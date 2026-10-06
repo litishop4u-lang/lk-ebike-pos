@@ -1,58 +1,179 @@
--- D1 (SQLite) schema cho POS xe đạp điện
-PRAGMA foreign_keys = ON;
+// Cloudflare Worker + D1 — API cho POS xe đạp điện (Full: Bán hàng & Nhập hàng)
 
-CREATE TABLE IF NOT EXISTS products (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  sku        TEXT NOT NULL UNIQUE,
-  name       TEXT NOT NULL,
-  price      INTEGER NOT NULL CHECK (price >= 0),          -- VND, số nguyên
-  stock      INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0), -- CHECK = chốt chặn chống bán âm kho
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+const json = (data, status = 200, origin = '*') =>
+  new Response(status === 204 ? null : JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 
--- Đơn đặt hàng: KHÔNG trừ kho
-CREATE TABLE IF NOT EXISTS orders (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  code           TEXT NOT NULL UNIQUE,                      -- DH-xxxx
-  customer_name  TEXT NOT NULL,
-  customer_phone TEXT,
-  note           TEXT,
-  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','invoiced','cancelled')),
-  total          INTEGER NOT NULL,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS order_items (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  product_id INTEGER NOT NULL REFERENCES products(id),
-  quantity   INTEGER NOT NULL CHECK (quantity > 0),
-  unit_price INTEGER NOT NULL
-);
+class HttpError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
 
--- Phiếu bán hàng: CÓ trừ kho
-CREATE TABLE IF NOT EXISTS invoices (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  code           TEXT NOT NULL UNIQUE,                      -- HD-xxxx
-  order_id       INTEGER REFERENCES orders(id),             -- tùy chọn: xuất từ đơn đặt hàng
-  customer_name  TEXT NOT NULL,
-  customer_phone TEXT,
-  note           TEXT,
-  total          INTEGER NOT NULL,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS invoice_items (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-  product_id INTEGER NOT NULL REFERENCES products(id),
-  quantity   INTEGER NOT NULL CHECK (quantity > 0),
-  unit_price INTEGER NOT NULL
-);
+const genCode = (prefix) =>
+  `${prefix}-${Date.now().toString(36).toUpperCase()}${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
 
-CREATE INDEX IF NOT EXISTS idx_order_items_order     ON order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
+// Gộp các dòng trùng sản phẩm + kiểm tra đầu vào
+function parseItems(items) {
+  if (!Array.isArray(items) || items.length === 0) throw new HttpError(400, 'Giỏ hàng trống');
+  const map = new Map();
+  for (const it of items) {
+    const id = Number(it.product_id), qty = Number(it.quantity);
+    if (!Number.isInteger(id) || !Number.isInteger(qty) || qty <= 0)
+      throw new HttpError(400, 'Sản phẩm hoặc số lượng không hợp lệ');
+    map.set(id, (map.get(id) || 0) + qty);
+  }
+  return map;
+}
 
--- Dữ liệu mẫu
-INSERT OR IGNORE INTO products (sku, name, price, stock) VALUES
- ('XDD-A1', 'Xe đạp điện Aima A1', 9500000, 12),
- ('XDD-V2', 'Xe đạp điện Vinfast Feliz Mini', 14900000, 5),
- ('ACQ-48', 'Bình ắc quy 48V', 1800000, 30);
+// Lấy giá từ DB
+async function loadLines(db, qtyMap, { checkStock }) {
+  const ids = [...qtyMap.keys()];
+  const { results } = await db
+    .prepare(`SELECT id, name, price, stock FROM products WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .bind(...ids).all();
+  if (results.length !== ids.length) throw new HttpError(404, 'Có sản phẩm không tồn tại');
+  return results.map((p) => {
+    const quantity = qtyMap.get(p.id);
+    if (checkStock && p.stock < quantity)
+      throw new HttpError(409, `"${p.name}" chỉ còn ${p.stock} trong kho`);
+    return { product_id: p.id, quantity, unit_price: p.price };
+  });
+}
+
+const totalOf = (lines) => lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
+
+// POST /api/orders — Đặt hàng (KHÔNG trừ kho)
+async function createOrder(db, body) {
+  const name = String(body.customer_name || '').trim();
+  if (!name) throw new HttpError(400, 'Thiếu tên khách hàng');
+  const lines = await loadLines(db, parseItems(body.items), { checkStock: false });
+  const code = genCode('DH');
+
+  await db.batch([
+    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, note, total) VALUES (?,?,?,?,?)')
+      .bind(code, name, body.customer_phone || null, body.note || null, totalOf(lines)),
+    ...lines.map((l) =>
+      db.prepare('INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.unit_price)),
+  ]);
+  return { code, total: totalOf(lines) };
+}
+
+// POST /api/invoices — Hóa đơn bán hàng + Trừ kho
+async function createInvoice(db, body) {
+  const name = String(body.customer_name || '').trim();
+  if (!name) throw new HttpError(400, 'Thiếu tên khách hàng');
+  const lines = await loadLines(db, parseItems(body.items), { checkStock: true });
+  const code = genCode('HD');
+  const orderId = body.order_id ? Number(body.order_id) : null;
+
+  const stmts = [
+    db.prepare('INSERT INTO invoices (code, order_id, customer_name, customer_phone, note, total) VALUES (?,?,?,?,?,?)')
+      .bind(code, orderId, name, body.customer_phone || null, body.note || null, totalOf(lines)),
+    ...lines.map((l) =>
+      db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.unit_price)),
+    ...lines.map((l) =>
+      db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
+  ];
+  if (orderId)
+    stmts.push(db.prepare("UPDATE orders SET status = 'invoiced' WHERE id = ? AND status = 'pending'").bind(orderId));
+
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    if (/CHECK constraint|constraint failed/i.test(String(e.message)))
+      throw new HttpError(409, 'Tồn kho vừa thay đổi, không đủ hàng. Vui lòng thử lại');
+    throw e;
+  }
+  return { code, total: totalOf(lines) };
+}
+
+// POST /api/purchases — Phiếu nhập hàng + Cộng tồn kho
+async function createPurchaseOrder(db, body) {
+  const lines = await loadLines(db, parseItems(body.items), { checkStock: false });
+  const code = genCode('NK');
+  const supplierId = body.supplier_id ? Number(body.supplier_id) : null;
+
+  const stmts = [
+    db.prepare('INSERT INTO purchase_orders (code, supplier_id, note, total) VALUES (?,?,?,?)')
+      .bind(code, supplierId, body.note || null, totalOf(lines)),
+    ...lines.map((l) =>
+      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, unit_price) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.unit_price)),
+    // Cộng dồn kho khi nhập hàng
+    ...lines.map((l) =>
+      db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+  ];
+
+  await db.batch(stmts);
+  return { code, total: totalOf(lines) };
+}
+
+export default {
+  async fetch(request, env) {
+    const origin = env.ALLOWED_ORIGIN || '*';
+    const { pathname } = new URL(request.url);
+    const db = env.DB;
+
+    if (request.method === 'OPTIONS') return json(null, 204, origin);
+
+    try {
+      // Products
+      if (pathname === '/api/products' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM products ORDER BY name').all();
+        return json(results, 200, origin);
+      }
+
+      // Orders
+      if (pathname === '/api/orders' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 50').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/orders' && request.method === 'POST')
+        return json(await createOrder(db, await request.json()), 201, origin);
+
+      // Invoices
+      if (pathname === '/api/invoices' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT 50').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/invoices' && request.method === 'POST')
+        return json(await createInvoice(db, await request.json()), 201, origin);
+
+      // Suppliers (Nhà cung cấp)
+      if (pathname === '/api/suppliers' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/suppliers' && request.method === 'POST') {
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
+        await db.prepare('INSERT INTO suppliers (name, phone, address) VALUES (?,?,?)')
+          .bind(name, b.phone || null, b.address || null).run();
+        return json({ success: true }, 201, origin);
+      }
+
+      // Purchases (Nhập hàng)
+      if (pathname === '/api/purchases' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM purchase_orders ORDER BY id DESC LIMIT 50').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/purchases' && request.method === 'POST')
+        return json(await createPurchaseOrder(db, await request.json()), 201, origin);
+
+      return json({ error: 'Không tìm thấy' }, 404, origin);
+    } catch (e) {
+      if (e instanceof HttpError) return json({ error: e.message }, e.status, origin);
+      console.error(e);
+      return json({ error: 'Lỗi máy chủ' }, 500, origin);
+    }
+  },
+};
