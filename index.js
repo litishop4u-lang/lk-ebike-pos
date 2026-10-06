@@ -1,4 +1,4 @@
-// Cloudflare Worker + D1 — API cho POS xe đạp điện
+// Cloudflare Worker + D1 — API cho POS xe đạp điện (Full: Bán hàng, Nhập hàng & Phục vụ Static Assets)
 
 const json = (data, status = 200, origin = '*') =>
   new Response(status === 204 ? null : JSON.stringify(data), {
@@ -79,8 +79,6 @@ async function createInvoice(db, body) {
     ...lines.map((l) =>
       db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?)')
         .bind(code, l.product_id, l.quantity, l.unit_price)),
-    // Trừ kho. Nếu hai người bán cùng lúc làm stock < 0, CHECK(stock >= 0)
-    // làm batch lỗi và D1 rollback toàn bộ — không bao giờ bán âm kho.
     ...lines.map((l) =>
       db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
   ];
@@ -97,15 +95,37 @@ async function createInvoice(db, body) {
   return { code, total: totalOf(lines) };
 }
 
+// POST /api/purchases — tạo phiếu nhập + cộng tồn kho
+async function createPurchaseOrder(db, body) {
+  const lines = await loadLines(db, parseItems(body.items), { checkStock: false });
+  const code = genCode('NK');
+  const supplierId = body.supplier_id ? Number(body.supplier_id) : null;
+
+  const stmts = [
+    db.prepare('INSERT INTO purchase_orders (code, supplier_id, note, total) VALUES (?,?,?,?)')
+      .bind(code, supplierId, body.note || null, totalOf(lines)),
+    ...lines.map((l) =>
+      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, unit_price) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.unit_price)),
+    ...lines.map((l) =>
+      db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+  ];
+
+  await db.batch(stmts);
+  return { code, total: totalOf(lines) };
+}
+
 export default {
   async fetch(request, env) {
     const origin = env.ALLOWED_ORIGIN || '*';
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const db = env.DB;
 
     if (request.method === 'OPTIONS') return json(null, 204, origin);
 
     try {
+      // --- CÁC API ROUTE ---
       if (pathname === '/api/products' && request.method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM products ORDER BY name').all();
         return json(results, 200, origin);
@@ -122,6 +142,33 @@ export default {
         return json(await createOrder(db, await request.json()), 201, origin);
       if (pathname === '/api/invoices' && request.method === 'POST')
         return json(await createInvoice(db, await request.json()), 201, origin);
+
+      // Nhà cung cấp
+      if (pathname === '/api/suppliers' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/suppliers' && request.method === 'POST') {
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
+        await db.prepare('INSERT INTO suppliers (name, phone, address) VALUES (?,?,?)')
+          .bind(name, b.phone || null, b.address || null).run();
+        return json({ success: true }, 201, origin);
+      }
+
+      // Nhập hàng
+      if (pathname === '/api/purchases' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM purchase_orders ORDER BY id DESC LIMIT 50').all();
+        return json(results, 200, origin);
+      }
+      if (pathname === '/api/purchases' && request.method === 'POST')
+        return json(await createPurchaseOrder(db, await request.json()), 201, origin);
+
+      // --- PHỤC VỤ GIAO DIỆN FRONTEND (REACT APP) ---
+      if (env.ASSETS) {
+        return await env.ASSETS.fetch(request);
+      }
 
       return json({ error: 'Không tìm thấy' }, 404, origin);
     } catch (e) {
