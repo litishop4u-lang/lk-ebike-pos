@@ -10,3 +10,7 @@ database_id = "c3f7f057-ffa1-4d11-a1b2-3120c6b80ae2"
 [vars]
 # Domain Pages của bạn, hoặc "*" khi dev
 ALLOWED_ORIGIN = "*"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
