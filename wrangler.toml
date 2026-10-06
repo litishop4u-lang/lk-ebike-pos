@@ -1,0 +1,12 @@
+name = "ebike-pos-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ebike-pos"
+database_id = "THAY_BANG_ID_SAU_KHI_TAO"
+
+[vars]
+# Domain Pages của bạn, hoặc "*" khi dev
+ALLOWED_ORIGIN = "*"

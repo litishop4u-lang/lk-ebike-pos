@@ -1,0 +1,31 @@
+:root {
+  --bg: #e9eef0; --ink: #14262c; --panel: #ffffff; --line: #cfd8dc;
+  --accent: #0b6e8a; --accent-ink: #ffffff; --warn: #b4540a; --ok: #1d6b3a; --err: #a31d2b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Be Vietnam Pro', system-ui, sans-serif; }
+.app { display: grid; grid-template-columns: 1fr 380px; gap: 20px; max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+h1, h2 { margin: 0 0 14px; }
+.products { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.products li { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sku { display: block; font-size: 12px; opacity: .6; }
+.meta { display: flex; align-items: center; gap: 14px; }
+.price { font-weight: 700; }
+.stock { font-size: 13px; } .stock.low { color: var(--warn); font-weight: 500; }
+button { font: inherit; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
+.ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; align-self: start;
+  display: flex; flex-direction: column; gap: 10px; position: sticky; top: 16px; }
+.ticket input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; width: 100%; }
+.line { display: grid; grid-template-columns: 1fr 56px auto; gap: 8px; align-items: center; font-size: 14px; }
+.line input { padding: 4px 6px; }
+.amount { text-align: right; }
+.total { display: flex; justify-content: space-between; border-top: 1px dashed var(--line); padding-top: 10px; font-size: 18px; }
+.actions { display: grid; gap: 8px; }
+.hint, .empty { font-size: 13px; opacity: .7; margin: 0; }
+.msg { margin: 0; padding: 10px; border-radius: 6px; font-size: 14px; }
+.msg.ok { background: #e3f3e8; color: var(--ok); } .msg.err { background: #fbe7ea; color: var(--err); }
+@media (max-width: 800px) { .app { grid-template-columns: 1fr; } .ticket { position: static; } }
