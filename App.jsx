@@ -23,7 +23,12 @@ export default function App() {
   
   // States cho Nhà cung cấp & Nhập hàng
   const [suppliers, setSuppliers] = useState([]);
-  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', address: '' });
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [supplierTab, setSupplierTab] = useState('info'); // 'info' | 'purchases' | 'payments' | 'returns'
+  const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
+  const [editingSupplier, setEditingSupplier] = useState(null);
+  const [supplierForm, setSupplierForm] = useState({ name: '', phone: '', address: '', status: 'active' });
   
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -69,18 +74,50 @@ export default function App() {
     }
   }
 
-  // --- Thêm nhà cung cấp ---
-  async function handleAddSupplier(e) {
+  // --- Quản lý Nhà cung cấp ---
+  const openSupplierDetail = async (s) => {
+    setSelectedSupplier(s);
+    setEditingSupplier(s);
+    setSupplierForm({ name: s.name, phone: s.phone || '', address: s.address || '', status: s.status });
+    setSupplierTab('info');
+    try {
+      const hist = await api(`/api/suppliers/${s.id}/history`);
+      setSupplierHistory(hist);
+    } catch (e) {
+      setSupplierHistory({ purchases: [], payments: [], returns: [] });
+    }
+    setShowSupplierModal(true);
+  };
+
+  const handleSaveSupplier = async (e) => {
     e.preventDefault();
     try {
-      await api('/api/suppliers', { method: 'POST', body: JSON.stringify(newSupplier) });
-      setMsg({ type: 'ok', text: 'Đã thêm nhà cung cấp thành công' });
-      setNewSupplier({ name: '', phone: '', address: '' });
+      if (editingSupplier) {
+        await api(`/api/suppliers/${editingSupplier.id}`, { method: 'PUT', body: JSON.stringify(supplierForm) });
+        setMsg({ type: 'ok', text: 'Đã cập nhật nhà cung cấp thành công' });
+      } else {
+        await api('/api/suppliers', { method: 'POST', body: JSON.stringify(supplierForm) });
+        setMsg({ type: 'ok', text: 'Đã thêm nhà cung cấp mới thành công' });
+      }
+      setSupplierForm({ name: '', phone: '', address: '', status: 'active' });
+      setEditingSupplier(null);
       loadData();
     } catch (err) {
       setMsg({ type: 'err', text: err.message });
     }
-  }
+  };
+
+  const handleDeleteSupplier = async (id) => {
+    if (!confirm('Bạn có chắc muốn xóa nhà cung cấp này?')) return;
+    try {
+      await api(`/api/suppliers/${id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: 'Đã xóa nhà cung cấp' });
+      setShowSupplierModal(false);
+      loadData();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+  };
 
   return (
     <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
@@ -278,7 +315,7 @@ export default function App() {
                         <tbody>
                           {supplierHistory.returns.map(ret => (
                             <tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>
-                          ))}
+                        ))}
                         </tbody>
                       </table>
                     )}
@@ -294,7 +331,6 @@ export default function App() {
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px' }}>
             <h2>Nhập hàng vào kho</h2>
             <p style={{ color: '#64748b' }}>Tính năng tạo phiếu nhập hàng và cộng tồn kho tự động.</p>
-            {/* Bạn có thể mở rộng form nhập hàng tương tự phần giỏ hàng bán hàng ở đây */}
           </div>
         )}
       </main>
@@ -314,66 +350,6 @@ const navBtnStyle = (active) => ({
   fontWeight: active ? 'bold' : 'normal'
 });
 
-const inputStyle = { width: '100%', padding: '10px', margin: '6px 0', borderRadius: '6px', border: '1px solid #cbd5e1' };
-const actionBtnStyle = { flex: 1, padding: '10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' };
-
-// Thêm phần state và giao diện cho Quản lý Nhà cung cấp vào App.jsx
-  const [suppliers, setSuppliers] = useState([]);
-  const [showSupplierModal, setShowSupplierModal] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState(null);
-  const [supplierTab, setSupplierTab] = useState('info'); // 'info' | 'purchases' | 'payments' | 'returns'
-  const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
-  const [editingSupplier, setEditingSupplier] = useState(null);
-  const [supplierForm, setSupplierForm] = useState({ name: '', phone: '', address: '', status: 'active' });
-
-  const loadSuppliers = () => api('/api/suppliers').then(setSuppliers).catch(() => {});
-
-  useEffect(() => { loadSuppliers(); }, []);
-
-  const openSupplierDetail = async (s) => {
-    setSelectedSupplier(s);
-    setEditingSupplier(s);
-    setSupplierForm({ name: s.name, phone: s.phone || '', address: s.address || '', status: s.status });
-    setSupplierTab('info');
-    try {
-      const hist = await api(`/api/suppliers/${s.id}/history`);
-      setSupplierHistory(hist);
-    } catch (e) {
-      setSupplierHistory({ purchases: [], payments: [], returns: [] });
-    }
-    setShowSupplierModal(true);
-  };
-
-  const handleSaveSupplier = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingSupplier) {
-        await api(`/api/suppliers/${editingSupplier.id}`, { method: 'PUT', body: JSON.stringify(supplierForm) });
-        setMsg({ type: 'ok', text: 'Đã cập nhật nhà cung cấp thành công' });
-      } else {
-        await api('/api/suppliers', { method: 'POST', body: JSON.stringify(supplierForm) });
-        setMsg({ type: 'ok', text: 'Đã thêm nhà cung cấp mới thành công' });
-      }
-      setSupplierForm({ name: '', phone: '', address: '', status: 'active' });
-      setEditingSupplier(null);
-      loadSuppliers();
-    } catch (err) {
-      setMsg({ type: 'err', text: err.message });
-    }
-  };
-
-  const handleDeleteSupplier = async (id) => {
-    if (!confirm('Bạn có chắc muốn xóa nhà cung cấp này?')) return;
-    try {
-      await api(`/api/suppliers/${id}`, { method: 'DELETE' });
-      setMsg({ type: 'ok', text: 'Đã xóa nhà cung cấp' });
-      setShowSupplierModal(false);
-      loadSuppliers();
-    } catch (e) {
-      setMsg({ type: 'err', text: e.message });
-    }
-  };
-
 const tabBtnStyle = (active) => ({
   flex: 1,
   padding: '12px',
@@ -384,3 +360,6 @@ const tabBtnStyle = (active) => ({
   color: active ? '#0284c7' : '#64748b',
   cursor: 'pointer'
 });
+
+const inputStyle = { width: '100%', padding: '10px', margin: '6px 0', borderRadius: '6px', border: '1px solid #cbd5e1' };
+const actionBtnStyle = { flex: 1, padding: '10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' };
