@@ -182,11 +182,13 @@ export default {
         const name = String(b.name || '').trim();
         if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
         
-        // Tự động sinh mã NCC ở đây để không bị lỗi NOT NULL
-        const code = b.code || `NCC-${Date.now().toString(36).toUpperCase()}`;
-        
+        const code = genCode('NCC');
+        const phone = String(b.phone || '').trim() || null;
+        const address = String(b.address || '').trim() || null;
+        const status = b.status || 'active';
+
         await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?, ?, ?, ?, ?)')
-          .bind(code, name, b.phone || null, b.address || null, b.status || 'active').run();
+          .bind(code, name, phone, address, status).run();
           
         return json({ success: true, code }, 201, origin);
       }
