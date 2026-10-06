@@ -373,3 +373,14 @@ const actionBtnStyle = { flex: 1, padding: '10px', background: '#0284c7', color:
       setMsg({ type: 'err', text: e.message });
     }
   };
+
+const tabBtnStyle = (active) => ({
+  flex: 1,
+  padding: '12px',
+  background: active ? '#fff' : 'transparent',
+  border: 'none',
+  borderBottom: active ? '3px solid #0284c7' : 'none',
+  fontWeight: active ? 'bold' : 'normal',
+  color: active ? '#0284c7' : '#64748b',
+  cursor: 'pointer'
+});
