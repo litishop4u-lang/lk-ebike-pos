@@ -228,7 +228,8 @@ export default {
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message }, e.status, origin);
       console.error(e);
-      return json({ error: 'Lỗi máy chủ' }, 500, origin);
+      // TRẢ VẺ LỖI CHI TIẾT ĐỂ GIAO DIỆN HIỂN THỊ RÕ NGUYÊN NHÂN
+      return json({ error: 'Lỗi chi tiết: ' + e.message }, 500, origin);
     }
   },
 };
