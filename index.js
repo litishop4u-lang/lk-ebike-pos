@@ -157,6 +157,60 @@ export default {
         return json({ success: true }, 201, origin);
       }
 
+      // Thêm vào file index.js phần API cho suppliers
+      // GET /api/suppliers — Lấy danh sách kèm tổng giá trị nhập, đã thanh toán, công nợ
+      if (pathname === '/api/suppliers' && request.method === 'GET') {
+        const { results } = await db.prepare(`
+          SELECT s.*, 
+            COALESCE((SELECT SUM(total) FROM purchase_orders WHERE supplier_id = s.id), 0) as total_import,
+            COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = s.id), 0) as total_paid
+          FROM suppliers s 
+          ORDER BY s.id DESC
+        `).all();
+        
+        const enriched = results.map(s => ({
+          ...s,
+          debt: s.total_import - s.total_paid
+        }));
+        return json(enriched, 200, origin);
+      }
+
+      // POST /api/suppliers — Thêm nhà cung cấp mới
+      if (pathname === '/api/suppliers' && request.method === 'POST') {
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
+        const code = genCode('NCC');
+        await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?,?,?,?,?)')
+          .bind(code, name, b.phone || null, b.address || null, b.status || 'active').run();
+        return json({ success: true, code }, 201, origin);
+      }
+
+      // PUT /api/suppliers/:id — Sửa thông tin nhà cung cấp
+      if (pathname.startsWith('/api/suppliers/') && request.method === 'PUT') {
+        const id = pathname.split('/')[3];
+        const b = await request.json();
+        await db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ?, status = ? WHERE id = ?')
+          .bind(b.name, b.phone, b.address, b.status || 'active', id).run();
+        return json({ success: true }, 200, origin);
+      }
+
+      // DELETE /api/suppliers/:id — Xóa nhà cung cấp
+      if (pathname.startsWith('/api/suppliers/') && request.method === 'DELETE') {
+        const id = pathname.split('/')[3];
+        await db.prepare('DELETE FROM suppliers WHERE id = ?').bind(id).run();
+        return json({ success: true }, 200, origin);
+      }
+
+      // GET /api/suppliers/:id/history — Lấy chi tiết lịch sử (nhập hàng, thanh toán, trả hàng)
+      if (pathname.match(/^\/api\/suppliers\/\d+\/history$/) && request.method === 'GET') {
+        const id = pathname.split('/')[3];
+        const purchases = await db.prepare('SELECT * FROM purchase_orders WHERE supplier_id = ? ORDER BY id DESC').bind(id).all();
+        const payments = await db.prepare('SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY id DESC').bind(id).all();
+        const returns = await db.prepare('SELECT * FROM supplier_returns WHERE supplier_id = ? ORDER BY id DESC').bind(id).all();
+        return json({ purchases: purchases.results, payments: payments.results, returns: returns.results }, 200, origin);
+      }
+
       // Nhập hàng
       if (pathname === '/api/purchases' && request.method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM purchase_orders ORDER BY id DESC LIMIT 50').all();
