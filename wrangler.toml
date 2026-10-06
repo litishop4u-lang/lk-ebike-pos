@@ -5,7 +5,7 @@ compatibility_date = "2025-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "ebike-pos"
-database_id = "THAY_BANG_ID_SAU_KHI_TAO"
+database_id = "99f7271ade95d35b4ec0c1177248124f"
 
 [vars]
 # Domain Pages của bạn, hoặc "*" khi dev
