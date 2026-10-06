@@ -150,31 +150,142 @@ export default function App() {
         {currentView === 'suppliers' && (
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px' }}>
             <h2>Quản lý Nhà cung cấp</h2>
-            <form onSubmit={handleAddSupplier} style={{ display: 'flex', gap: '10px', margin: '20px 0' }}>
-              <input placeholder="Tên nhà cung cấp" value={newSupplier.name} onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })} style={inputStyle} required />
-              <input placeholder="Số điện thoại" value={newSupplier.phone} onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })} style={inputStyle} />
-              <input placeholder="Địa chỉ" value={newSupplier.address} onChange={(e) => setNewSupplier({ ...newSupplier, address: e.target.value })} style={inputStyle} />
-              <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Thêm NCC</button>
+            <form onSubmit={handleSaveSupplier} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 120px auto', gap: '10px', margin: '20px 0', background: '#f8fafc', padding: '15px', borderRadius: '8px' }}>
+              <input placeholder="Tên nhà cung cấp *" value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required />
+              <input placeholder="Số điện thoại" value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} />
+              <input placeholder="Địa chỉ" value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} />
+              <select value={supplierForm.status} onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} style={inputStyle}>
+                <option value="active">Hoạt động</option>
+                <option value="inactive">Ngừng</option>
+              </select>
+              <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                {editingSupplier ? 'Lưu sửa' : 'Thêm NCC'}
+              </button>
             </form>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
               <thead>
-                <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                  <th style={{ padding: '10px' }}>Tên NCC</th>
-                  <th style={{ padding: '10px' }}>Điện thoại</th>
-                  <th style={{ padding: '10px' }}>Địa chỉ</th>
+                <tr style={{ background: '#f1f5f9', textAlign: 'left', fontSize: '14px' }}>
+                  <th style={{ padding: '12px' }}>Mã NCC</th>
+                  <th style={{ padding: '12px' }}>Tên NCC</th>
+                  <th style={{ padding: '12px' }}>SĐT</th>
+                  <th style={{ padding: '12px' }}>Địa chỉ</th>
+                  <th style={{ padding: '12px' }}>Tổng giá trị nhập</th>
+                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
+                  <th style={{ padding: '12px' }}>Công nợ</th>
+                  <th style={{ padding: '12px' }}>Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
                 {suppliers.map((s) => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '10px' }}>{s.name}</td>
-                    <td style={{ padding: '10px' }}>{s.phone || '---'}</td>
-                    <td style={{ padding: '10px' }}>{s.address || '---'}</td>
+                  <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }} onClick={() => openSupplierDetail(s)}>
+                    <td style={{ padding: '12px', color: '#0284c7', fontWeight: 'bold' }}>{s.code}</td>
+                    <td style={{ padding: '12px', fontWeight: '500' }}>{s.name}</td>
+                    <td style={{ padding: '12px' }}>{s.phone || '---'}</td>
+                    <td style={{ padding: '12px' }}>{s.address || '---'}</td>
+                    <td style={{ padding: '12px' }}>{vnd(s.total_import)}</td>
+                    <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
+                    <td style={{ padding: '12px', color: s.debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.debt > 0 ? 'bold' : 'normal' }}>{vnd(s.debt)}</td>
+                    <td style={{ padding: '12px' }}>
+                      <span style={{ padding: '4px 8px', borderRadius: '4px', background: s.status === 'active' ? '#dcfce7' : '#fee2e2', color: s.status === 'active' ? '#166534' : '#991b1b', fontSize: '12px' }}>
+                        {s.status === 'active' ? 'Hoạt động' : 'Ngừng'}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {/* POPUP CHI TIẾT NHÀ CUNG CẤP (4 TAB) */}
+            {showSupplierModal && selectedSupplier && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+                <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+                  <div style={{ padding: '20px', background: '#1e293b', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0 }}>Chi tiết: {selectedSupplier.name} ({selectedSupplier.code})</h3>
+                    <button onClick={() => setShowSupplierModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                  </div>
+
+                  {/* Thanh Tabs */}
+                  <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                    <button onClick={() => setSupplierTab('info')} style={tabBtnStyle(supplierTab === 'info')}>1. Thông tin NCC</button>
+                    <button onClick={() => setSupplierTab('purchases')} style={tabBtnStyle(supplierTab === 'purchases')}>2. Lịch sử nhập hàng</button>
+                    <button onClick={() => setSupplierTab('payments')} style={tabBtnStyle(supplierTab === 'payments')}>3. Lịch sử thanh toán</button>
+                    <button onClick={() => setSupplierTab('returns')} style={tabBtnStyle(supplierTab === 'returns')}>4. Lịch sử trả hàng</button>
+                  </div>
+
+                  <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+                    {supplierTab === 'info' && (
+                      <form onSubmit={handleSaveSupplier}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                          <div>
+                            <label>Tên nhà cung cấp</label>
+                            <input value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required />
+                          </div>
+                          <div>
+                            <label>Số điện thoại</label>
+                            <input value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} />
+                          </div>
+                          <div style={{ gridColumn: 'span 2' }}>
+                            <label>Địa chỉ</label>
+                            <input value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} />
+                          </div>
+                          <div>
+                            <label>Trạng thái</label>
+                            <select value={supplierForm.status} onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} style={inputStyle}>
+                              <option value="active">Hoạt động</option>
+                              <option value="inactive">Ngừng</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                          <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Cập nhật thông tin</button>
+                          <button type="button" onClick={() => handleDeleteSupplier(selectedSupplier.id)} style={{ padding: '10px 20px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Xóa nhà cung cấp</button>
+                        </div>
+                      </form>
+                    )}
+
+                    {supplierTab === 'purchases' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Mã phiếu</th><th style={{ padding: '8px' }}>Tổng tiền</th><th style={{ padding: '8px' }}>Ngày nhập</th></tr>
+                        </thead>
+                        <tbody>
+                          {supplierHistory.purchases.map(p => (
+                            <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    {supplierTab === 'payments' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Số tiền thanh toán</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr>
+                        </thead>
+                        <tbody>
+                          {supplierHistory.payments.map(pay => (
+                            <tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    {supplierTab === 'returns' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Tổng giá trị trả</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr>
+                        </thead>
+                        <tbody>
+                          {supplierHistory.returns.map(ret => (
+                            <tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
