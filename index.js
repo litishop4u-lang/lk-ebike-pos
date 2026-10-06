@@ -176,13 +176,18 @@ export default {
       }
 
       // POST /api/suppliers — Thêm nhà cung cấp mới
+      
       if (pathname === '/api/suppliers' && request.method === 'POST') {
         const b = await request.json();
         const name = String(b.name || '').trim();
         if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
-        const code = genCode('NCC');
-        await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?,?,?,?,?)')
+        
+        // Tự động sinh mã NCC ở đây để không bị lỗi NOT NULL
+        const code = b.code || `NCC-${Date.now().toString(36).toUpperCase()}`;
+        
+        await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?, ?, ?, ?, ?)')
           .bind(code, name, b.phone || null, b.address || null, b.status || 'active').run();
+          
         return json({ success: true, code }, 201, origin);
       }
 
