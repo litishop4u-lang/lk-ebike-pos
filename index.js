@@ -361,8 +361,12 @@ export default {
 
         // 1. Lấy danh sách sản phẩm
       if (pathname === '/api/products' && request.method === 'GET') {
-        const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
-        return json(results || [], 200, origin);
+        try {
+          const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
+          return json(results || [], 200, origin);
+        } catch (err) {
+          return json({ error: 'Lỗi tải danh sách sản phẩm: ' + err.message }, 500, origin);
+        }
       }
 
       // 2. Thêm mới một sản phẩm
@@ -399,11 +403,13 @@ export default {
         const items = body.items || [];
         
         let successCount = 0;
+        let errors = [];
+
         for (const item of items) {
           const name = String(item.name || '').trim();
           if (!name) continue;
           
-          const sku = String(item.sku || '').trim() || genCode('SP');
+          const sku = String(item.sku || '').trim() || 'SP-' + Math.floor(Math.random() * 100000);
           const unit = String(item.unit || '').trim() || 'Cái';
           const import_price = Number(item.import_price) || 0;
           const price = Number(item.price) || 0;
@@ -424,11 +430,11 @@ export default {
             `).bind(sku, name, unit, import_price, price, wholesale_price, stock).run();
             successCount++;
           } catch (e) {
-            // Bỏ qua lỗi dòng nếu có
+            errors.push(e.message);
           }
         }
 
-        return json({ success: true, successCount }, 200, origin);
+        return json({ success: true, successCount, errors }, 200, origin);
       }
 
         // 4. Cập nhật thông tin sản phẩm (PUT /api/products/:id)
