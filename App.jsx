@@ -52,7 +52,7 @@ export default function App() {
   const loadData = () => {
     api('/api/products')
       .then((data) => {
-        // Hỗ trợ cả 2 định dạng trả về từ API (mảng trực tiếp hoặc bọc trong object results)
+        console.log('Dữ liệu sản phẩm trả về từ server:', data); // <-- Thêm dòng này để soi F12
         const list = Array.isArray(data) ? data : (data.results || []);
         setProducts(list);
       })
@@ -62,7 +62,6 @@ export default function App() {
       .then((data) => setSuppliers(Array.isArray(data) ? data : (data.results || [])))
       .catch(() => {});
   };
-
   useEffect(() => { loadData(); }, []);
 
   // --- POS Logic ---
