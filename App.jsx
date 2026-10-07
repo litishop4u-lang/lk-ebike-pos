@@ -26,6 +26,12 @@ export default function App() {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
+
+  const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
+  const [purchaseItems, setPurchaseItems] = useState([]); 
+  const [productSearchKeyword, setProductSearchKeyword] = useState('');
+  const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   
   const [supplierForm, setSupplierForm] = useState({ code: '', name: '', phone: '', address: '', status: 'active' });
   const [selectedSupplier, setSelectedSupplier] = useState(null);
@@ -249,12 +255,243 @@ export default function App() {
 
         {/* 3. MÀN HÌNH NHẬP HÀNG */}
         {currentView === 'purchases' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px' }}>
-            <h2>Nhập hàng vào kho</h2>
-            <p style={{ color: '#64748b' }}>Tính năng tạo phiếu nhập hàng và cộng tồn kho tự động.</p>
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Tạo Phiếu Nhập Hàng</h2>
+
+            {/* PHẦN 1: THÔNG TIN CHUNG PHIẾU NHẬP */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              
+              {/* Chọn Nhà cung cấp có tìm kiếm theo Tên, SĐT, Mã */}
+              <div style={{ position: 'relative' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Nhà cung cấp *:</label>
+                <input 
+                  placeholder="Nhập tên, SĐT hoặc mã NCC..." 
+                  value={supplierSearchKeyword}
+                  onChange={(e) => {
+                    setSupplierSearchKeyword(e.target.value);
+                    setShowSupplierDropdown(true);
+                  }}
+                  onFocus={() => setShowSupplierDropdown(true)}
+                  style={inputStyle}
+                />
+                {showSupplierDropdown && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '180px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                    {(suppliers || []).filter(s => 
+                      s.name.toLowerCase().includes(supplierSearchKeyword.toLowerCase()) || 
+                      (s.phone && s.phone.includes(supplierSearchKeyword)) || 
+                      s.code.toLowerCase().includes(supplierSearchKeyword.toLowerCase())
+                    ).map(s => (
+                      <div 
+                        key={s.id} 
+                        onClick={() => {
+                          setPurchaseForm({ ...purchaseForm, supplier_id: s.id });
+                          setSupplierSearchKeyword(`${s.name} (${s.code} - ${s.phone || 'Không có SĐT'})`);
+                          setShowSupplierDropdown(false);
+                        }}
+                        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                      >
+                        <b>{s.name}</b> <span style={{ color: '#64748b' }}>({s.code})</span> - SĐT: {s.phone || '---'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Phương thức thanh toán:</label>
+                <select 
+                  value={purchaseForm.payment_method} 
+                  onChange={(e) => setPurchaseForm({ ...purchaseForm, payment_method: e.target.value })} 
+                  style={inputStyle}
+                >
+                  <option value="Tiền mặt">Tiền mặt</option>
+                  <option value="Chuyển khoản">Chuyển khoản</option>
+                  <option value="Công nợ">Công nợ</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Ngày nhập:</label>
+                <input type="text" disabled value={new Date().toLocaleDateString('vi-VN')} style={{ ...inputStyle, background: '#f1f5f9' }} />
+              </div>
+            </div>
+
+            {/* PHẦN 2: TÌM KIẾM VÀ CHỌN SẢN PHẨM NHẬP */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
+              <input 
+                placeholder="Nhập tên sản phẩm hoặc mã SKU..." 
+                value={productSearchKeyword}
+                onChange={(e) => setProductSearchKeyword(e.target.value)}
+                style={inputStyle}
+              />
+              {productSearchKeyword.trim() && (
+                <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', marginTop: '5px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                  {(products || []).filter(p => 
+                    p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) || 
+                    (p.sku && p.sku.toLowerCase().includes(productSearchKeyword.toLowerCase()))
+                  ).map(p => (
+                    <div 
+                      key={p.id}
+                      onClick={() => {
+                        // Thêm sản phẩm vào danh sách nhập nếu chưa có, hoặc tăng số lượng
+                        const exist = purchaseItems.find(item => item.product_id === p.id);
+                        if (exist) {
+                          setPurchaseItems(purchaseItems.map(item => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
+                        } else {
+                          setPurchaseItems([...purchaseItems, { product_id: p.id, name: p.name, sku: p.sku, unit: p.unit || 'Cái', quantity: 1, price: p.import_price || p.price || 0, discount: 0 }]);
+                        }
+                        setProductSearchKeyword('');
+                      }}
+                      style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}
+                    >
+                      <span><b>{p.name}</b> (SKU: {p.sku})</span>
+                      <span style={{ color: '#0284c7', fontWeight: 'bold' }}>+ Thêm</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* PHẦN 3: BẢNG CHI TIẾT SẢN PHẨM NHẬP */}
+            <div style={{ marginBottom: '20px', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                    <th style={{ padding: '10px' }}>Mã SP (SKU)</th>
+                    <th style={{ padding: '10px' }}>Tên sản phẩm</th>
+                    <th style={{ padding: '10px' }}>Đơn vị tính</th>
+                    <th style={{ padding: '10px', width: '90px' }}>Số lượng</th>
+                    <th style={{ padding: '10px', width: '140px' }}>Đơn giá nhập</th>
+                    <th style={{ padding: '10px', width: '120px' }}>Giảm giá</th>
+                    <th style={{ padding: '10px' }}>Thành tiền</th>
+                    <th style={{ padding: '10px', width: '60px' }}>Xóa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {purchaseItems.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có sản phẩm nào trong phiếu nhập.</td></tr>
+                  ) : (
+                    purchaseItems.map((item, index) => {
+                      const lineTotal = (item.quantity * item.price) - item.discount;
+                      return (
+                        <tr key={index} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px' }}>{item.sku}</td>
+                          <td style={{ padding: '10px', fontWeight: '500' }}>{item.name}</td>
+                          <td style={{ padding: '10px' }}>{item.unit}</td>
+                          <td style={{ padding: '10px' }}>
+                            <input 
+                              type="number" min="1" value={item.quantity} 
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, quantity: val } : it));
+                              }} 
+                              style={{ width: '60px', padding: '6px', textAlign: 'center', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+                            />
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <input 
+                              type="number" value={item.price} 
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, price: val } : it));
+                              }} 
+                              style={{ width: '120px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+                            />
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <input 
+                              type="number" value={item.discount} 
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, discount: val } : it));
+                              }} 
+                              style={{ width: '100px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+                            />
+                          </td>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(lineTotal)}</td>
+                          <td style={{ padding: '10px' }}>
+                            <button 
+                              onClick={() => setPurchaseItems(purchaseItems.filter((_, idx) => idx !== index))}
+                              style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* PHẦN 4: TỔNG KẾT VÀ NÚT LƯU PHIẾU */}
+            {(() => {
+              const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
+              const debtAmount = totalAmount - (Number(purchaseForm.paid_amount) || 0);
+
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '15px 20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', gap: '30px', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Tổng tiền hàng: </span>
+                      <b style={{ fontSize: '1.1rem' }}>{vnd(totalAmount)}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Đã thanh toán: </span>
+                      <input 
+                        type="number" 
+                        value={purchaseForm.paid_amount} 
+                        onChange={(e) => setPurchaseForm({ ...purchaseForm, paid_amount: e.target.value })}
+                        style={{ width: '130px', padding: '6px', marginLeft: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }} 
+                      />
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Còn nợ: </span>
+                      <b style={{ fontSize: '1.1rem', color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(debtAmount)}</b>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={async () => {
+                      if (!purchaseForm.supplier_id) {
+                        alert('Vui lòng chọn nhà cung cấp!');
+                        return;
+                      }
+                      if (purchaseItems.length === 0) {
+                        alert('Vui lòng chọn ít nhất một sản phẩm nhập kho!');
+                        return;
+                      }
+                      try {
+                        const res = await api('/api/purchase_orders', {
+                          method: 'POST',
+                          body: JSON.stringify({
+                            supplier_id: purchaseForm.supplier_id,
+                            payment_method: purchaseForm.payment_method,
+                            paid_amount: Number(purchaseForm.paid_amount) || 0,
+                            items: purchaseItems
+                          })
+                        });
+                        setMsg({ type: 'ok', text: `Tạo phiếu nhập hàng ${res.code} thành công!` });
+                        setPurchaseItems([]);
+                        setPurchaseForm({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
+                        setSupplierSearchKeyword('');
+                        loadData();
+                      } catch (err) {
+                        alert('Lỗi tạo phiếu nhập: ' + err.message);
+                      }
+                    }}
+                    style={{ padding: '12px 25px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '1rem', cursor: 'pointer', fontWeight: 'bold' }}
+                  >
+                    💾 Hoàn tất nhập hàng
+                  </button>
+                </div>
+              );
+            })()}
+
           </div>
         )}
-      </main>
 
       {/* POPUP THÊM HOẶC CHI TIẾT NHÀ CUNG CẤP (4 TAB) */}
       {showSupplierModal && (
