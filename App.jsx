@@ -209,6 +209,9 @@ export default function App() {
                   <th style={{ padding: '12px' }}>Tên NCC</th>
                   <th style={{ padding: '12px' }}>SĐT</th>
                   <th style={{ padding: '12px' }}>Địa chỉ</th>
+                  <th style={{ padding: '12px' }}>Tổng giá trị nhập</th>
+                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
+                  <th style={{ padding: '12px' }}>Công nợ</th>
                   <th style={{ padding: '12px' }}>Trạng thái</th>
                 </tr>
               </thead>
@@ -219,6 +222,11 @@ export default function App() {
                     <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
                     <td style={{ padding: '12px' }}>{s.phone || '-'}</td>
                     <td style={{ padding: '12px' }}>{s.address || '-'}</td>
+                    <td style={{ padding: '12px' }}>{vnd(s.total_purchase)}</td>
+                    <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
+                    <td style={{ padding: '12px', color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>
+                      {vnd(s.total_debt)}
+                    </td>
                     <td style={{ padding: '12px' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
                   </tr>
                 ))}
