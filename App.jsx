@@ -21,9 +21,10 @@ export default function App() {
   const [cart, setCart] = useState({});
   const [customer, setCustomer] = useState({ customer_name: '', customer_phone: '', note: '' });
   
-  // States cho Quản lý Sản phẩm & Modal thêm/import
+  // States cho Quản lý Sản phẩm
   const [showProductModal, setShowProductModal] = useState(false);
   const [showProductImportModal, setShowProductImportModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
   const [productImportText, setProductImportText] = useState('');
 
@@ -93,13 +94,30 @@ export default function App() {
   const handleSaveProduct = async (e) => {
     e.preventDefault();
     try {
-      await api('/api/products', { method: 'POST', body: JSON.stringify(productForm) });
-      setMsg({ type: 'ok', text: 'Đã thêm sản phẩm thành công!' });
+      if (editingProduct) {
+        await api(`/api/products/${editingProduct.id}`, { method: 'PUT', body: JSON.stringify(productForm) });
+        setMsg({ type: 'ok', text: 'Đã cập nhật sản phẩm thành công!' });
+      } else {
+        await api('/api/products', { method: 'POST', body: JSON.stringify(productForm) });
+        setMsg({ type: 'ok', text: 'Đã thêm sản phẩm thành công!' });
+      }
       setShowProductModal(false);
+      setEditingProduct(null);
       setProductForm({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
       loadData();
     } catch (err) {
       setMsg({ type: 'err', text: err.message });
+    }
+  };
+
+  const handleDeleteProduct = async (id) => {
+    if (!confirm('Bạn có chắc muốn xóa sản phẩm này?')) return;
+    try {
+      await api(`/api/products/${id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: 'Đã xóa sản phẩm thành công' });
+      loadData();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
     }
   };
 
@@ -218,7 +236,7 @@ export default function App() {
         {currentView === 'products' && (
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Sản phẩm</h2>
+              <h2 style={{ margin: 0 }}>Quản lý Sản phẩm ({products.length})</h2>
               
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button 
@@ -228,7 +246,11 @@ export default function App() {
                   📁 Nhập Excel / Dán dữ liệu
                 </button>
                 <button 
-                  onClick={() => setShowProductModal(true)}
+                  onClick={() => {
+                    setEditingProduct(null);
+                    setProductForm({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
+                    setShowProductModal(true);
+                  }}
                   style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm sản phẩm mới
@@ -237,34 +259,55 @@ export default function App() {
             </div>
 
             {/* Bảng danh sách sản phẩm */}
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Mã sản phẩm (SKU)</th>
-                  <th style={{ padding: '12px' }}>Tên sản phẩm</th>
-                  <th style={{ padding: '12px' }}>Đơn vị tính</th>
-                  <th style={{ padding: '12px' }}>Giá nhập</th>
-                  <th style={{ padding: '12px' }}>Giá bán lẻ</th>
-                  <th style={{ padding: '12px' }}>Giá bán sỉ</th>
-                  <th style={{ padding: '12px' }}>Tồn kho</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(products || []).map((p) => (
-                  <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '12px' }}>{p.sku}</td>
-                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{p.name}</td>
-                    <td style={{ padding: '12px' }}>{p.unit || 'Cái'}</td>
-                    <td style={{ padding: '12px' }}>{vnd(p.import_price)}</td>
-                    <td style={{ padding: '12px', color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
-                    <td style={{ padding: '12px', color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
-                    <td style={{ padding: '12px', color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>
-                      {p.stock}
-                    </td>
+            <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1 }}>
+                    <th style={{ padding: '12px' }}>Mã sản phẩm (SKU)</th>
+                    <th style={{ padding: '12px' }}>Tên sản phẩm</th>
+                    <th style={{ padding: '12px' }}>Đơn vị tính</th>
+                    <th style={{ padding: '12px' }}>Giá nhập</th>
+                    <th style={{ padding: '12px' }}>Giá bán lẻ</th>
+                    <th style={{ padding: '12px' }}>Giá bán sỉ</th>
+                    <th style={{ padding: '12px' }}>Tồn kho</th>
+                    <th style={{ padding: '12px', textAlign: 'center' }}>Thao tác</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(products || []).map((p) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '12px' }}>{p.sku}</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{p.name}</td>
+                      <td style={{ padding: '12px' }}>{p.unit || 'Cái'}</td>
+                      <td style={{ padding: '12px' }}>{vnd(p.import_price)}</td>
+                      <td style={{ padding: '12px', color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
+                      <td style={{ padding: '12px', color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
+                      <td style={{ padding: '12px', color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>
+                        {p.stock}
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                        <button 
+                          onClick={() => {
+                            setEditingProduct(p);
+                            setProductForm({ sku: p.sku, name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
+                            setShowProductModal(true);
+                          }}
+                          style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
+                        >
+                          Sửa
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteProduct(p.id)}
+                          style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
+                        >
+                          Xóa
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -294,7 +337,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bảng danh sách NCC */}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -561,14 +603,14 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL THÊM SẢN PHẨM MỚI */}
+      {/* MODAL THÊM / SỬA SẢN PHẨM */}
       {showProductModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '20px' }}>Thêm sản phẩm mới</h3>
+            <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</h3>
             <form onSubmit={handleSaveProduct}>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã sản phẩm (SKU - để trống tự sinh):</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã sản phẩm (SKU):</label>
                 <input placeholder="VD: SKU001" value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} style={inputStyle} />
               </div>
               <div style={{ marginBottom: '12px' }}>
@@ -581,7 +623,7 @@ export default function App() {
                   <input placeholder="Cái, Bộ, Chiếc..." value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tồn kho ban đầu:</label>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tồn kho:</label>
                   <input type="number" value={productForm.stock} onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })} style={inputStyle} />
                 </div>
               </div>
@@ -699,7 +741,7 @@ export default function App() {
         </div>
       )}
 
-      {/* POPUP THÊM HOẶC CHI TIẾT NHÀ CUNG CẤP (4 TAB) */}
+      {/* MODAL THÊM / SỬA NCC */}
       {showSupplierModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
@@ -823,99 +865,6 @@ export default function App() {
                 </div>
               </form>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* POPUP IMPORT NCC */}
-      {showImportModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Nhà cung cấp</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.5' }}>
-              Copy các cột từ Excel và dán trực tiếp vào ô bên dưới.<br/>
-              Thứ tự cột: <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>Mã NCC | Tên NCC | Số điện thoại | Địa chỉ</code>
-            </p>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Hoặc chọn file (.csv / .txt):</label>
-              <input 
-                type="file" 
-                accept=".csv, .txt, .tsv"
-                onChange={(e) => {
-                  const file = e.target.files[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = (evt) => setImportText(evt.target.result);
-                  reader.readAsText(file);
-                }}
-                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Dán dữ liệu trực tiếp:</label>
-              <textarea 
-                rows="8"
-                placeholder={"NCC01\tCông ty A\t0901234567\tQuận 1, TP.HCM\nNCC02\tCông ty B\t0908765432\tQuận 3, TP.HCM"}
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '6px', border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: '13px' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button type="button" onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button 
-                type="button" 
-                onClick={async () => {
-                  if (!importText.trim()) {
-                    alert('Vui lòng nhập hoặc dán dữ liệu!');
-                    return;
-                  }
-                  try {
-                    const lines = importText.split('\n');
-                    const items = [];
-                    for (let line of lines) {
-                      if (!line.trim()) continue;
-                      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
-                      if (cols.length > 0 && cols[0]) {
-                        let code = '', name = '', phone = '', address = '';
-                        if (cols.length >= 4) {
-                          code = cols[0]; name = cols[1]; phone = cols[2]; address = cols.slice(3).join(', ');
-                        } else if (cols.length === 3) {
-                          name = cols[0]; phone = cols[1]; address = cols.slice(2).join(', ');
-                        } else if (cols.length === 2) {
-                          name = cols[0]; phone = cols[1];
-                        } else {
-                          name = cols[0];
-                        }
-                        items.push({ code, name, phone, address, status: 'active' });
-                      }
-                    }
-
-                    if (items.length === 0) {
-                      alert('Không đọc được dữ liệu hợp lệ!');
-                      return;
-                    }
-
-                    const res = await api('/api/suppliers/import', {
-                      method: 'POST',
-                      body: JSON.stringify({ items })
-                    });
-
-                    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount || items.length} nhà cung cấp!` });
-                    setShowImportModal(false);
-                    loadData();
-                  } catch (err) {
-                    alert('Lỗi nhập khẩu: ' + err.message);
-                  }
-                }}
-                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Xác nhận nhập khẩu
-              </button>
-            </div>
           </div>
         </div>
       )}
