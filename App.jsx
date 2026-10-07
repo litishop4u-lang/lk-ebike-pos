@@ -24,6 +24,7 @@ export default function App() {
   // States cho Nhà cung cấp & Nhập hàng
   const [suppliers, setSuppliers] = useState([]);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [supplierForm, setSupplierForm] = useState({ code: '', name: '', phone: '', address: '', status: 'active' });
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [supplierTab, setSupplierTab] = useState('info'); // 'info' | 'purchases' | 'payments' | 'returns'
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
