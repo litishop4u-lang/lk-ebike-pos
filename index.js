@@ -209,42 +209,46 @@ export default {
         return json({ success: true, code }, 201, origin);
       }
 
-        if (pathname === '/api/suppliers/import' && request.method === 'POST') {
-          const body = await request.json();
-          const items = body.items || [];
-      
-          let successCount = 0;
-          let errorCount = 0;
+        // Nhập khẩu hàng loạt nhà cung cấp (POST /api/suppliers/import)
+      if (pathname === '/api/suppliers/import' && request.method === 'POST') {
+        const body = await request.json();
+        const items = body.items || [];
+        
+        let successCount = 0;
+        let errorCount = 0;
 
-          for (const item of items) {
-            const name = String(item.name || '').trim();
-            if (!name) {
-              errorCount++;
-              continue;
-            }
-            const code = String(item.code || '').trim() || genCode('NCC');
-            const phone = String(item.phone || '').trim() || null;
-            const address = String(item.address || '').trim() || null;
-            const status = item.status === 'inactive' ? 'inactive' : 'active';
-
-            try {
-              await db.prepare(`
-                INSERT INTO suppliers (code, name, phone, address, status) 
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(code) DO UPDATE SET 
-                  name = excluded.name,
-                  phone = COALESCE(excluded.phone, suppliers.phone),
-                  address = COALESCE(excluded.address, suppliers.address),
-                  status = excluded.status
-              `).bind(code, name, phone, address, status).run();
-              successCount++;
-            } catch (e) {
-              errorCount++;
-            }
+        for (const item of items) {
+          const name = String(item.name || '').trim();
+          if (!name) {
+            errorCount++;
+            continue;
           }
+          const code = String(item.code || '').trim() || genCode('NCC');
+          const phone = String(item.phone || '').trim() || null;
+          const address = String(item.address || '').trim() || null;
+          const status = item.status === 'inactive' ? 'inactive' : 'active';
 
-          return json({ success: true, successCount, errorCount }, 200, origin);
+          try {
+            // Kiểm tra xem mã NCC đã tồn tại chưa
+            const existing = await db.prepare('SELECT id FROM suppliers WHERE code = ?').bind(code).first();
+            
+            if (existing) {
+              // Nếu đã có thì cập nhật thông tin
+              await db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ?, status = ? WHERE code = ?')
+                .bind(name, phone, address, status, code).run();
+            } else {
+              // Nếu chưa có thì thêm mới
+              await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?, ?, ?, ?, ?)')
+                .bind(code, name, phone, address, status).run();
+            }
+            successCount++;
+          } catch (e) {
+            errorCount++;
+          }
         }
+
+        return json({ success: true, successCount, errorCount }, 200, origin);
+      }
       
       // PUT /api/suppliers/:id — Sửa thông tin nhà cung cấp
       if (pathname.match(/^\/api\/suppliers\/\d+$/) && request.method === 'PUT') {
