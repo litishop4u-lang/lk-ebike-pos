@@ -34,9 +34,12 @@ export default function App() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
   
-  // Quản lý danh sách phiếu nhập & popup tạo phiếu nhập
+  // Quản lý danh sách phiếu nhập & popup tạo/xem phiếu nhập
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [showCreatePurchaseModal, setShowCreatePurchaseModal] = useState(false);
+  const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
+  const [showViewPurchaseModal, setShowViewPurchaseModal] = useState(false);
+
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [productSearchKeyword, setProductSearchKeyword] = useState('');
@@ -171,6 +174,18 @@ export default function App() {
     }
   };
 
+  // --- Xóa Phiếu Nhập ---
+  const handleDeletePurchaseOrder = async (id, code) => {
+    if (!confirm(`Bạn có chắc muốn xóa phiếu nhập ${code}? Thao tác này sẽ hoàn lại số lượng tồn kho!`)) return;
+    try {
+      await api(`/api/purchase_orders/${id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: `Đã xóa phiếu nhập ${code} thành công!` });
+      loadData();
+    } catch (e) {
+      alert('Lỗi xóa phiếu nhập: ' + e.message);
+    }
+  };
+
   return (
     <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
       {/* Thanh menu bên trái */}
@@ -262,7 +277,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bảng danh sách sản phẩm */}
             <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -374,7 +388,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. MÀN HÌNH QUẢN LÝ NHẬP HÀNG (HIỂN THỊ DANH SÁCH & NÚT TẠO PHIẾU NHẬP) */}
+        {/* 4. MÀN HÌNH QUẢN LÝ NHẬP HÀNG */}
         {currentView === 'purchases' && (
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -402,11 +416,12 @@ export default function App() {
                   <th style={{ padding: '12px' }}>Đã Thanh Toán</th>
                   <th style={{ padding: '12px' }}>Còn Nợ</th>
                   <th style={{ padding: '12px' }}>Trạng Thái</th>
+                  <th style={{ padding: '12px', textAlign: 'center' }}>Thao Tác</th>
                 </tr>
               </thead>
               <tbody>
                 {purchaseOrders.length === 0 ? (
-                  <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu nhập hàng nào.</td></tr>
+                  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu nhập hàng nào.</td></tr>
                 ) : (
                   purchaseOrders.map((po) => {
                     const totalAmt = Number(po.total) || 0;
@@ -427,6 +442,41 @@ export default function App() {
                             {isPaid ? 'Đã thanh toán' : 'Còn nợ'}
                           </span>
                         </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          {/* Nút Xem chi tiết */}
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const details = await api(`/api/purchase_orders/${po.id}`);
+                                setSelectedPurchaseOrder(details);
+                                setShowViewPurchaseModal(true);
+                              } catch (e) {
+                                setSelectedPurchaseOrder(po);
+                                setShowViewPurchaseModal(true);
+                              }
+                            }}
+                            title="Xem chi tiết"
+                            style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
+                          >
+                            👁️
+                          </button>
+                          {/* Nút Sửa */}
+                          <button 
+                            onClick={() => alert('Chức năng chỉnh sửa phiếu nhập đang được cập nhật!')}
+                            title="Chỉnh sửa"
+                            style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
+                          >
+                            ✏️
+                          </button>
+                          {/* Nút Xóa */}
+                          <button 
+                            onClick={() => handleDeletePurchaseOrder(po.id, po.code)}
+                            title="Xóa phiếu"
+                            style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                          >
+                            🗑️
+                          </button>
+                        </td>
                       </tr>
                     );
                   })
@@ -437,7 +487,32 @@ export default function App() {
         )}
       </main>
 
-      {/* POPUP (MODAL) TẠO PHIẾU NHẬP HÀNG */}
+      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
+      {showViewPurchaseModal && selectedPurchaseOrder && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
+              <button onClick={() => setShowViewPurchaseModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+            <p><b>Nhà cung cấp:</b> {selectedPurchaseOrder.supplier_name || '---'}</p>
+            <p><b>Ngày tạo:</b> {selectedPurchaseOrder.created_at ? new Date(selectedPurchaseOrder.created_at).toLocaleString('vi-VN') : '---'}</p>
+            <p><b>Phương thức thanh toán:</b> {selectedPurchaseOrder.payment_method || 'Tiền mặt'}</p>
+            <hr style={{ margin: '15px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />
+            <h4>Tổng kết thanh toán</h4>
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
+              <p><b>Tổng tiền hàng:</b> {vnd(selectedPurchaseOrder.total)}</p>
+              <p><b>Đã thanh toán:</b> {vnd(selectedPurchaseOrder.paid_amount)}</p>
+              <p><b>Còn nợ:</b> <span style={{ color: selectedPurchaseOrder.debt > 0 ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{vnd(selectedPurchaseOrder.debt)}</span></p>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowViewPurchaseModal(false)} style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Đóng</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP TẠO PHIẾU NHẬP HÀNG */}
       {showCreatePurchaseModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
