@@ -163,13 +163,20 @@ export default {
         const query = `
           SELECT 
             s.*,
-            COALESCE(SUM(DISTINCT p.total), 0) as total_purchase,
-            COALESCE(SUM(DISTINCT pay.amount), 0) as total_paid,
-            (COALESCE(SUM(DISTINCT p.total), 0) - COALESCE(SUM(DISTINCT pay.amount), 0)) as total_debt
+            COALESCE(p.total_purchase, 0) as total_purchase,
+            COALESCE(pay.total_paid, 0) as total_paid,
+            (COALESCE(p.total_purchase, 0) - COALESCE(pay.total_paid, 0)) as total_debt
           FROM suppliers s
-          LEFT JOIN purchase_orders p ON s.id = p.supplier_id
-          LEFT JOIN supplier_payments pay ON s.id = pay.supplier_id
-          GROUP BY s.id
+          LEFT JOIN (
+            SELECT supplier_id, SUM(total) as total_purchase 
+            FROM purchase_orders 
+            GROUP BY supplier_id
+          ) p ON s.id = p.supplier_id
+          LEFT JOIN (
+            SELECT supplier_id, SUM(amount) as total_paid 
+            FROM supplier_payments 
+            GROUP BY supplier_id
+          ) pay ON s.id = pay.supplier_id
           ORDER BY s.id DESC
         `;
         const { results } = await db.prepare(query).all();
