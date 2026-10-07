@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
-const vnd = (n) => n.toLocaleString('vi-VN') + ' ₫';
+const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
 
 async function api(path, options) {
   const res = await fetch(API + path, {
