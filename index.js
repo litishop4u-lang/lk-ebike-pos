@@ -402,6 +402,20 @@ export default {
         return json({ success: true, code, total }, 201, origin);
       }
 
+        // GET /api/purchase_orders — Lấy danh sách phiếu nhập kèm tên nhà cung cấp
+      if (pathname === '/api/purchase_orders' && request.method === 'GET') {
+        const query = `
+          SELECT 
+            po.*,
+            s.name as supplier_name
+          FROM purchase_orders po
+          LEFT JOIN suppliers s ON po.supplier_id = s.id
+          ORDER BY po.id DESC
+        `;
+        const { results } = await db.prepare(query).all();
+        return json(results || [], 200, origin);
+      }
+
       // Phục vụ giao diện Frontend
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
