@@ -433,7 +433,7 @@ export default function App() {
               </button>
               <button 
                 type="button" 
-                onClick={async () => {
+               onClick={async () => {
   if (!importText.trim()) {
     alert('Vui lòng nhập hoặc dán dữ liệu!');
     return;
@@ -441,25 +441,26 @@ export default function App() {
   try {
     const lines = importText.split('\n');
     const items = [];
+    
     for (let line of lines) {
       if (!line.trim()) continue;
-      // Tách cột bằng tab (Excel), dấu phẩy hoặc dấu chấm phẩy
+      // Tách cột bằng tab (khi copy từ Excel), dấu phẩy hoặc dấu chấm phẩy
       const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
       
       if (cols.length > 0 && cols[0]) {
         let code = '', name = '', phone = '', address = '';
-        
-        // Nếu có từ 3 cột trở lên (Ví dụ: Mã | Tên | SĐT | Địa chỉ hoặc Tên | SĐT | Địa chỉ)
+
+        // Tùy theo số cột người dùng dán vào
         if (cols.length >= 4) {
           code = cols[0];
           name = cols[1];
           phone = cols[2];
           address = cols.slice(3).join(', ');
         } else if (cols.length === 3) {
-          // Kiểm tra xem cột đầu có phải là mã hay không (ví dụ chứa chữ NCC hoặc ngắn), nếu không thì coi như Tên | SĐT | Địa chỉ
+          // Trường hợp dán 3 cột: Tên | SĐT | Địa chỉ (để trống mã để tự sinh)
           name = cols[0];
           phone = cols[1];
-          address = cols[2];
+          address = cols.slice(2).join(', ');
         } else if (cols.length === 2) {
           name = cols[0];
           phone = cols[1];
@@ -472,16 +473,17 @@ export default function App() {
     }
 
     if (items.length === 0) {
-      alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại định dạng!');
+      alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại!');
       return;
     }
 
+    // Gửi lên API /api/suppliers/import
     const res = await api('/api/suppliers/import', {
       method: 'POST',
       body: JSON.stringify({ items })
     });
 
-    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount} nhà cung cấp!` });
+    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount || items.length} nhà cung cấp!` });
     setShowImportModal(false);
     loadData();
   } catch (err) {
