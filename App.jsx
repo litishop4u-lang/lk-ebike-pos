@@ -338,6 +338,119 @@ export default function App() {
   );
 }
 
+        {/* Nút mở Popup thêm NCC */}
+<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+  <h3>Quản lý Nhà cung cấp</h3>
+  <button 
+    onClick={() => {
+      setSupplierForm({ code: '', name: '', phone: '', address: '', status: 'active' });
+      setShowSupplierModal(true);
+    }}
+    style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+  >
+    + Thêm nhà cung cấp
+  </button>
+</div>
+
+{/* Popup Modal thêm / sửa NCC */}
+{showSupplierModal && (
+  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+    <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '450px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+      <h3 style={{ marginTop: 0, marginBottom: '20px' }}>Thêm nhà cung cấp mới</h3>
+      
+      <form onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          const res = await fetch(`${API}/api/suppliers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(supplierForm)
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'Có lỗi xảy ra');
+            return;
+          }
+          setShowSupplierModal(false);
+          // Gọi lại hàm tải danh sách nhà cung cấp ở đây
+          loadSuppliers(); 
+        } catch (err) {
+          alert('Lỗi kết nối máy chủ');
+        }
+      }}>
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã NCC (để trống sẽ tự sinh):</label>
+          <input 
+            placeholder="Ví dụ: NCC-001" 
+            value={supplierForm.code || ''} 
+            onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} 
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tên nhà cung cấp *:</label>
+          <input 
+            placeholder="Nhập tên nhà cung cấp" 
+            value={supplierForm.name || ''} 
+            onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} 
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+            required 
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Số điện thoại:</label>
+          <input 
+            placeholder="Nhập số điện thoại" 
+            value={supplierForm.phone || ''} 
+            onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} 
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Địa chỉ:</label>
+          <input 
+            placeholder="Nhập địa chỉ" 
+            value={supplierForm.address || ''} 
+            onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} 
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+          />
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Trạng thái:</label>
+          <select 
+            value={supplierForm.status || 'active'} 
+            onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} 
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+          >
+            <option value="active">Hoạt động</option>
+            <option value="inactive">Ngừng hoạt động</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <button 
+            type="button" 
+            onClick={() => setShowSupplierModal(false)}
+            style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
+            Hủy
+          </button>
+          <button 
+            type="submit" 
+            style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Lưu nhà cung cấp
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
 const navBtnStyle = (active) => ({
   width: '100%',
   padding: '10px 15px',
