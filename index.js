@@ -182,13 +182,21 @@ export default {
         const name = String(b.name || '').trim();
         if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
         
-        const code = genCode('NCC');
+        // Lấy mã do người dùng nhập, nếu để trống thì tự sinh mã
+        const code = String(b.code || '').trim() || genCode('NCC');
         const phone = String(b.phone || '').trim() || null;
         const address = String(b.address || '').trim() || null;
         const status = b.status || 'active';
 
-        await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?, ?, ?, ?, ?)')
-          .bind(code, name, phone, address, status).run();
+        try {
+          await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?, ?, ?, ?, ?)')
+            .bind(code, name, phone, address, status).run();
+        } catch (err) {
+          if (err.message && err.message.includes('UNIQUE')) {
+            throw new HttpError(400, 'Trùng mã NCC');
+          }
+          throw err;
+        }
           
         return json({ success: true, code }, 201, origin);
       }
