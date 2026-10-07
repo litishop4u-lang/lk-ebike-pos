@@ -184,56 +184,143 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
-        {currentView === 'suppliers' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px' }}>
-            <h2>Quản lý Nhà cung cấp</h2>
-            <form onSubmit={handleSaveSupplier} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 120px auto', gap: '10px', margin: '20px 0', background: '#f8fafc', padding: '15px', borderRadius: '8px' }}>
-              <input placeholder="Tên nhà cung cấp *" value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required />
-              <input placeholder="Số điện thoại" value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} />
-              <input placeholder="Địa chỉ" value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} />
-              <select value={supplierForm.status} onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} style={inputStyle}>
-                <option value="active">Hoạt động</option>
-                <option value="inactive">Ngừng</option>
-              </select>
-              <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-                {editingSupplier ? 'Lưu sửa' : 'Thêm NCC'}
-              </button>
-            </form>
+        {/* Giao diện Quản lý Nhà cung cấp & Nút mở Popup */}
+<div style={{ padding: '20px' }}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+    <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp</h2>
+    <button 
+      onClick={() => {
+        setSupplierForm({ code: '', name: '', phone: '', address: '', status: 'active' });
+        setShowSupplierModal(true);
+      }}
+      style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+    >
+      + Thêm nhà cung cấp
+    </button>
+  </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
-              <thead>
-                <tr style={{ background: '#f1f5f9', textAlign: 'left', fontSize: '14px' }}>
-                  <th style={{ padding: '12px' }}>Mã NCC</th>
-                  <th style={{ padding: '12px' }}>Tên NCC</th>
-                  <th style={{ padding: '12px' }}>SĐT</th>
-                  <th style={{ padding: '12px' }}>Địa chỉ</th>
-                  <th style={{ padding: '12px' }}>Tổng giá trị nhập</th>
-                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
-                  <th style={{ padding: '12px' }}>Công nợ</th>
-                  <th style={{ padding: '12px' }}>Trạng thái</th>
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers.map((s) => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }} onClick={() => openSupplierDetail(s)}>
-                    <td style={{ padding: '12px', color: '#0284c7', fontWeight: 'bold' }}>{s.code}</td>
-                    <td style={{ padding: '12px', fontWeight: '500' }}>{s.name}</td>
-                    <td style={{ padding: '12px' }}>{s.phone || '---'}</td>
-                    <td style={{ padding: '12px' }}>{s.address || '---'}</td>
-                    <td style={{ padding: '12px' }}>{vnd(s.total_import)}</td>
-                    <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
-                    <td style={{ padding: '12px', color: s.debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.debt > 0 ? 'bold' : 'normal' }}>{vnd(s.debt)}</td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{ padding: '4px 8px', borderRadius: '4px', background: s.status === 'active' ? '#dcfce7' : '#fee2e2', color: s.status === 'active' ? '#166534' : '#991b1b', fontSize: '12px' }}>
-                        {s.status === 'active' ? 'Hoạt động' : 'Ngừng'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+  {/* Bảng danh sách NCC */}
+  <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+    <thead>
+      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+        <th style={{ padding: '12px' }}>Mã NCC</th>
+        <th style={{ padding: '12px' }}>Tên NCC</th>
+        <th style={{ padding: '12px' }}>SĐT</th>
+        <th style={{ padding: '12px' }}>Địa chỉ</th>
+        <th style={{ padding: '12px' }}>Trạng thái</th>
+      </tr>
+    </thead>
+    <tbody>
+      {(suppliers || []).map((s) => (
+        <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}>
+          <td style={{ padding: '12px' }}>{s.code}</td>
+          <td style={{ padding: '12px' }}>{s.name}</td>
+          <td style={{ padding: '12px' }}>{s.phone || '-'}</td>
+          <td style={{ padding: '12px' }}>{s.address || '-'}</td>
+          <td style={{ padding: '12px' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
 
+  {/* Popup Modal thêm NCC */}
+  {showSupplierModal && (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+      <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '450px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+        <h3 style={{ marginTop: 0, marginBottom: '20px' }}>Thêm nhà cung cấp mới</h3>
+        
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            const res = await fetch(`${API}/api/suppliers`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(supplierForm)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              alert(data.error || 'Có lỗi xảy ra');
+              return;
+            }
+            setShowSupplierModal(false);
+            if (typeof loadSuppliers === 'function') loadSuppliers();
+          } catch (err) {
+            alert('Lỗi kết nối máy chủ');
+          }
+        }}>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã NCC (để trống sẽ tự sinh):</label>
+            <input 
+              placeholder="Ví dụ: NCC-001" 
+              value={supplierForm.code || ''} 
+              onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} 
+              style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+            />
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tên nhà cung cấp *:</label>
+            <input 
+              placeholder="Nhập tên nhà cung cấp" 
+              value={supplierForm.name || ''} 
+              onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} 
+              style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+              required 
+            />
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Số điện thoại:</label>
+            <input 
+              placeholder="Nhập số điện thoại" 
+              value={supplierForm.phone || ''} 
+              onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} 
+              style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+            />
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Địa chỉ:</label>
+            <input 
+              placeholder="Nhập địa chỉ" 
+              value={supplierForm.address || ''} 
+              onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} 
+              style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }} 
+            />
+          </div>
+
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Trạng thái:</label>
+            <select 
+              value={supplierForm.status || 'active'} 
+              onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} 
+              style={{ width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+            >
+              <option value="active">Hoạt động</option>
+              <option value="inactive">Ngừng hoạt động</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <button 
+              type="button" 
+              onClick={() => setShowSupplierModal(false)}
+              style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            >
+              Hủy
+            </button>
+            <button 
+              type="submit" 
+              style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Lưu nhà cung cấp
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )}
+</div>
             {/* POPUP CHI TIẾT NHÀ CUNG CẤP (4 TAB) */}
             {showSupplierModal && selectedSupplier && (
               <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
