@@ -434,46 +434,60 @@ export default function App() {
               <button 
                 type="button" 
                 onClick={async () => {
-                  if (!importText.trim()) {
-                    alert('Vui lòng nhập hoặc dán dữ liệu!');
-                    return;
-                  }
-                  try {
-                    const lines = importText.split('\n');
-                    const items = [];
-                    for (let line of lines) {
-                      if (!line.trim()) continue;
-                      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
-                      if (cols.length >= 2) {
-                        let code = '', name = '', phone = '', address = '';
-                        if (cols.length >= 4) {
-                          code = cols[0]; name = cols[1]; phone = cols[2]; address = cols.slice(3).join(', ');
-                        } else if (cols.length === 3) {
-                          name = cols[0]; phone = cols[1]; address = cols.slice(2).join(', ');
-                        } else {
-                          name = cols[0]; phone = cols[1] || '';
-                        }
-                        items.push({ code, name, phone, address, status: 'active' });
-                      }
-                    }
+  if (!importText.trim()) {
+    alert('Vui lòng nhập hoặc dán dữ liệu!');
+    return;
+  }
+  try {
+    const lines = importText.split('\n');
+    const items = [];
+    for (let line of lines) {
+      if (!line.trim()) continue;
+      // Tách cột bằng tab (Excel), dấu phẩy hoặc dấu chấm phẩy
+      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+      
+      if (cols.length > 0 && cols[0]) {
+        let code = '', name = '', phone = '', address = '';
+        
+        // Nếu có từ 3 cột trở lên (Ví dụ: Mã | Tên | SĐT | Địa chỉ hoặc Tên | SĐT | Địa chỉ)
+        if (cols.length >= 4) {
+          code = cols[0];
+          name = cols[1];
+          phone = cols[2];
+          address = cols.slice(3).join(', ');
+        } else if (cols.length === 3) {
+          // Kiểm tra xem cột đầu có phải là mã hay không (ví dụ chứa chữ NCC hoặc ngắn), nếu không thì coi như Tên | SĐT | Địa chỉ
+          name = cols[0];
+          phone = cols[1];
+          address = cols[2];
+        } else if (cols.length === 2) {
+          name = cols[0];
+          phone = cols[1];
+        } else {
+          name = cols[0];
+        }
 
-                    if (items.length === 0) {
-                      alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại định dạng!');
-                      return;
-                    }
+        items.push({ code, name, phone, address, status: 'active' });
+      }
+    }
 
-                    const res = await api('/api/suppliers/import', {
-                      method: 'POST',
-                      body: JSON.stringify({ items })
-                    });
+    if (items.length === 0) {
+      alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại định dạng!');
+      return;
+    }
 
-                    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount} nhà cung cấp!` });
-                    setShowImportModal(false);
-                    loadData();
-                  } catch (err) {
-                    alert('Lỗi nhập khẩu: ' + err.message);
-                  }
-                }}
+    const res = await api('/api/suppliers/import', {
+      method: 'POST',
+      body: JSON.stringify({ items })
+    });
+
+    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount} nhà cung cấp!` });
+    setShowImportModal(false);
+    loadData();
+  } catch (err) {
+    alert('Lỗi nhập khẩu: ' + err.message);
+  }
+}}
                 style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Xác nhận nhập khẩu
