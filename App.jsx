@@ -29,6 +29,9 @@ export default function App() {
   const [supplierTab, setSupplierTab] = useState('info'); // 'info' | 'purchases' | 'payments' | 'returns'
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
   
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -189,6 +192,14 @@ export default function App() {
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp</h2>
+              
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  onClick={() => { setImportText(''); setShowImportModal(true); }}
+                  style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  📁 Nhập Excel / Dán dữ liệu
+                </button>
               <button 
                 onClick={() => {
                   setEditingSupplier(null);
@@ -339,6 +350,110 @@ export default function App() {
                 </div>
               </>
             ) : (
+
+                  {/* POPUP IMPORT NHÀ CUNG CẤP */}
+                  {showImportModal && (
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+                      <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+                        <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Nhà cung cấp</h3>
+                        <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.5' }}>
+                          Bạn có thể <b>copy các cột từ Excel</b> và dán trực tiếp vào ô bên dưới.<br/>
+                          Thứ tự cột: <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>Mã NCC | Tên NCC | Số điện thoại | Địa chỉ</code> (Có thể bỏ trống cột Mã NCC để hệ thống tự sinh).
+                        </p>
+
+                        {/* Chọn file Excel/CSV */}
+                        <div style={{ marginBottom: '15px' }}>
+                          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Hoặc chọn file Excel (.csv / .txt):</label>
+                          <input 
+                            type="file" 
+                            accept=".csv, .txt, .tsv"
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = (evt) => setImportText(evt.target.result);
+                              reader.readAsText(file);
+                            }}
+                            style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
+                          />
+                        </div>
+
+                        <div style={{ marginBottom: '15px' }}>
+                          <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Hoặc dán (Paste) dữ liệu trực tiếp vào đây:</label>
+                          <textarea 
+                            rows="8"
+                            placeholder={"NCC01\tCông ty A\t0901234567\tQuận 1, TP.HCM\nNCC02\tCông ty B\t0908765432\tQuận 3, TP.HCM"}
+                            value={importText}
+                            onChange={(e) => setImportText(e.target.value)}
+                            style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '6px', border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                          <button 
+                            type="button" 
+                            onClick={() => setShowImportModal(false)}
+                            style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                          >
+                            Hủy
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={async () => {
+                              if (!importText.trim()) {
+                                alert('Vui lòng nhập hoặc dán dữ liệu!');
+                                return;
+                              }
+                              try {
+                                const lines = importText.split('\n');
+                                const items = [];
+                                for (let line of lines) {
+                                  if (!line.trim()) continue;
+                                  const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+                                  if (cols.length >= 2) {
+                                    let code = '', name = '', phone = '', address = '';
+                                    if (cols.length >= 4) {
+                                      code = cols[0]; name = cols[1]; phone = cols[2]; address = cols.slice(3).join(', ');
+                                    } else if (cols.length === 3) {
+                                      name = cols[0]; phone = cols[1]; address = cols.slice(2).join(', ');
+                                    } else {
+                                      name = cols[0]; phone = cols[1] || '';
+                                    }
+                                    items.push({ code, name, phone, address, status: 'active' });
+                                  }
+                                }
+
+                                if (items.length === 0) {
+                                  alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại định dạng!');
+                                  return;
+                                }
+
+                                const res = await api('/api/suppliers/import', {
+                                  method: 'POST',
+                                  body: JSON.stringify({ items })
+                                });
+
+                                setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount} nhà cung cấp!` });
+                                setShowImportModal(false);
+                                loadData();
+                              } catch (err) {
+                                alert('Lỗi nhập khẩu: ' + err.message);
+                              }
+                            }}
+                            style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            Xác nhận nhập khẩu
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* ==================================================== */}
+
+                </div>
+              );
+            }
+          
               /* FORM THÊM MỚI NCC */
               <form onSubmit={handleSaveSupplier} style={{ padding: '20px' }}>
                 <div style={{ marginBottom: '12px' }}>
