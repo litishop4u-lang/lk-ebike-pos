@@ -421,7 +421,6 @@ export default {
             continue;
           }
           
-          // Tạo SKU ngẫu nhiên độc lập nếu thiếu để tránh trùng lặp gây lỗi UNIQUE
           const sku = String(item.sku || '').trim() || 'SP-' + Math.floor(100000 + Math.random() * 900000);
           const unit = String(item.unit || '').trim() || 'Cái';
           const import_price = Number(item.import_price) || 0;
@@ -449,7 +448,6 @@ export default {
 
         return json({ success: true, successCount, errorCount }, 200, origin);
       }
-
         // 4. Cập nhật thông tin sản phẩm (PUT /api/products/:id)
       if (pathname.match(/^\/api\/products\/\d+$/) && request.method === 'PUT') {
         const id = pathname.split('/')[3];
