@@ -895,5 +895,81 @@ const tabBtnStyle = (active) => ({
   cursor: 'pointer'
 });
 
+{/* POPUP IMPORT NHÀ CUNG CẤP (DÁN VÀO TRƯỚC THẺ ĐÓNG CUỐI CÙNG CỦA FILE APP.JSX) */}
+      {showImportModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Nhà cung cấp</h3>
+            <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.5' }}>
+              Copy các cột từ Excel và dán trực tiếp vào ô bên dưới.<br/>
+              Thứ tự cột: <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>Mã NCC | Tên NCC | Số điện thoại | Địa chỉ</code>
+            </p>
+
+            <div style={{ marginBottom: '15px' }}>
+              <textarea 
+                rows="8"
+                placeholder={"NCC01\tCông ty A\t0901234567\tQuận 1, TP.HCM\nNCC02\tCông ty B\t0908765432\tQuận 3, TP.HCM"}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '6px', border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button type="button" onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+              <button 
+                type="button" 
+                onClick={async () => {
+                  if (!importText.trim()) {
+                    alert('Vui lòng nhập hoặc dán dữ liệu!');
+                    return;
+                  }
+                  try {
+                    const lines = importText.split('\n');
+                    const items = [];
+                    for (let line of lines) {
+                      if (!line.trim()) continue;
+                      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+                      if (cols.length > 0 && cols[0]) {
+                        let code = '', name = '', phone = '', address = '';
+                        if (cols.length >= 4) {
+                          code = cols[0]; name = cols[1]; phone = cols[2]; address = cols.slice(3).join(', ');
+                        } else if (cols.length === 3) {
+                          name = cols[0]; phone = cols[1]; address = cols.slice(2).join(', ');
+                        } else if (cols.length === 2) {
+                          name = cols[0]; phone = cols[1];
+                        } else {
+                          name = cols[0];
+                        }
+                        items.push({ code, name, phone, address, status: 'active' });
+                      }
+                    }
+
+                    if (items.length === 0) {
+                      alert('Không đọc được dữ liệu hợp lệ!');
+                      return;
+                    }
+
+                    const res = await api('/api/suppliers/import', {
+                      method: 'POST',
+                      body: JSON.stringify({ items })
+                    });
+
+                    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount || items.length} nhà cung cấp!` });
+                    setShowImportModal(false);
+                    loadData();
+                  } catch (err) {
+                    alert('Lỗi nhập khẩu: ' + err.message);
+                  }
+                }}
+                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Xác nhận nhập khẩu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 const inputStyle = { width: '100%', padding: '10px', margin: '6px 0', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' };
 const actionBtnStyle = { flex: 1, padding: '10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' };
