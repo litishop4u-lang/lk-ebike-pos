@@ -359,6 +359,78 @@ export default {
         return json({ success: true, code, total }, 201, origin);
       }
 
+        // 1. Lấy danh sách sản phẩm
+      if (pathname === '/api/products' && request.method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
+        return json(results || [], 200, origin);
+      }
+
+      // 2. Thêm mới một sản phẩm
+      if (pathname === '/api/products' && request.method === 'POST') {
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên sản phẩm');
+        
+        const sku = String(b.sku || '').trim() || genCode('SP');
+        const unit = String(b.unit || '').trim() || 'Cái';
+        const import_price = Number(b.import_price) || 0;
+        const price = Number(b.price) || 0; // Giá bán lẻ
+        const wholesale_price = Number(b.wholesale_price) || 0; // Giá bán sỉ
+        const stock = Number(b.stock) || 0;
+
+        try {
+          await db.prepare(`
+            INSERT INTO products (sku, name, unit, import_price, price, wholesale_price, stock)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).bind(sku, name, unit, import_price, price, wholesale_price, stock).run();
+        } catch (err) {
+          if (err.message && err.message.includes('UNIQUE')) {
+            throw new HttpError(400, 'Trùng mã SKU sản phẩm');
+          }
+          throw err;
+        }
+
+        return json({ success: true }, 201, origin);
+      }
+
+      // 3. Nhập khẩu hàng loạt sản phẩm (POST /api/products/import)
+      if (pathname === '/api/products/import' && request.method === 'POST') {
+        const body = await request.json();
+        const items = body.items || [];
+        
+        let successCount = 0;
+        for (const item of items) {
+          const name = String(item.name || '').trim();
+          if (!name) continue;
+          
+          const sku = String(item.sku || '').trim() || genCode('SP');
+          const unit = String(item.unit || '').trim() || 'Cái';
+          const import_price = Number(item.import_price) || 0;
+          const price = Number(item.price) || 0;
+          const wholesale_price = Number(item.wholesale_price) || 0;
+          const stock = Number(item.stock) || 0;
+
+          try {
+            await db.prepare(`
+              INSERT INTO products (sku, name, unit, import_price, price, wholesale_price, stock) 
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(sku) DO UPDATE SET 
+                name = excluded.name,
+                unit = excluded.unit,
+                import_price = excluded.import_price,
+                price = excluded.price,
+                wholesale_price = excluded.wholesale_price,
+                stock = excluded.stock
+            `).bind(sku, name, unit, import_price, price, wholesale_price, stock).run();
+            successCount++;
+          } catch (e) {
+            // Bỏ qua lỗi dòng nếu có
+          }
+        }
+
+        return json({ success: true, successCount }, 200, origin);
+      }
+
       // --- PHỤC VỤ GIAO DIỆN FRONTEND (REACT APP) ---
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
