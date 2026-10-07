@@ -416,6 +416,30 @@ export default {
         return json(results || [], 200, origin);
       }
 
+        // DELETE /api/purchase_orders/:id — Xóa phiếu nhập hàng (và hoàn trả tồn kho nếu cần)
+      if (pathname.match(/^\/api\/purchase_orders\/\d+$/) && request.method === 'DELETE') {
+        const id = pathname.split('/')[3];
+        
+        // Lấy chi tiết sản phẩm trong phiếu nhập để trừ lại tồn kho
+        const itemsRes = await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all();
+        const items = itemsRes.results || [];
+
+        const stmts = [
+          db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+          db.prepare('DELETE FROM purchase_orders WHERE id = ?').bind(id),
+        ];
+
+        // Hoàn lại kho sản phẩm khi xóa phiếu nhập
+        for (const item of items) {
+          stmts.push(
+            db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(item.quantity, item.product_id)
+          );
+        }
+
+        await db.batch(stmts);
+        return json({ success: true }, 200, origin);
+      }
+
       // Phục vụ giao diện Frontend
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
