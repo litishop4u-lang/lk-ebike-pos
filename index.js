@@ -431,6 +431,36 @@ export default {
         return json({ success: true, successCount }, 200, origin);
       }
 
+        // 4. Cập nhật thông tin sản phẩm (PUT /api/products/:id)
+      if (pathname.match(/^\/api\/products\/\d+$/) && request.method === 'PUT') {
+        const id = pathname.split('/')[3];
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên sản phẩm');
+        
+        const sku = String(b.sku || '').trim() || 'SP-' + id;
+        const unit = String(b.unit || '').trim() || 'Cái';
+        const import_price = Number(b.import_price) || 0;
+        const price = Number(b.price) || 0;
+        const wholesale_price = Number(b.wholesale_price) || 0;
+        const stock = Number(b.stock) || 0;
+
+        await db.prepare(`
+          UPDATE products 
+          SET sku = ?, name = ?, unit = ?, import_price = ?, price = ?, wholesale_price = ?, stock = ? 
+          WHERE id = ?
+        `).bind(sku, name, unit, import_price, price, wholesale_price, stock, id).run();
+
+        return json({ success: true }, 200, origin);
+      }
+
+      // 5. Xóa sản phẩm (DELETE /api/products/:id)
+      if (pathname.match(/^\/api\/products\/\d+$/) && request.method === 'DELETE') {
+        const id = pathname.split('/')[3];
+        await db.prepare('DELETE FROM products WHERE id = ?').bind(id).run();
+        return json({ success: true }, 200, origin);
+      }
+
       // --- PHỤC VỤ GIAO DIỆN FRONTEND (REACT APP) ---
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
