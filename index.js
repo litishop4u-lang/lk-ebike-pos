@@ -307,13 +307,57 @@ export default {
           returns: returns.results || [] 
         }, 200, origin);
       }
-      // Nhập hàng
-      if (pathname === '/api/purchases' && request.method === 'GET') {
-        const { results } = await db.prepare('SELECT * FROM purchase_orders ORDER BY id DESC LIMIT 50').all();
-        return json(results, 200, origin);
+      // Tạo phiếu nhập hàng mới (POST /api/purchase_orders)
+      if (pathname === '/api/purchase_orders' && request.method === 'POST') {
+        const body = await request.json();
+        const supplier_id = body.supplier_id;
+        const payment_method = body.payment_method || 'Tiền mặt';
+        const paid_amount = Number(body.paid_amount) || 0;
+        const items = body.items || [];
+
+        if (!supplier_id) throw new HttpError(400, 'Vui lòng chọn nhà cung cấp');
+        if (items.length === 0) throw new HttpError(400, 'Phiếu nhập chưa có sản phẩm nào');
+
+        const code = genCode('PN');
+        
+        // Tính tổng tiền của phiếu nhập
+        let total = 0;
+        for (const item of items) {
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.price) || 0;
+          const discount = Number(item.discount) || 0;
+          total += (qty * price) - discount;
+        }
+
+        const debt = total - paid_amount;
+
+        // Lưu phiếu nhập hàng
+        const poRes = await db.prepare(`
+          INSERT INTO purchase_orders (code, supplier_id, total, paid_amount, debt, payment_method) 
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).bind(code, supplier_id, total, paid_amount, debt, payment_method).run();
+
+        // Lưu chi tiết sản phẩm và cộng tồn kho
+        for (const item of items) {
+          const product_id = item.product_id;
+          const quantity = Number(item.quantity) || 0;
+          const price = Number(item.price) || 0;
+          const discount = Number(item.discount) || 0;
+          const lineTotal = (quantity * price) - discount;
+
+          await db.prepare(`
+            INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).bind(poRes.meta.last_row_id, product_id, quantity, price, discount, lineTotal).run();
+
+          // Cộng dồn tồn kho cho sản phẩm
+          await db.prepare(`
+            UPDATE products SET stock = stock + ? WHERE id = ?
+          `).bind(quantity, product_id).run();
+        }
+
+        return json({ success: true, code, total }, 201, origin);
       }
-      if (pathname === '/api/purchases' && request.method === 'POST')
-        return json(await createPurchaseOrder(db, await request.json()), 201, origin);
 
       // --- PHỤC VỤ GIAO DIỆN FRONTEND (REACT APP) ---
       if (env.ASSETS) {
