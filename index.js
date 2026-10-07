@@ -412,13 +412,17 @@ export default {
         const items = body.items || [];
         
         let successCount = 0;
-        let errors = [];
+        let errorCount = 0;
 
         for (const item of items) {
           const name = String(item.name || '').trim();
-          if (!name) continue;
+          if (!name) {
+            errorCount++;
+            continue;
+          }
           
-          const sku = String(item.sku || '').trim() || 'SP-' + Math.floor(Math.random() * 100000);
+          // Tạo SKU ngẫu nhiên độc lập nếu thiếu để tránh trùng lặp gây lỗi UNIQUE
+          const sku = String(item.sku || '').trim() || 'SP-' + Math.floor(100000 + Math.random() * 900000);
           const unit = String(item.unit || '').trim() || 'Cái';
           const import_price = Number(item.import_price) || 0;
           const price = Number(item.price) || 0;
@@ -439,11 +443,11 @@ export default {
             `).bind(sku, name, unit, import_price, price, wholesale_price, stock).run();
             successCount++;
           } catch (e) {
-            errors.push(e.message);
+            errorCount++;
           }
         }
 
-        return json({ success: true, successCount, errors }, 200, origin);
+        return json({ success: true, successCount, errorCount }, 200, origin);
       }
 
         // 4. Cập nhật thông tin sản phẩm (PUT /api/products/:id)
