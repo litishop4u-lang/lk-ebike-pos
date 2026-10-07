@@ -158,21 +158,22 @@ export default {
       }
 
       // Thêm vào file index.js phần API cho suppliers
-      // GET /api/suppliers — Lấy danh sách kèm tổng giá trị nhập, đã thanh toán, công nợ
+      // Lấy danh sách nhà cung cấp kèm theo tính toán Tổng nhập, Đã thanh toán, Công nợ
       if (pathname === '/api/suppliers' && request.method === 'GET') {
-        const { results } = await db.prepare(`
-          SELECT s.*, 
-            COALESCE((SELECT SUM(total) FROM purchase_orders WHERE supplier_id = s.id), 0) as total_import,
-            COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = s.id), 0) as total_paid
-          FROM suppliers s 
+        const query = `
+          SELECT 
+            s.*,
+            COALESCE(SUM(DISTINCT p.total), 0) as total_purchase,
+            COALESCE(SUM(DISTINCT pay.amount), 0) as total_paid,
+            (COALESCE(SUM(DISTINCT p.total), 0) - COALESCE(SUM(DISTINCT pay.amount), 0)) as total_debt
+          FROM suppliers s
+          LEFT JOIN purchase_orders p ON s.id = p.supplier_id
+          LEFT JOIN supplier_payments pay ON s.id = pay.supplier_id
+          GROUP BY s.id
           ORDER BY s.id DESC
-        `).all();
-        
-        const enriched = results.map(s => ({
-          ...s,
-          debt: s.total_import - s.total_paid
-        }));
-        return json(enriched, 200, origin);
+        `;
+        const { results } = await db.prepare(query).all();
+        return json(results || [], 200, origin);
       }
 
       // POST /api/suppliers — Thêm nhà cung cấp mới
