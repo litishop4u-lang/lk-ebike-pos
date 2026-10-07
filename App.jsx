@@ -26,16 +26,17 @@ export default function App() {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
-
+  
+  // States cho màn hình Nhập hàng
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
-  const [purchaseItems, setPurchaseItems] = useState([]); 
+  const [purchaseItems, setPurchaseItems] = useState([]);
   const [productSearchKeyword, setProductSearchKeyword] = useState('');
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
-  
+
   const [supplierForm, setSupplierForm] = useState({ code: '', name: '', phone: '', address: '', status: 'active' });
   const [selectedSupplier, setSelectedSupplier] = useState(null);
-  const [supplierTab, setSupplierTab] = useState('info'); // 'info' | 'purchases' | 'payments' | 'returns'
+  const [supplierTab, setSupplierTab] = useState('info');
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
   
@@ -258,10 +259,8 @@ export default function App() {
           <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Tạo Phiếu Nhập Hàng</h2>
 
-            {/* PHẦN 1: THÔNG TIN CHUNG PHIẾU NHẬP */}
+            {/* Thông tin chung */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              
-              {/* Chọn Nhà cung cấp có tìm kiếm theo Tên, SĐT, Mã */}
               <div style={{ position: 'relative' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Nhà cung cấp *:</label>
                 <input 
@@ -316,7 +315,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* PHẦN 2: TÌM KIẾM VÀ CHỌN SẢN PHẨM NHẬP */}
+            {/* Tìm kiếm sản phẩm */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
               <input 
@@ -334,7 +333,6 @@ export default function App() {
                     <div 
                       key={p.id}
                       onClick={() => {
-                        // Thêm sản phẩm vào danh sách nhập nếu chưa có, hoặc tăng số lượng
                         const exist = purchaseItems.find(item => item.product_id === p.id);
                         if (exist) {
                           setPurchaseItems(purchaseItems.map(item => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
@@ -353,7 +351,7 @@ export default function App() {
               )}
             </div>
 
-            {/* PHẦN 3: BẢNG CHI TIẾT SẢN PHẨM NHẬP */}
+            {/* Bảng chi tiết sản phẩm */}
             <div style={{ marginBottom: '20px', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -426,7 +424,7 @@ export default function App() {
               </table>
             </div>
 
-            {/* PHẦN 4: TỔNG KẾT VÀ NÚT LƯU PHIẾU */}
+            {/* Tổng kết và nút lưu */}
             {(() => {
               const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
               const debtAmount = totalAmount - (Number(purchaseForm.paid_amount) || 0);
@@ -489,9 +487,9 @@ export default function App() {
                 </div>
               );
             })()}
-
           </div>
         )}
+      </main>
 
       {/* POPUP THÊM HOẶC CHI TIẾT NHÀ CUNG CẤP (4 TAB) */}
       {showSupplierModal && (
@@ -504,7 +502,6 @@ export default function App() {
 
             {editingSupplier ? (
               <>
-                {/* Thanh Tabs */}
                 <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
                   <button onClick={() => setSupplierTab('info')} style={tabBtnStyle(supplierTab === 'info')}>1. Thông tin NCC</button>
                   <button onClick={() => setSupplierTab('purchases')} style={tabBtnStyle(supplierTab === 'purchases')}>2. Lịch sử nhập hàng</button>
@@ -588,7 +585,6 @@ export default function App() {
                 </div>
               </>
             ) : (
-              /* FORM THÊM MỚI NCC */
               <form onSubmit={handleSaveSupplier} style={{ padding: '20px' }}>
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã NCC (để trống sẽ tự sinh):</label>
@@ -623,7 +619,7 @@ export default function App() {
         </div>
       )}
 
-      {/* POPUP IMPORT EXCEL / PASTE DỮ LIỆU */}
+      {/* POPUP IMPORT EXCEL */}
       {showImportModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
@@ -670,63 +666,49 @@ export default function App() {
               </button>
               <button 
                 type="button" 
-               onClick={async () => {
-  if (!importText.trim()) {
-    alert('Vui lòng nhập hoặc dán dữ liệu!');
-    return;
-  }
-  try {
-    const lines = importText.split('\n');
-    const items = [];
-    
-    for (let line of lines) {
-      if (!line.trim()) continue;
-      // Tách cột bằng tab (khi copy từ Excel), dấu phẩy hoặc dấu chấm phẩy
-      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
-      
-      if (cols.length > 0 && cols[0]) {
-        let code = '', name = '', phone = '', address = '';
+                onClick={async () => {
+                  if (!importText.trim()) {
+                    alert('Vui lòng nhập hoặc dán dữ liệu!');
+                    return;
+                  }
+                  try {
+                    const lines = importText.split('\n');
+                    const items = [];
+                    for (let line of lines) {
+                      if (!line.trim()) continue;
+                      const cols = line.split(/\t|,|;/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+                      if (cols.length > 0 && cols[0]) {
+                        let code = '', name = '', phone = '', address = '';
+                        if (cols.length >= 4) {
+                          code = cols[0]; name = cols[1]; phone = cols[2]; address = cols.slice(3).join(', ');
+                        } else if (cols.length === 3) {
+                          name = cols[0]; phone = cols[1]; address = cols.slice(2).join(', ');
+                        } else if (cols.length === 2) {
+                          name = cols[0]; phone = cols[1];
+                        } else {
+                          name = cols[0];
+                        }
+                        items.push({ code, name, phone, address, status: 'active' });
+                      }
+                    }
 
-        // Tùy theo số cột người dùng dán vào
-        if (cols.length >= 4) {
-          code = cols[0];
-          name = cols[1];
-          phone = cols[2];
-          address = cols.slice(3).join(', ');
-        } else if (cols.length === 3) {
-          // Trường hợp dán 3 cột: Tên | SĐT | Địa chỉ (để trống mã để tự sinh)
-          name = cols[0];
-          phone = cols[1];
-          address = cols.slice(2).join(', ');
-        } else if (cols.length === 2) {
-          name = cols[0];
-          phone = cols[1];
-        } else {
-          name = cols[0];
-        }
+                    if (items.length === 0) {
+                      alert('Không đọc được dữ liệu hợp lệ!');
+                      return;
+                    }
 
-        items.push({ code, name, phone, address, status: 'active' });
-      }
-    }
+                    const res = await api('/api/suppliers/import', {
+                      method: 'POST',
+                      body: JSON.stringify({ items })
+                    });
 
-    if (items.length === 0) {
-      alert('Không đọc được dữ liệu hợp lệ. Vui lòng kiểm tra lại!');
-      return;
-    }
-
-    // Gửi lên API /api/suppliers/import
-    const res = await api('/api/suppliers/import', {
-      method: 'POST',
-      body: JSON.stringify({ items })
-    });
-
-    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount || items.length} nhà cung cấp!` });
-    setShowImportModal(false);
-    loadData();
-  } catch (err) {
-    alert('Lỗi nhập khẩu: ' + err.message);
-  }
-}}
+                    setMsg({ type: 'ok', text: `Nhập khẩu thành công ${res.successCount || items.length} nhà cung cấp!` });
+                    setShowImportModal(false);
+                    loadData();
+                  } catch (err) {
+                    alert('Lỗi nhập khẩu: ' + err.message);
+                  }
+                }}
                 style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Xác nhận nhập khẩu
