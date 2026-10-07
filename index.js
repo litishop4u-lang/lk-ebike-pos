@@ -202,16 +202,32 @@ export default {
       }
 
       // PUT /api/suppliers/:id — Sửa thông tin nhà cung cấp
-      if (pathname.startsWith('/api/suppliers/') && request.method === 'PUT') {
+      if (pathname.match(/^\/api\/suppliers\/\d+$/) && request.method === 'PUT') {
         const id = pathname.split('/')[3];
         const b = await request.json();
-        await db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ?, status = ? WHERE id = ?')
-          .bind(b.name, b.phone, b.address, b.status || 'active', id).run();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
+        
+        const code = String(b.code || '').trim() || 'NCC-DEFAULT';
+        const phone = String(b.phone || '').trim() || null;
+        const address = String(b.address || '').trim() || null;
+        const status = b.status || 'active';
+
+        try {
+          await db.prepare('UPDATE suppliers SET code = ?, name = ?, phone = ?, address = ?, status = ? WHERE id = ?')
+            .bind(code, name, phone, address, status, id).run();
+        } catch (err) {
+          if (err.message && err.message.includes('UNIQUE')) {
+            throw new HttpError(400, 'Trùng mã NCC');
+          }
+          throw err;
+        }
+
         return json({ success: true }, 200, origin);
       }
 
       // DELETE /api/suppliers/:id — Xóa nhà cung cấp
-      if (pathname.startsWith('/api/suppliers/') && request.method === 'DELETE') {
+      if (pathname.match(/^\/api\/suppliers\/\d+$/) && request.method === 'DELETE') {
         const id = pathname.split('/')[3];
         await db.prepare('DELETE FROM suppliers WHERE id = ?').bind(id).run();
         return json({ success: true }, 200, origin);
