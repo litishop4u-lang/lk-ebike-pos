@@ -361,12 +361,21 @@ export default {
 
         // 1. Lấy danh sách sản phẩm
       if (pathname === '/api/products' && request.method === 'GET') {
-        try {
-          const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
-          return json(results || [], 200, origin);
-        } catch (err) {
-          return json({ error: 'Lỗi tải danh sách sản phẩm: ' + err.message }, 500, origin);
-        }
+        const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
+        
+        // Chuẩn hóa lại dữ liệu trả về cho chắc chắn khớp với Frontend
+        const formattedProducts = (results || []).map(p => ({
+          id: p.id,
+          sku: p.sku || p.code || '',
+          name: p.name || '',
+          unit: p.unit || 'Cái',
+          import_price: p.import_price || p.cost_price || 0,
+          price: p.price || p.retail_price || 0,
+          wholesale_price: p.wholesale_price || 0,
+          stock: p.stock || p.quantity || 0
+        }));
+
+        return json(formattedProducts, 200, origin);
       }
 
       // 2. Thêm mới một sản phẩm
