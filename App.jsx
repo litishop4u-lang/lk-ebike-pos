@@ -79,12 +79,31 @@ export default function App() {
 
   // --- POS Logic ---
   const lines = useMemo(
-    () => products.filter((p) => cart[p.id]).map((p) => ({ ...p, quantity: cart[p.id] })),
+    () => products.filter((p) => cart[p.id]).map((p) => ({ 
+      ...p, 
+      quantity: cart[p.id], 
+      price: cart[p.id + '_price'] !== undefined ? cart[p.id + '_price'] : p.price,
+      discount: cart[p.id + '_discount'] || 0 
+    })),
     [products, cart]
   );
-  const total = lines.reduce((s, l) => s + l.price * l.quantity, 0);
+  const total = lines.reduce((s, l) => s + ((l.price * l.quantity) - l.discount), 0);
+  const debt = total - (Number(paidAmount) || 0);
 
-  const add = (p) => setCart((c) => ({ ...c, [p.id]: (c[p.id] || 0) + 1 }));
+  const add = (p) => {
+    setCart((c) => {
+      const next = { ...c, [p.id]: (c[p.id] || 0) + 1 };
+      // Nếu sản phẩm chưa có giá riêng trong giỏ, gán giá mặc định
+      if (!next[p.id + '_price']) {
+        next[p.id + '_price'] = p.price;
+      }
+      return next;
+    });
+  };
+
+  const setItemPrice = (id, price) => {
+    setCart((c) => ({ ...c, [id + '_price']: Number(price) || 0 }));
+  };
   const setQty = (id, q) =>
     setCart((c) => {
       const next = { ...c };
@@ -444,21 +463,23 @@ export default function App() {
                         cartLines.map((l) => {
                           const lineTotal = (l.price * l.quantity) - l.discount;
                           return (
-                            <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
-                              <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
-                              <td style={{ padding: '10px' }}>{l.unit || 'Cái'}</td>
-                              <td style={{ padding: '10px' }}>
-                                <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Number(e.target.value))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
-                              </td>
-                              <td style={{ padding: '10px' }}>{vnd(l.price)}</td>
-                              <td style={{ padding: '10px' }}>
-                                <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
-                              </td>
-                              <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(lineTotal)}</td>
-                              <td style={{ padding: '10px' }}>
-                                <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-                              </td>
-                            </tr>
+                           <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
+  <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
+  <td style={{ padding: '10px' }}>{l.unit || 'Cái'}</td>
+  <td style={{ padding: '10px' }}>
+    <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Number(e.target.value))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
+  </td>
+  <td style={{ padding: '10px' }}>
+    <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ width: '90px', padding: '4px', fontWeight: 'bold', color: '#7c3aed' }} />
+  </td>
+  <td style={{ padding: '10px' }}>
+    <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
+  </td>
+  <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((l.price * l.quantity) - l.discount)}</td>
+  <td style={{ padding: '10px' }}>
+    <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+  </td>
+</tr>
                           );
                         })
                       )}
