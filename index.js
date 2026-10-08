@@ -268,6 +268,18 @@ export default {
         return json({ success: true, ...r }, 201, origin);
       }
 
+      // GET /api/invoices — Lấy danh sách phiếu bán hàng
+      if (pathname === '/api/invoices' && request.method === 'GET') {
+        const res = await db.prepare('SELECT * FROM invoices ORDER BY id DESC').all();
+        return json(res.results || [], 200, origin);
+      }
+
+      // GET /api/orders — Lấy danh sách đơn đặt hàng
+      if (pathname === '/api/orders' && request.method === 'GET') {
+        const res = await db.prepare('SELECT * FROM orders ORDER BY id DESC').all();
+        return json(res.results || [], 200, origin);
+      }
+
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
