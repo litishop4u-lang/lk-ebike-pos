@@ -462,6 +462,82 @@ export default {
         return json({ ...po, items: itemsRes.results || [] }, 200, origin);
       }
 
+        // GET /api/customers — Lấy danh sách khách hàng kèm tổng hợp Mua hàng, Thanh toán, Công nợ
+      if (pathname === '/api/customers' && request.method === 'GET') {
+        const query = `
+          SELECT 
+            c.*,
+            COALESCE(i.total_purchased, 0) as total_purchased,
+            COALESCE(pay.total_paid, 0) as total_paid,
+            (COALESCE(i.total_purchased, 0) - COALESCE(pay.total_paid, 0)) as total_debt
+          FROM customers c
+          LEFT JOIN (
+            SELECT customer_name, SUM(total) as total_purchased 
+            FROM invoices 
+            GROUP BY customer_name
+          ) i ON c.name = i.customer_name
+          LEFT JOIN (
+            SELECT customer_name, SUM(amount) as total_paid 
+            FROM customer_payments 
+            GROUP BY customer_name
+          ) pay ON c.name = pay.customer_name
+          ORDER BY c.id DESC
+        `;
+        let results = [];
+        try {
+          const res = await db.prepare(query).all();
+          results = res.results || [];
+        } catch (e) {
+          // Nếu bảng chưa có, trả về mảng trống
+        }
+        return json(results, 200, origin);
+      }
+
+      // POST /api/customers — Thêm mới khách hàng
+      if (pathname === '/api/customers' && request.method === 'POST') {
+        const b = await request.json();
+        const name = String(b.name || '').trim();
+        if (!name) throw new HttpError(400, 'Thiếu tên khách hàng');
+        
+        const code = String(b.code || '').trim() || genCode('KH');
+        const phone = String(b.phone || '').trim() || null;
+        const address = String(b.address || '').trim() || null;
+
+        await db.prepare('INSERT INTO customers (code, name, phone, address) VALUES (?, ?, ?, ?)')
+          .bind(code, name, phone, address).run();
+          
+        return json({ success: true, code }, 201, origin);
+      }
+
+      // POST /api/customers/import — Nhập khẩu hàng loạt khách hàng
+      if (pathname === '/api/customers/import' && request.method === 'POST') {
+        const body = await request.json();
+        const items = body.items || [];
+        let successCount = 0;
+
+        for (const item of items) {
+          const name = String(item.name || '').trim();
+          if (!name) continue;
+          const code = String(item.code || '').trim() || genCode('KH');
+          const phone = String(item.phone || '').trim() || null;
+          const address = String(item.address || '').trim() || null;
+
+          try {
+            const existing = await db.prepare('SELECT id FROM customers WHERE code = ?').bind(code).first();
+            if (existing) {
+              await db.prepare('UPDATE customers SET name = ?, phone = ?, address = ? WHERE code = ?')
+                .bind(name, phone, address, code).run();
+            } else {
+              await db.prepare('INSERT INTO customers (code, name, phone, address) VALUES (?, ?, ?, ?)')
+                .bind(code, name, phone, address).run();
+            }
+            successCount++;
+          } catch (e) {}
+        }
+
+        return json({ success: true, successCount }, 200, origin);
+      }
+
       // Phục vụ giao diện Frontend
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
