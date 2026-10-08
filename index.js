@@ -287,8 +287,8 @@ export default {
         const code = genCode('DH');
 
         const stmts = [
-          db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .bind(code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method, 'Pending')
+          db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, created_at, status) VALUES (?, ?, ?, ?, ?, ?)')
+            .bind(code, customer_name, customer_phone, total, created_at, 'Pending')
         ];
 
         for (const item of items) {
@@ -297,7 +297,6 @@ export default {
             db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM orders WHERE code = ?), ?, ?, ?, ?, ?)')
               .bind(code, item.product_id, item.quantity, item.price, item.discount || 0, lineTotal)
           );
-          // Không trừ tồn kho ở đơn đặt hàng
         }
 
         await db.batch(stmts);
