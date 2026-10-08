@@ -14,7 +14,7 @@ async function api(path, options) {
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases'
+  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers'
   
   // States cho POS
   const [products, setProducts] = useState([]);
@@ -34,7 +34,6 @@ export default function App() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
   
-  // Quản lý danh sách phiếu nhập & popup tạo/xem phiếu nhập
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [showCreatePurchaseModal, setShowCreatePurchaseModal] = useState(false);
   const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
@@ -51,6 +50,13 @@ export default function App() {
   const [supplierTab, setSupplierTab] = useState('info');
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
+
+  // States cho Khách hàng
+  const [customers, setCustomers] = useState([]);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomerImportModal, setShowCustomerImportModal] = useState(false);
+  const [customerForm, setCustomerForm] = useState({ code: '', name: '', phone: '', address: '' });
+  const [customerImportText, setCustomerImportText] = useState('');
   
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -59,6 +65,7 @@ export default function App() {
     api('/api/products').then(setProducts).catch((e) => setMsg({ type: 'err', text: e.message }));
     api('/api/suppliers').then(setSuppliers).catch(() => {});
     api('/api/purchase_orders').then(setPurchaseOrders).catch(() => {});
+    api('/api/customers').then(setCustomers).catch(() => {});
   };
 
   useEffect(() => { loadData(); }, []);
@@ -182,7 +189,21 @@ export default function App() {
       setMsg({ type: 'ok', text: `Đã xóa phiếu nhập ${code} thành công!` });
       loadData();
     } catch (e) {
-      alert('Lỗi xóa phiếu nhập: ' + e.message);
+      alert('Lỗi: ' + e.message);
+    }
+  };
+
+  // --- Quản lý Khách hàng ---
+  const handleSaveCustomer = async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/customers', { method: 'POST', body: JSON.stringify(customerForm) });
+      setMsg({ type: 'ok', text: 'Đã thêm khách hàng mới thành công!' });
+      setShowCustomerModal(false);
+      setCustomerForm({ code: '', name: '', phone: '', address: '' });
+      loadData();
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
     }
   };
 
@@ -196,6 +217,7 @@ export default function App() {
           <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>Sản phẩm</button></li>
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
+          <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>Khách hàng</button></li>
         </ul>
       </aside>
 
@@ -443,23 +465,19 @@ export default function App() {
                           </span>
                         </td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                          {/* Nút Xem chi tiết */}
                           <button 
                             onClick={async () => {
                               try {
                                 const details = await api(`/api/purchase_orders/${po.id}`);
                                 setSelectedPurchaseOrder(details);
                                 setShowViewPurchaseModal(true);
-                              } catch (e) {
-                                alert('Không thể tải chi tiết phiếu nhập: ' + e.message);
-                              }
+                              } catch (e) { alert('Lỗi: ' + e.message); }
                             }}
                             title="Xem chi tiết"
                             style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
                           >
                             👁️
                           </button>
-                          {/* Nút Sửa */}
                           <button 
                             onClick={async () => {
                               try {
@@ -481,16 +499,13 @@ export default function App() {
                                 const foundSup = (suppliers || []).find(s => s.id === details.supplier_id);
                                 if (foundSup) setSupplierSearchKeyword(`${foundSup.name} (${foundSup.code})`);
                                 setShowCreatePurchaseModal(true);
-                              } catch (e) {
-                                alert('Không thể tải dữ liệu để sửa: ' + e.message);
-                              }
+                              } catch (e) { alert('Lỗi: ' + e.message); }
                             }}
                             title="Chỉnh sửa"
                             style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
                           >
                             ✏️
                           </button>
-                          {/* Nút Xóa */}
                           <button 
                             onClick={() => handleDeletePurchaseOrder(po.id, po.code)}
                             title="Xóa phiếu"
@@ -507,9 +522,53 @@ export default function App() {
             </table>
           </div>
         )}
+
+        {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
+        {currentView === 'customers' && (
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customers.length})</h2>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
+                <button onClick={() => { setCustomerForm({ code: '', name: '', phone: '', address: '' }); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
+              </div>
+            </div>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                  <th style={{ padding: '12px' }}>Mã KH</th>
+                  <th style={{ padding: '12px' }}>Tên khách hàng</th>
+                  <th style={{ padding: '12px' }}>Số điện thoại</th>
+                  <th style={{ padding: '12px' }}>Địa chỉ</th>
+                  <th style={{ padding: '12px' }}>Tổng mua</th>
+                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
+                  <th style={{ padding: '12px' }}>Công nợ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customers.length === 0 ? (
+                  <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có khách hàng nào.</td></tr>
+                ) : (
+                  customers.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '12px' }}>{c.code}</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{c.name}</td>
+                      <td style={{ padding: '12px' }}>{c.phone || '-'}</td>
+                      <td style={{ padding: '12px' }}>{c.address || '-'}</td>
+                      <td style={{ padding: '12px' }}>{vnd(c.total_purchased)}</td>
+                      <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(c.total_paid)}</td>
+                      <td style={{ padding: '12px', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </main>
 
-      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP (CÓ ĐẦY ĐỦ DANH SÁCH SẢN PHẨM) */}
+      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
       {showViewPurchaseModal && selectedPurchaseOrder && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
@@ -923,6 +982,51 @@ export default function App() {
                   const res = await api('/api/suppliers/import', { method: 'POST', body: JSON.stringify({ items }) });
                   setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} nhà cung cấp!` });
                   setShowImportModal(false); loadData();
+                } catch (err) { alert(err.message); }
+              }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THÊM KHÁCH HÀNG */}
+      {showCustomerModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px' }}>
+            <h3 style={{ marginTop: 0 }}>Thêm khách hàng mới</h3>
+            <form onSubmit={handleSaveCustomer}>
+              <div style={{ marginBottom: '10px' }}><label>Mã KH (tự sinh nếu trống):</label><input value={customerForm.code} onChange={e => setCustomerForm({...customerForm, code: e.target.value})} style={inputStyle} /></div>
+              <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={e => setCustomerForm({...customerForm, name: e.target.value})} style={inputStyle} required /></div>
+              <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={e => setCustomerForm({...customerForm, phone: e.target.value})} style={inputStyle} /></div>
+              <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={e => setCustomerForm({...customerForm, address: e.target.value})} style={inputStyle} /></div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" onClick={() => setShowCustomerModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
+                <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL IMPORT KHÁCH HÀNG */}
+      {showCustomerImportModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
+            <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Khách hàng</h3>
+            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã KH | Tên KH | SĐT | Địa chỉ</code></p>
+            <textarea rows="8" placeholder="KH01\tNguyễn Văn A\t0901234567\tQuận 1" value={customerImportText} onChange={e => setCustomerImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace' }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
+              <button onClick={() => setShowCustomerImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+              <button onClick={async () => {
+                try {
+                  const lines = customerImportText.split('\n');
+                  const items = lines.map(l => {
+                    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
+                    return c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null;
+                  }).filter(Boolean);
+                  const res = await api('/api/customers/import', { method: 'POST', body: JSON.stringify({ items }) });
+                  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} khách hàng!` });
+                  setShowCustomerImportModal(false); loadData();
                 } catch (err) { alert(err.message); }
               }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
             </div>
