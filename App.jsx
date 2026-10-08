@@ -129,45 +129,7 @@ export default function App() {
   const setItemPrice = (id, price) => setCart((c) => ({ ...c, [id + '_price']: Number(price) || 0 }));
   const setDiscount = (id, d) => setCart((c) => ({ ...c, [id + '_discount']: Number(d) || 0 }));
 
-  // Xử lý submit tạo đơn từ Popup
-  async function handlePosSubmit() {
-    setBusy(true); setMsg(null);
-    try {
-      if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
-      if (lines.length === 0) throw new Error('Giỏ hàng trống!');
-
-      if (modalOrderType === 'invoices') {
-        for (const l of lines) {
-          if (l.stock < l.quantity) {
-            throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
-          }
-        }
-      }
-
-      const body = {
-        customer_name: posCustomer.name,
-        customer_phone: posCustomer.phone,
-        address: posCustomer.address,
-        created_at: new Date(orderDate).toISOString(),
-        payment_method: paymentMethod,
-        paid_amount: Number(paidAmount) || 0,
-        items: lines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
-      };
-
-      const r = await api(`/api/${modalOrderType}`, { method: 'POST', body: JSON.stringify(body) });
-      setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công!` });
-      setCart({});
-      setPosCustomer({ name: '', phone: '', address: '' });
-      setCustomerSearch('');
-      setPaidAmount(0);
-      setShowOrderModal(false);
-      loadData();
-    } catch (e) {
-      alert('Lỗi: ' + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+ 
   const setQty = (id, q) =>
     setCart((c) => {
       const next = { ...c };
