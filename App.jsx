@@ -58,8 +58,16 @@ export default function App() {
   const [customerForm, setCustomerForm] = useState({ code: '', name: '', phone: '', address: '' });
   const [customerImportText, setCustomerImportText] = useState('');
   
+  
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // Bổ sung các state này vào khu vực Khách hàng hiện có của bạn
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
+  const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
+  const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
+  const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
 
   const loadData = () => {
     api('/api/products').then(setProducts).catch((e) => setMsg({ type: 'err', text: e.message }));
@@ -179,6 +187,50 @@ export default function App() {
     } catch (e) {
       setMsg({ type: 'err', text: e.message });
     }
+  };
+
+    // --- Thêm / Sửa / Xóa Khách hàng (Bổ sung) ---
+  const handleSaveCustomer = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingCustomer) {
+        await api(`/api/customers/${editingCustomer.id}`, { method: 'PUT', body: JSON.stringify(customerForm) });
+        setMsg({ type: 'ok', text: 'Đã cập nhật khách hàng thành công!' });
+      } else {
+        await api('/api/customers', { method: 'POST', body: JSON.stringify(customerForm) });
+        setMsg({ type: 'ok', text: 'Đã thêm khách hàng mới thành công!' });
+      }
+      setShowCustomerModal(false);
+      setEditingCustomer(null);
+      setCustomerForm({ code: '', name: '', phone: '', address: '' });
+      loadData();
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
+
+  const handleDeleteCustomer = async (id, name) => {
+    if (!confirm(`Bạn có chắc muốn xóa khách hàng ${name}?`)) return;
+    try {
+      await api(`/api/customers/${id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: `Đã xóa khách hàng ${name} thành công!` });
+      setShowCustomerDetailModal(false);
+      loadData();
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
+    }
+  };
+
+  const openCustomerDetail = async (c) => {
+    setSelectedCustomerDetail(c);
+    setCustomerDetailTab('orders');
+    try {
+      const data = await api(`/api/customers/${c.id}/history`);
+      setCustomerDetailData(data);
+    } catch (e) {
+      setCustomerDetailData({ invoices: [], payments: [] });
+    }
+    setShowCustomerDetailModal(true);
   };
 
   // --- Xóa Phiếu Nhập ---
@@ -525,47 +577,52 @@ export default function App() {
 
         {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
         {currentView === 'customers' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customers.length})</h2>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
-                <button onClick={() => { setCustomerForm({ code: '', name: '', phone: '', address: '' }); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
-              </div>
-            </div>
+  <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customers.length})</h2>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
+        <button onClick={() => { setEditingCustomer(null); setCustomerForm({ code: '', name: '', phone: '', address: '' }); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
+      </div>
+    </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Mã KH</th>
-                  <th style={{ padding: '12px' }}>Tên khách hàng</th>
-                  <th style={{ padding: '12px' }}>Số điện thoại</th>
-                  <th style={{ padding: '12px' }}>Địa chỉ</th>
-                  <th style={{ padding: '12px' }}>Tổng mua</th>
-                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
-                  <th style={{ padding: '12px' }}>Công nợ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customers.length === 0 ? (
-                  <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có khách hàng nào.</td></tr>
-                ) : (
-                  customers.map((c) => (
-                    <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '12px' }}>{c.code}</td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{c.name}</td>
-                      <td style={{ padding: '12px' }}>{c.phone || '-'}</td>
-                      <td style={{ padding: '12px' }}>{c.address || '-'}</td>
-                      <td style={{ padding: '12px' }}>{vnd(c.total_purchased)}</td>
-                      <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(c.total_paid)}</td>
-                      <td style={{ padding: '12px', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+          <th style={{ padding: '12px' }}>Mã KH</th>
+          <th style={{ padding: '12px' }}>Tên khách hàng</th>
+          <th style={{ padding: '12px' }}>Số điện thoại</th>
+          <th style={{ padding: '12px' }}>Địa chỉ</th>
+          <th style={{ padding: '12px' }}>Tổng mua</th>
+          <th style={{ padding: '12px' }}>Đã thanh toán</th>
+          <th style={{ padding: '12px' }}>Công nợ</th>
+          <th style={{ padding: '12px', textAlign: 'center' }}>Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {customers.length === 0 ? (
+          <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có khách hàng nào.</td></tr>
+        ) : (
+          customers.map((c) => (
+            <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+              <td style={{ padding: '12px' }}>{c.code}</td>
+              <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
+              <td style={{ padding: '12px' }}>{c.phone || '-'}</td>
+              <td style={{ padding: '12px' }}>{c.address || '-'}</td>
+              <td style={{ padding: '12px' }}>{vnd(c.total_purchased)}</td>
+              <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(c.total_paid)}</td>
+              <td style={{ padding: '12px', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
+              <td style={{ padding: '12px', textAlign: 'center' }}>
+                <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
+                <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
+              </td>
+            </tr>
+          ))
         )}
+      </tbody>
+    </table>
+  </div>
+)}
       </main>
 
       {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
@@ -1042,9 +1099,121 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showCustomerDetailModal && selectedCustomerDetail && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, color: '#7c3aed' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
+              <button onClick={() => setShowCustomerDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '20px' }}>
+              <button onClick={() => setCustomerDetailTab('orders')} style={tabBtnStyle(customerDetailTab === 'orders')}>📦 Đơn Hàng</button>
+              <button onClick={() => setCustomerDetailTab('payments')} style={tabBtnStyle(customerDetailTab === 'payments')}>💰 Lịch Sử Thanh Toán</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{customerDetailData.invoices.length}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#16a34a' }}>{vnd(selectedCustomerDetail.total_purchased)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Tổng chi tiêu</div>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(selectedCustomerDetail.total_paid)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Đã thanh toán</div>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: selectedCustomerDetail.total_debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedCustomerDetail.total_debt)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ</div>
+              </div>
+            </div>
+
+            {customerDetailTab === 'orders' && (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <h4>Danh sách đơn hàng</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                      <th style={{ padding: '10px' }}>Mã ĐH</th>
+                      <th style={{ padding: '10px' }}>Ngày</th>
+                      <th style={{ padding: '10px' }}>Tổng tiền</th>
+                      <th style={{ padding: '10px' }}>Đã TT</th>
+                      <th style={{ padding: '10px' }}>Còn nợ</th>
+                      <th style={{ padding: '10px' }}>Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerDetailData.invoices.length === 0 ? (
+                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
+                    ) : (
+                      customerDetailData.invoices.map((inv) => (
+                        <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
+                          <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                          <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
+                          <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount || inv.total)}</td>
+                          <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt || 0)}</td>
+                          <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Completed</span></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {customerDetailTab === 'payments' && (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <h4>Lịch sử giao dịch thanh toán</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                      <th style={{ padding: '10px' }}>Mã GD</th>
+                      <th style={{ padding: '10px' }}>Ngày</th>
+                      <th style={{ padding: '10px' }}>Số tiền</th>
+                      <th style={{ padding: '10px' }}>Phương thức</th>
+                      <th style={{ padding: '10px' }}>Nội dung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerDetailData.payments.length === 0 ? (
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
+                    ) : (
+                      customerDetailData.payments.map((pay) => (
+                        <tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px', fontWeight: 'bold' }}>{pay.code || `GD-${pay.id}`}</td>
+                          <td style={{ padding: '10px' }}>{pay.created_at ? new Date(pay.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(pay.amount)}</td>
+                          <td style={{ padding: '10px' }}>{pay.method || 'Tiền mặt'}</td>
+                          <td style={{ padding: '10px' }}>{pay.note || 'Thanh toán đơn hàng'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button onClick={() => setShowCustomerDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+      
+    </div>
+  );
+}
+
+  
 
 const navBtnStyle = (active) => ({ width: '100%', padding: '10px 15px', background: active ? '#0284c7' : 'transparent', color: '#fff', border: 'none', borderRadius: '6px', textAlign: 'left', cursor: 'pointer', fontWeight: active ? 'bold' : 'normal' });
 const tabBtnStyle = (active) => ({ flex: 1, padding: '12px', background: active ? '#fff' : 'transparent', border: 'none', borderBottom: active ? '3px solid #0284c7' : 'none', fontWeight: active ? 'bold' : 'normal', color: active ? '#0284c7' : '#64748b', cursor: 'pointer' });
