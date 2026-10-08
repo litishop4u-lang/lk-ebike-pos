@@ -2,42 +2,57 @@ import { useEffect, useMemo, useState } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
 const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
+// Chuyển chuỗi số kiểu "1,500,000" / "1.500.000 ₫" thành số
+const num = (s) => Number(String(s ?? '').replace(/[.,\s₫]/g, '')) || 0;
+const splitRow = (l) => l.split(/\t|;/).map((x) => x.trim().replace(/^["']|["']$/g, ''));
 
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Có lỗi xảy ra');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Có lỗi xảy ra (${res.status})`);
   return data;
 }
 
+const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 };
+const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'active' };
+const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
+
 export default function App() {
   const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers'
-  
-  // States cho POS
+
+  // ===== States cho POS (đưa lên cấp App để không vi phạm Rules of Hooks) =====
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState({});
-  const [customer, setCustomer] = useState({ customer_name: '', customer_phone: '', note: '' });
-  
-  // States cho Quản lý Sản phẩm
+  const [orderType, setOrderType] = useState('invoices'); // 'invoices' | 'orders'
+  const [paymentMethod, setPaymentMethod] = useState('Tiền mặt');
+  const [paidAmount, setPaidAmount] = useState(0);
+  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
+  const [posProductKeyword, setPosProductKeyword] = useState('');
+
+  // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
   const [showProductImportModal, setShowProductImportModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
-  const [productForm, setProductForm] = useState({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
+  const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [productImportText, setProductImportText] = useState('');
 
-  // States cho Nhà cung cấp & Nhập hàng
+  // ===== States cho Nhà cung cấp & Nhập hàng =====
   const [suppliers, setSuppliers] = useState([]);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
-  
+
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [showCreatePurchaseModal, setShowCreatePurchaseModal] = useState(false);
   const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
   const [showViewPurchaseModal, setShowViewPurchaseModal] = useState(false);
+  const [editingPurchaseId, setEditingPurchaseId] = useState(null);
 
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
   const [purchaseItems, setPurchaseItems] = useState([]);
@@ -45,28 +60,26 @@ export default function App() {
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
 
-  const [supplierForm, setSupplierForm] = useState({ code: '', name: '', phone: '', address: '', status: 'active' });
+  const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [supplierTab, setSupplierTab] = useState('info');
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
 
-  // States cho Khách hàng
+  // ===== States cho Khách hàng =====
   const [customers, setCustomers] = useState([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showCustomerImportModal, setShowCustomerImportModal] = useState(false);
-  const [customerForm, setCustomerForm] = useState({ code: '', name: '', phone: '', address: '' });
+  const [customerForm, setCustomerForm] = useState(EMPTY_CUSTOMER);
   const [customerImportText, setCustomerImportText] = useState('');
-  
-  const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  // Bổ sung các state này vào khu vực Khách hàng hiện có của bạn
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
   const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
   const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
   const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
+
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const loadData = () => {
     api('/api/products').then(setProducts).catch((e) => setMsg({ type: 'err', text: e.message }));
@@ -77,73 +90,101 @@ export default function App() {
 
   useEffect(() => { loadData(); }, []);
 
-  // --- POS Logic ---
-  const lines = useMemo(
-    () => products.filter((p) => cart[p.id]).map((p) => ({ 
-      ...p, 
-      quantity: cart[p.id], 
+  // ===== POS Logic =====
+  const cartLines = useMemo(
+    () => products.filter((p) => cart[p.id]).map((p) => ({
+      ...p,
+      quantity: cart[p.id],
       price: cart[p.id + '_price'] !== undefined ? cart[p.id + '_price'] : p.price,
-      discount: cart[p.id + '_discount'] || 0 
+      discount: cart[p.id + '_discount'] || 0,
     })),
     [products, cart]
   );
-  const total = lines.reduce((s, l) => s + ((l.price * l.quantity) - l.discount), 0);
-  const debt = total - (Number(paidAmount) || 0);
+  const cartTotal = cartLines.reduce((s, l) => s + ((l.price * l.quantity) - l.discount), 0);
+  const cartDebt = cartTotal - (Number(paidAmount) || 0);
 
   const add = (p) => {
     setCart((c) => {
       const next = { ...c, [p.id]: (c[p.id] || 0) + 1 };
-      // Nếu sản phẩm chưa có giá riêng trong giỏ, gán giá mặc định
-      if (!next[p.id + '_price']) {
-        next[p.id + '_price'] = p.price;
-      }
+      if (next[p.id + '_price'] === undefined) next[p.id + '_price'] = p.price;
       return next;
     });
   };
 
-  const setItemPrice = (id, price) => {
-    setCart((c) => ({ ...c, [id + '_price']: Number(price) || 0 }));
-  };
+  const setItemPrice = (id, price) => setCart((c) => ({ ...c, [id + '_price']: Number(price) || 0 }));
+  const setDiscount = (id, d) => setCart((c) => ({ ...c, [id + '_discount']: Number(d) || 0 }));
   const setQty = (id, q) =>
     setCart((c) => {
       const next = { ...c };
-      if (q <= 0) delete next[id]; else next[id] = q;
+      if (q <= 0) {
+        delete next[id];
+        delete next[id + '_price'];
+        delete next[id + '_discount'];
+      } else {
+        next[id] = q;
+      }
       return next;
     });
 
-  async function submit(kind) {
+  const handlePosSubmit = async () => {
     setBusy(true); setMsg(null);
     try {
+      if (!posCustomer.name.trim()) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
+      if (cartLines.length === 0) throw new Error('Giỏ hàng trống!');
+
+      if (orderType === 'invoices') {
+        for (const l of cartLines) {
+          if (l.stock < l.quantity) {
+            throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
+          }
+        }
+      }
+
       const body = {
-        ...customer,
-        items: lines.map((l) => ({ product_id: l.id, quantity: l.quantity })),
+        customer_name: posCustomer.name.trim(),
+        customer_phone: posCustomer.phone,
+        address: posCustomer.address,
+        created_at: new Date(orderDate).toISOString(),
+        payment_method: paymentMethod,
+        paid_amount: Number(paidAmount) || 0,
+        items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount })),
       };
-      const r = await api(`/api/${kind}`, { method: 'POST', body: JSON.stringify(body) });
-      setMsg({ type: 'ok', text: `${kind === 'orders' ? 'Đã lưu đơn đặt hàng' : 'Đã xuất phiếu bán hàng'} ${r.code} — ${vnd(r.total)}` });
+
+      const r = await api(`/api/${orderType}`, { method: 'POST', body: JSON.stringify(body) });
+      setMsg({ type: 'ok', text: `Tạo ${orderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công — Tổng: ${vnd(r.total)}` });
       setCart({});
-      setCustomer({ customer_name: '', customer_phone: '', note: '' });
+      setPosCustomer({ name: '', phone: '', address: '' });
+      setCustomerSearch('');
+      setPaidAmount(0);
       loadData();
     } catch (e) {
       setMsg({ type: 'err', text: e.message });
     } finally {
       setBusy(false);
     }
-  }
+  };
 
-  // --- Quản lý Sản phẩm ---
+  // ===== Quản lý Sản phẩm =====
   const handleSaveProduct = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...productForm,
+        import_price: Number(productForm.import_price) || 0,
+        price: Number(productForm.price) || 0,
+        wholesale_price: Number(productForm.wholesale_price) || 0,
+        stock: Number(productForm.stock) || 0,
+      };
       if (editingProduct) {
-        await api(`/api/products/${editingProduct.id}`, { method: 'PUT', body: JSON.stringify(productForm) });
+        await api(`/api/products/${editingProduct.id}`, { method: 'PUT', body: JSON.stringify(payload) });
         setMsg({ type: 'ok', text: 'Đã cập nhật sản phẩm thành công!' });
       } else {
-        await api('/api/products', { method: 'POST', body: JSON.stringify(productForm) });
+        await api('/api/products', { method: 'POST', body: JSON.stringify(payload) });
         setMsg({ type: 'ok', text: 'Đã thêm sản phẩm thành công!' });
       }
       setShowProductModal(false);
       setEditingProduct(null);
-      setProductForm({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
+      setProductForm(EMPTY_PRODUCT);
       loadData();
     } catch (err) {
       setMsg({ type: 'err', text: err.message });
@@ -161,7 +202,7 @@ export default function App() {
     }
   };
 
-  // --- Quản lý Nhà cung cấp ---
+  // ===== Quản lý Nhà cung cấp =====
   const openSupplierDetail = async (s) => {
     setSelectedSupplier(s);
     setEditingSupplier(s);
@@ -187,7 +228,7 @@ export default function App() {
         setMsg({ type: 'ok', text: 'Đã thêm nhà cung cấp mới thành công' });
       }
       setShowSupplierModal(false);
-      setSupplierForm({ code: '', name: '', phone: '', address: '', status: 'active' });
+      setSupplierForm(EMPTY_SUPPLIER);
       setEditingSupplier(null);
       loadData();
     } catch (err) {
@@ -207,7 +248,7 @@ export default function App() {
     }
   };
 
-  // --- Thêm / Sửa / Xóa Khách hàng ---
+  // ===== Khách hàng =====
   const handleSaveCustomer = async (e) => {
     e.preventDefault();
     try {
@@ -217,13 +258,19 @@ export default function App() {
       } else {
         await api('/api/customers', { method: 'POST', body: JSON.stringify(customerForm) });
         setMsg({ type: 'ok', text: 'Đã thêm khách hàng mới thành công!' });
+        // Nếu thêm từ màn POS thì chọn luôn khách vừa tạo
+        if (currentView === 'pos') {
+          setPosCustomer({ name: customerForm.name, phone: customerForm.phone || '', address: customerForm.address || '' });
+          setCustomerSearch(customerForm.name);
+          setShowCustomerDropdown(false);
+        }
       }
       setShowCustomerModal(false);
       setEditingCustomer(null);
-      setCustomerForm({ code: '', name: '', phone: '', address: '' });
+      setCustomerForm(EMPTY_CUSTOMER);
       loadData();
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      setMsg({ type: 'err', text: err.message });
     }
   };
 
@@ -235,7 +282,7 @@ export default function App() {
       setShowCustomerDetailModal(false);
       loadData();
     } catch (e) {
-      alert('Lỗi: ' + e.message);
+      setMsg({ type: 'err', text: e.message });
     }
   };
 
@@ -244,14 +291,14 @@ export default function App() {
     setCustomerDetailTab('orders');
     try {
       const data = await api(`/api/customers/${c.id}/history`);
-      setCustomerDetailData(data);
+      setCustomerDetailData({ invoices: data.invoices || [], payments: data.payments || [] });
     } catch (e) {
       setCustomerDetailData({ invoices: [], payments: [] });
     }
     setShowCustomerDetailModal(true);
   };
 
-  // --- Xóa Phiếu Nhập ---
+  // ===== Phiếu nhập =====
   const handleDeletePurchaseOrder = async (id, code) => {
     if (!confirm(`Bạn có chắc muốn xóa phiếu nhập ${code}? Thao tác này sẽ hoàn lại số lượng tồn kho!`)) return;
     try {
@@ -259,9 +306,99 @@ export default function App() {
       setMsg({ type: 'ok', text: `Đã xóa phiếu nhập ${code} thành công!` });
       loadData();
     } catch (e) {
-      alert('Lỗi: ' + e.message);
+      setMsg({ type: 'err', text: e.message });
     }
   };
+
+  const openCreatePurchase = () => {
+    setEditingPurchaseId(null);
+    setPurchaseItems([]);
+    setPurchaseForm({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
+    setSupplierSearchKeyword('');
+    setProductSearchKeyword('');
+    setShowCreatePurchaseModal(true);
+  };
+
+  const openEditPurchase = async (po) => {
+    try {
+      const details = await api(`/api/purchase_orders/${po.id}`);
+      setEditingPurchaseId(po.id);
+      setPurchaseForm({
+        supplier_id: details.supplier_id,
+        payment_method: details.payment_method || 'Tiền mặt',
+        paid_amount: details.paid_amount || 0,
+      });
+      setPurchaseItems((details.items || []).map((i) => ({
+        product_id: i.product_id,
+        name: i.product_name,
+        sku: i.sku,
+        unit: i.unit || 'Cái',
+        quantity: i.quantity,
+        price: i.price,
+        discount: i.discount || 0,
+      })));
+      const foundSup = (suppliers || []).find((s) => s.id === details.supplier_id);
+      setSupplierSearchKeyword(foundSup ? `${foundSup.name} (${foundSup.code})` : '');
+      setProductSearchKeyword('');
+      setShowCreatePurchaseModal(true);
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+  };
+
+  const handleSavePurchase = async () => {
+    if (!purchaseForm.supplier_id) return alert('Vui lòng chọn nhà cung cấp!');
+    if (purchaseItems.length === 0) return alert('Vui lòng chọn sản phẩm nhập kho!');
+    try {
+      const url = editingPurchaseId ? `/api/purchase_orders/${editingPurchaseId}` : '/api/purchase_orders';
+      await api(url, {
+        method: editingPurchaseId ? 'PUT' : 'POST',
+        body: JSON.stringify({
+          supplier_id: purchaseForm.supplier_id,
+          payment_method: purchaseForm.payment_method,
+          paid_amount: Number(purchaseForm.paid_amount) || 0,
+          items: purchaseItems,
+        }),
+      });
+      setMsg({ type: 'ok', text: editingPurchaseId ? 'Cập nhật phiếu nhập thành công!' : 'Lưu phiếu nhập hàng thành công!' });
+      setShowCreatePurchaseModal(false);
+      setEditingPurchaseId(null);
+      loadData();
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
+
+  const updatePurchaseItem = (index, patch) =>
+    setPurchaseItems((items) => items.map((it, idx) => (idx === index ? { ...it, ...patch } : it)));
+
+  // ===== Import =====
+  const runImport = async ({ text, endpoint, mapRow, label, close }) => {
+    try {
+      const items = text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitRow).map(mapRow).filter(Boolean);
+      if (items.length === 0) {
+        alert('Không đọc được dữ liệu hợp lệ! Vui lòng kiểm tra lại định dạng (cột cách nhau bằng Tab hoặc dấu ;).');
+        return;
+      }
+      const res = await api(endpoint, { method: 'POST', body: JSON.stringify({ items }) });
+      setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} ${label}!` });
+      close(false);
+      loadData();
+    } catch (err) {
+      alert('Lỗi chi tiết: ' + err.message);
+    }
+  };
+
+  const filteredPosProducts = (products || []).filter((p) =>
+    p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
+    (p.sku && p.sku.toLowerCase().includes(posProductKeyword.toLowerCase()))
+  );
+
+  const filteredPosCustomers = (customers || []).filter((c) =>
+    c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+    (c.phone && c.phone.includes(customerSearch)) ||
+    (c.code || '').toLowerCase().includes(customerSearch.toLowerCase())
+  );
 
   return (
     <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
@@ -281,278 +418,216 @@ export default function App() {
       <main className="main-content" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
         {msg && <div style={{ padding: '10px', marginBottom: '15px', borderRadius: '6px', background: msg.type === 'ok' ? '#dcfce7' : '#fee2e2', color: msg.type === 'ok' ? '#166534' : '#991b1b' }}>{msg.text}</div>}
 
-        {/* 1. MÀN HÌNH TẠO ĐƠN HÀNG (POS - GIAO DIỆN CHUẨN MẪU) */}
-        {currentView === 'pos' && (() => {
-          // Khởi tạo các state riêng phục vụ giao diện POS này nếu chưa có trong file gốc
-          const [orderType, setOrderType] = useState('invoices'); // 'invoices' | 'orders'
-          const [paymentMethod, setPaymentMethod] = useState('Tiền mặt');
-          const [paidAmount, setPaidAmount] = useState(0);
-          const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
-          const [customerSearch, setCustomerSearch] = useState('');
-          const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-          const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
-          const [productSearchKeyword, setProductSearchKeyword] = useState('');
-
-          const cartLines = products.filter((p) => cart[p.id]).map((p) => ({ ...p, quantity: cart[p.id], discount: cart[p.id + '_discount'] || 0 }));
-          const cartTotal = cartLines.reduce((s, l) => s + ((l.price * l.quantity) - l.discount), 0);
-          const cartDebt = cartTotal - (Number(paidAmount) || 0);
-
-          const setDiscount = (id, d) => setCart((c) => ({ ...c, [id + '_discount']: Number(d) || 0 }));
-
-          const handlePosSubmit = async () => {
-            setBusy(true); setMsg(null);
-            try {
-              if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
-              if (cartLines.length === 0) throw new Error('Giỏ hàng trống!');
-
-              if (orderType === 'invoices') {
-                for (const l of cartLines) {
-                  if (l.stock < l.quantity) {
-                    throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
-                  }
-                }
-              }
-
-              const body = {
-                customer_name: posCustomer.name,
-                customer_phone: posCustomer.phone,
-                address: posCustomer.address,
-                created_at: new Date(orderDate).toISOString(),
-                payment_method: paymentMethod,
-                paid_amount: Number(paidAmount) || 0,
-                items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
-              };
-
-              const r = await api(`/api/${orderType}`, { method: 'POST', body: JSON.stringify(body) });
-              setMsg({ type: 'ok', text: `Tạo ${orderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công — Tổng: ${vnd(r.total)}` });
-              setCart({});
-              setPosCustomer({ name: '', phone: '', address: '' });
-              setCustomerSearch('');
-              setPaidAmount(0);
-              loadData();
-            } catch (e) {
-              alert('Lỗi: ' + e.message);
-              setMsg({ type: 'err', text: e.message });
-            } finally {
-              setBusy(false);
-            }
-          };
-
-          return (
-            <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: '24px' }}>
-              {/* Cột trái: Tìm kiếm & chọn sản phẩm */}
-              <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                  <input 
-                    placeholder="Gõ mã hoặc tên sản phẩm..." 
-                    value={productSearchKeyword} 
-                    onChange={(e) => setProductSearchKeyword(e.target.value)} 
-                    style={{ ...inputStyle, margin: 0 }} 
-                  />
-                  <button onClick={() => {}} style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
-                </div>
-
-                <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-                  {(products || []).filter(p => 
-                    p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) || 
-                    (p.sku && p.sku.toLowerCase().includes(productSearchKeyword.toLowerCase()))
-                  ).map((p) => {
-                    const isOutOfStock = p.stock <= 0;
-                    return (
-                      <div 
-                        key={p.id} 
-                        onClick={() => add(p)}
-                        style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isOutOfStock ? '#fffbeb' : '#fff' }}
-                      >
-                        <div>
-                          <strong style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</strong><br />
-                          <small style={{ color: isOutOfStock ? '#dc2626' : '#64748b' }}>
-                            {isOutOfStock ? 'Hết (Cho phép đặt)' : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
-                          </small>
-                        </div>
-                        <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>
-                          {vnd(p.price)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+        {/* 1. MÀN HÌNH TẠO ĐƠN HÀNG (POS) */}
+        {currentView === 'pos' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: '24px' }}>
+            {/* Cột trái: Tìm kiếm & chọn sản phẩm */}
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                <input
+                  placeholder="Gõ mã hoặc tên sản phẩm..."
+                  value={posProductKeyword}
+                  onChange={(e) => setPosProductKeyword(e.target.value)}
+                  style={{ ...inputStyle, margin: 0 }}
+                />
+                <button
+                  onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
+                  title="Thêm sản phẩm mới"
+                  style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >+</button>
               </div>
 
-              {/* Cột phải: Thông tin đơn hàng & chi tiết giỏ hàng */}
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Ngày tạo đơn / phiếu bán:</label>
-                  <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
-                </div>
-
-                <div style={{ marginBottom: '15px', position: 'relative' }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Khách hàng:</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input 
-                      placeholder="Gõ tên, SĐT hoặc mã khách hàng..." 
-                      value={customerSearch}
-                      onChange={(e) => {
-                        setCustomerSearch(e.target.value);
-                        setShowCustomerDropdown(true);
-                      }}
-                      onFocus={() => setShowCustomerDropdown(true)}
-                      style={{ ...inputStyle, margin: 0, flex: 1 }}
-                    />
-                    <button 
-                      onClick={() => { setEditingCustomer(null); setCustomerForm({ code: '', name: '', phone: '', address: '' }); setShowCustomerModal(true); }}
-                      title="Thêm khách hàng mới"
-                      style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }}
+              <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                {filteredPosProducts.map((p) => {
+                  const isOutOfStock = p.stock <= 0;
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => add(p)}
+                      style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isOutOfStock ? '#fffbeb' : '#fff' }}
                     >
-                      +
-                    </button>
-                  </div>
-
-                  {showCustomerDropdown && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 45, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '160px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                      {(customers || []).filter(c => 
-                        c.name.toLowerCase().includes(customerSearch.toLowerCase()) || 
-                        (c.phone && c.phone.includes(customerSearch)) || 
-                        c.code.toLowerCase().includes(customerSearch.toLowerCase())
-                      ).map(c => (
-                        <div 
-                          key={c.id}
-                          onClick={() => {
-                            setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '' });
-                            setCustomerSearch(c.name);
-                            setShowCustomerDropdown(false);
-                          }}
-                          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
-                        >
-                          <b>{c.name}</b> - <span style={{ color: '#64748b' }}>{c.phone || 'Chưa có SĐT'} ({c.code})</span>
-                        </div>
-                      ))}
+                      <div>
+                        <strong style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</strong><br />
+                        <small style={{ color: isOutOfStock ? '#dc2626' : '#64748b' }}>
+                          {isOutOfStock ? 'Hết (Cho phép đặt)' : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
+                        </small>
+                      </div>
+                      <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(p.price)}</div>
                     </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Số điện thoại:</label>
-                    <input value={posCustomer.phone} onChange={(e) => setPosCustomer({ ...posCustomer, phone: e.target.value })} placeholder="SĐT khách hàng..." style={{ ...inputStyle, margin: 0 }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Địa chỉ:</label>
-                    <input value={posCustomer.address} onChange={(e) => setPosCustomer({ ...posCustomer, address: e.target.value })} placeholder="Địa chỉ khách hàng..." style={{ ...inputStyle, margin: 0 }} />
-                  </div>
-                </div>
-
-                <h4 style={{ margin: '10px 0 5px 0' }}>Chi tiết đơn hàng</h4>
-                <div style={{ flex: 1, minHeight: '160px', maxHeight: '220px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '15px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f8fafc', textAlign: 'left', fontSize: '13px' }}>
-                        <th style={{ padding: '10px' }}>Sản phẩm</th>
-                        <th style={{ padding: '10px' }}>ĐVT</th>
-                        <th style={{ padding: '10px', width: '70px' }}>SL</th>
-                        <th style={{ padding: '10px' }}>Đơn giá</th>
-                        <th style={{ padding: '10px', width: '90px' }}>Giảm giá</th>
-                        <th style={{ padding: '10px' }}>Thành tiền</th>
-                        <th style={{ padding: '10px', width: '40px' }}>Xóa</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cartLines.length === 0 ? (
-                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có sản phẩm nào</td></tr>
-                      ) : (
-                        cartLines.map((l) => {
-                          const lineTotal = (l.price * l.quantity) - l.discount;
-                          return (
-                           <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
-  <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
-  <td style={{ padding: '10px' }}>{l.unit || 'Cái'}</td>
-  <td style={{ padding: '10px' }}>
-    <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Number(e.target.value))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
-  </td>
-  <td style={{ padding: '10px' }}>
-    <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ width: '90px', padding: '4px', fontWeight: 'bold', color: '#7c3aed' }} />
-  </td>
-  <td style={{ padding: '10px' }}>
-    <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
-  </td>
-  <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((l.price * l.quantity) - l.discount)}</td>
-  <td style={{ padding: '10px' }}>
-    <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-  </td>
-</tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Tổng kết và loại đơn */}
-                <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
-                    <span>TỔNG CỘNG:</span>
-                    <span style={{ color: '#7c3aed' }}>{vnd(cartTotal)}</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', alignItems: 'center' }}>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Khách đã thanh toán:</label>
-                      <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ đơn này:</label>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: cartDebt > 0 ? '#dc2626' : '#16a34a', marginTop: '6px' }}>{vnd(cartDebt)}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#7c3aed' }}>Loại đơn:</label>
-                      <select value={orderType} onChange={(e) => setOrderType(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0' }}>
-                        <option value="invoices">📦 Phiếu bán hàng (Trừ tồn kho)</option>
-                        <option value="orders">📝 Đơn đặt hàng (Không trừ kho)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Phương thức TT:</label>
-                      <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0' }}>
-                        <option value="Tiền mặt">💵 Tiền mặt</option>
-                        <option value="Chuyển khoản">🏦 Chuyển khoản</option>
-                        <option value="Công nợ"> sổ Công nợ</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <button 
-                  disabled={busy || cartLines.length === 0}
-                  onClick={handlePosSubmit}
-                  style={{ width: '100%', padding: '14px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}
-                >
-                  XÁC NHẬN TẠO ĐƠN
-                </button>
+                  );
+                })}
               </div>
             </div>
-          );
-        })()}
+
+            {/* Cột phải: Thông tin đơn hàng & chi tiết giỏ hàng */}
+            <div style={{ ...cardStyle, padding: '24px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={labelStyle}>Ngày tạo đơn / phiếu bán:</label>
+                <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
+              </div>
+
+              <div style={{ marginBottom: '15px', position: 'relative' }}>
+                <label style={labelStyle}>Khách hàng:</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    placeholder="Gõ tên, SĐT hoặc mã khách hàng..."
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setPosCustomer((c) => ({ ...c, name: e.target.value }));
+                      setShowCustomerDropdown(true);
+                    }}
+                    onFocus={() => setShowCustomerDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 150)}
+                    style={{ ...inputStyle, margin: 0, flex: 1 }}
+                  />
+                  <button
+                    onClick={() => { setEditingCustomer(null); setCustomerForm({ ...EMPTY_CUSTOMER, name: customerSearch }); setShowCustomerModal(true); }}
+                    title="Thêm khách hàng mới"
+                    style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }}
+                  >+</button>
+                </div>
+
+                {showCustomerDropdown && filteredPosCustomers.length > 0 && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 45, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '160px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                    {filteredPosCustomers.map((c) => (
+                      <div
+                        key={c.id}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '' });
+                          setCustomerSearch(c.name);
+                          setShowCustomerDropdown(false);
+                        }}
+                        style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                      >
+                        <b>{c.name}</b> - <span style={{ color: '#64748b' }}>{c.phone || 'Chưa có SĐT'} ({c.code})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                <div>
+                  <label style={labelStyle}>Số điện thoại:</label>
+                  <input value={posCustomer.phone} onChange={(e) => setPosCustomer({ ...posCustomer, phone: e.target.value })} placeholder="SĐT khách hàng..." style={{ ...inputStyle, margin: 0 }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Địa chỉ:</label>
+                  <input value={posCustomer.address} onChange={(e) => setPosCustomer({ ...posCustomer, address: e.target.value })} placeholder="Địa chỉ khách hàng..." style={{ ...inputStyle, margin: 0 }} />
+                </div>
+              </div>
+
+              <h4 style={{ margin: '10px 0 5px 0' }}>Chi tiết đơn hàng</h4>
+              <div style={{ flex: 1, minHeight: '160px', maxHeight: '220px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '15px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', textAlign: 'left', fontSize: '13px' }}>
+                      <th style={{ padding: '10px' }}>Sản phẩm</th>
+                      <th style={{ padding: '10px' }}>ĐVT</th>
+                      <th style={{ padding: '10px', width: '70px' }}>SL</th>
+                      <th style={{ padding: '10px' }}>Đơn giá</th>
+                      <th style={{ padding: '10px', width: '90px' }}>Giảm giá</th>
+                      <th style={{ padding: '10px' }}>Thành tiền</th>
+                      <th style={{ padding: '10px', width: '40px' }}>Xóa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cartLines.length === 0 ? (
+                      <tr><td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có sản phẩm nào</td></tr>
+                    ) : (
+                      cartLines.map((l) => (
+                        <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
+                          <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
+                          <td style={{ padding: '10px' }}>{l.unit || 'Cái'}</td>
+                          <td style={{ padding: '10px' }}>
+                            <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ width: '90px', padding: '4px', fontWeight: 'bold', color: '#7c3aed' }} />
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
+                          </td>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((l.price * l.quantity) - l.discount)}</td>
+                          <td style={{ padding: '10px' }}>
+                            <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tổng kết và loại đơn */}
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
+                  <span>TỔNG CỘNG:</span>
+                  <span style={{ color: '#7c3aed' }}>{vnd(cartTotal)}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', alignItems: 'center' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#64748b' }}>Khách đã thanh toán:</label>
+                    <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ đơn này:</label>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: cartDebt > 0 ? '#dc2626' : '#16a34a', marginTop: '6px' }}>{vnd(cartDebt)}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#7c3aed' }}>Loại đơn:</label>
+                    <select value={orderType} onChange={(e) => setOrderType(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0' }}>
+                      <option value="invoices">📦 Phiếu bán hàng (Trừ tồn kho)</option>
+                      <option value="orders">📝 Đơn đặt hàng (Không trừ kho)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#64748b' }}>Phương thức TT:</label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => {
+                        setPaymentMethod(e.target.value);
+                        if (e.target.value === 'Công nợ') setPaidAmount(0);
+                      }}
+                      style={{ ...inputStyle, margin: '2px 0 0 0' }}
+                    >
+                      <option value="Tiền mặt">💵 Tiền mặt</option>
+                      <option value="Chuyển khoản">🏦 Chuyển khoản</option>
+                      <option value="Công nợ">📒 Công nợ</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                disabled={busy || cartLines.length === 0}
+                onClick={handlePosSubmit}
+                style={{ width: '100%', padding: '14px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '16px' }}
+              >
+                XÁC NHẬN TẠO ĐƠN
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Sản phẩm ({products.length})</h2>
-              
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
+                <button
                   onClick={() => { setProductImportText(''); setShowProductImportModal(true); }}
                   style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   📁 Nhập Excel / Dán dữ liệu
                 </button>
-                <button 
-                  onClick={() => {
-                    setEditingProduct(null);
-                    setProductForm({ sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 });
-                    setShowProductModal(true);
-                  }}
+                <button
+                  onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
                   style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm sản phẩm mới
@@ -564,45 +639,39 @@ export default function App() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1 }}>
-                    <th style={{ padding: '12px' }}>Mã sản phẩm (SKU)</th>
-                    <th style={{ padding: '12px' }}>Tên sản phẩm</th>
-                    <th style={{ padding: '12px' }}>Đơn vị tính</th>
-                    <th style={{ padding: '12px' }}>Giá nhập</th>
-                    <th style={{ padding: '12px' }}>Giá bán lẻ</th>
-                    <th style={{ padding: '12px' }}>Giá bán sỉ</th>
-                    <th style={{ padding: '12px' }}>Tồn kho</th>
-                    <th style={{ padding: '12px', textAlign: 'center' }}>Thao tác</th>
+                    <th style={cellStyle}>Mã sản phẩm (SKU)</th>
+                    <th style={cellStyle}>Tên sản phẩm</th>
+                    <th style={cellStyle}>Đơn vị tính</th>
+                    <th style={cellStyle}>Giá nhập</th>
+                    <th style={cellStyle}>Giá bán lẻ</th>
+                    <th style={cellStyle}>Giá bán sỉ</th>
+                    <th style={cellStyle}>Tồn kho</th>
+                    <th style={{ ...cellStyle, textAlign: 'center' }}>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(products || []).map((p) => (
                     <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '12px' }}>{p.sku}</td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{p.name}</td>
-                      <td style={{ padding: '12px' }}>{p.unit || 'Cái'}</td>
-                      <td style={{ padding: '12px' }}>{vnd(p.import_price)}</td>
-                      <td style={{ padding: '12px', color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
-                      <td style={{ padding: '12px', color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
-                      <td style={{ padding: '12px', color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>
-                        {p.stock}
-                      </td>
-                      <td style={{ padding: '12px', textAlign: 'center' }}>
-                        <button 
+                      <td style={cellStyle}>{p.sku}</td>
+                      <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{p.name}</td>
+                      <td style={cellStyle}>{p.unit || 'Cái'}</td>
+                      <td style={cellStyle}>{vnd(p.import_price)}</td>
+                      <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
+                      <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
+                      <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
+                      <td style={{ ...cellStyle, textAlign: 'center' }}>
+                        <button
                           onClick={() => {
                             setEditingProduct(p);
-                            setProductForm({ sku: p.sku, name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
+                            setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
                             setShowProductModal(true);
                           }}
                           style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
-                        >
-                          Sửa
-                        </button>
-                        <button 
+                        >Sửa</button>
+                        <button
                           onClick={() => handleDeleteProduct(p.id)}
                           style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
-                        >
-                          Xóa
-                        </button>
+                        >Xóa</button>
                       </td>
                     </tr>
                   ))}
@@ -614,23 +683,18 @@ export default function App() {
 
         {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp</h2>
-              
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
+                <button
                   onClick={() => { setImportText(''); setShowImportModal(true); }}
                   style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   📁 Nhập Excel / Dán dữ liệu
                 </button>
-                <button 
-                  onClick={() => {
-                    setEditingSupplier(null);
-                    setSupplierForm({ code: '', name: '', phone: '', address: '', status: 'active' });
-                    setShowSupplierModal(true);
-                  }}
+                <button
+                  onClick={() => { setEditingSupplier(null); setSupplierForm(EMPTY_SUPPLIER); setShowSupplierModal(true); }}
                   style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm nhà cung cấp
@@ -641,29 +705,27 @@ export default function App() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Mã NCC</th>
-                  <th style={{ padding: '12px' }}>Tên NCC</th>
-                  <th style={{ padding: '12px' }}>SĐT</th>
-                  <th style={{ padding: '12px' }}>Địa chỉ</th>
-                  <th style={{ padding: '12px' }}>Tổng giá trị nhập</th>
-                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
-                  <th style={{ padding: '12px' }}>Công nợ</th>
-                  <th style={{ padding: '12px' }}>Trạng thái</th>
+                  <th style={cellStyle}>Mã NCC</th>
+                  <th style={cellStyle}>Tên NCC</th>
+                  <th style={cellStyle}>SĐT</th>
+                  <th style={cellStyle}>Địa chỉ</th>
+                  <th style={cellStyle}>Tổng giá trị nhập</th>
+                  <th style={cellStyle}>Đã thanh toán</th>
+                  <th style={cellStyle}>Công nợ</th>
+                  <th style={cellStyle}>Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
                 {(suppliers || []).map((s) => (
                   <tr key={s.id} onClick={() => openSupplierDetail(s)} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                    <td style={{ padding: '12px' }}>{s.code}</td>
-                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
-                    <td style={{ padding: '12px' }}>{s.phone || '-'}</td>
-                    <td style={{ padding: '12px' }}>{s.address || '-'}</td>
-                    <td style={{ padding: '12px' }}>{vnd(s.total_purchase)}</td>
-                    <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
-                    <td style={{ padding: '12px', color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>
-                      {vnd(s.total_debt)}
-                    </td>
-                    <td style={{ padding: '12px' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
+                    <td style={cellStyle}>{s.code}</td>
+                    <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
+                    <td style={cellStyle}>{s.phone || '-'}</td>
+                    <td style={cellStyle}>{s.address || '-'}</td>
+                    <td style={cellStyle}>{vnd(s.total_purchase)}</td>
+                    <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(s.total_paid)}</td>
+                    <td style={{ ...cellStyle, color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.total_debt)}</td>
+                    <td style={cellStyle}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -673,16 +735,11 @@ export default function App() {
 
         {/* 4. MÀN HÌNH QUẢN LÝ NHẬP HÀNG */}
         {currentView === 'purchases' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Nhập Hàng</h2>
-              <button 
-                onClick={() => {
-                  setPurchaseItems([]);
-                  setPurchaseForm({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
-                  setSupplierSearchKeyword('');
-                  setShowCreatePurchaseModal(true);
-                }}
+              <button
+                onClick={openCreatePurchase}
                 style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 + Tạo Phiếu Nhập
@@ -692,14 +749,14 @@ export default function App() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Mã Phiếu</th>
-                  <th style={{ padding: '12px' }}>Ngày</th>
-                  <th style={{ padding: '12px' }}>Nhà Cung Cấp</th>
-                  <th style={{ padding: '12px' }}>Tổng Tiền</th>
-                  <th style={{ padding: '12px' }}>Đã Thanh Toán</th>
-                  <th style={{ padding: '12px' }}>Còn Nợ</th>
-                  <th style={{ padding: '12px' }}>Trạng Thái</th>
-                  <th style={{ padding: '12px', textAlign: 'center' }}>Thao Tác</th>
+                  <th style={cellStyle}>Mã Phiếu</th>
+                  <th style={cellStyle}>Ngày</th>
+                  <th style={cellStyle}>Nhà Cung Cấp</th>
+                  <th style={cellStyle}>Tổng Tiền</th>
+                  <th style={cellStyle}>Đã Thanh Toán</th>
+                  <th style={cellStyle}>Còn Nợ</th>
+                  <th style={cellStyle}>Trạng Thái</th>
+                  <th style={{ ...cellStyle, textAlign: 'center' }}>Thao Tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -709,71 +766,44 @@ export default function App() {
                   purchaseOrders.map((po) => {
                     const totalAmt = Number(po.total) || 0;
                     const paidAmt = Number(po.paid_amount) || 0;
-                    const debtAmt = Number(po.debt) || (totalAmt - paidAmt);
+                    const debtAmt = po.debt !== undefined && po.debt !== null ? Number(po.debt) : (totalAmt - paidAmt);
                     const isPaid = debtAmt <= 0;
 
                     return (
                       <tr key={po.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7' }}>{po.code}</td>
-                        <td style={{ padding: '12px' }}>{po.created_at ? new Date(po.created_at).toLocaleDateString('vi-VN') : '---'}</td>
-                        <td style={{ padding: '12px', fontWeight: '500' }}>{po.supplier_name || '---'}</td>
-                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(totalAmt)}</td>
-                        <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(paidAmt)}</td>
-                        <td style={{ padding: '12px', color: debtAmt > 0 ? '#dc2626' : '#16a34a', fontWeight: debtAmt > 0 ? 'bold' : 'normal' }}>{vnd(debtAmt)}</td>
-                        <td style={{ padding: '12px' }}>
+                        <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{po.code}</td>
+                        <td style={cellStyle}>{po.created_at ? new Date(po.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                        <td style={{ ...cellStyle, fontWeight: '500' }}>{po.supplier_name || '---'}</td>
+                        <td style={{ ...cellStyle, fontWeight: 'bold', color: '#7c3aed' }}>{vnd(totalAmt)}</td>
+                        <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(paidAmt)}</td>
+                        <td style={{ ...cellStyle, color: debtAmt > 0 ? '#dc2626' : '#16a34a', fontWeight: debtAmt > 0 ? 'bold' : 'normal' }}>{vnd(debtAmt)}</td>
+                        <td style={cellStyle}>
                           <span style={{ padding: '4px 10px', borderRadius: '4px', background: isPaid ? '#dcfce7' : '#fee2e2', color: isPaid ? '#166534' : '#991b1b', fontSize: '12px', fontWeight: 'bold' }}>
                             {isPaid ? 'Đã thanh toán' : 'Còn nợ'}
                           </span>
                         </td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <button 
+                        <td style={{ ...cellStyle, textAlign: 'center' }}>
+                          <button
                             onClick={async () => {
                               try {
                                 const details = await api(`/api/purchase_orders/${po.id}`);
                                 setSelectedPurchaseOrder(details);
                                 setShowViewPurchaseModal(true);
-                              } catch (e) { alert('Lỗi: ' + e.message); }
+                              } catch (e) { setMsg({ type: 'err', text: e.message }); }
                             }}
                             title="Xem chi tiết"
                             style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
-                          >
-                            👁️
-                          </button>
-                          <button 
-                            onClick={async () => {
-                              try {
-                                const details = await api(`/api/purchase_orders/${po.id}`);
-                                setPurchaseForm({
-                                  supplier_id: details.supplier_id,
-                                  payment_method: details.payment_method || 'Tiền mặt',
-                                  paid_amount: details.paid_amount || 0
-                                });
-                                setPurchaseItems((details.items || []).map(i => ({
-                                  product_id: i.product_id,
-                                  name: i.product_name,
-                                  sku: i.sku,
-                                  unit: 'Cái',
-                                  quantity: i.quantity,
-                                  price: i.price,
-                                  discount: i.discount || 0
-                                })));
-                                const foundSup = (suppliers || []).find(s => s.id === details.supplier_id);
-                                if (foundSup) setSupplierSearchKeyword(`${foundSup.name} (${foundSup.code})`);
-                                setShowCreatePurchaseModal(true);
-                              } catch (e) { alert('Lỗi: ' + e.message); }
-                            }}
+                          >👁️</button>
+                          <button
+                            onClick={() => openEditPurchase(po)}
                             title="Chỉnh sửa"
                             style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
-                          >
-                            ✏️
-                          </button>
-                          <button 
+                          >✏️</button>
+                          <button
                             onClick={() => handleDeletePurchaseOrder(po.id, po.code)}
                             title="Xóa phiếu"
                             style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                          >
-                            🗑️
-                          </button>
+                          >🗑️</button>
                         </td>
                       </tr>
                     );
@@ -786,26 +816,26 @@ export default function App() {
 
         {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
         {currentView === 'customers' && (
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customers.length})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
-                <button onClick={() => { setEditingCustomer(null); setCustomerForm({ code: '', name: '', phone: '', address: '' }); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
+                <button onClick={() => { setEditingCustomer(null); setCustomerForm(EMPTY_CUSTOMER); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
               </div>
             </div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '12px' }}>Mã KH</th>
-                  <th style={{ padding: '12px' }}>Tên khách hàng</th>
-                  <th style={{ padding: '12px' }}>Số điện thoại</th>
-                  <th style={{ padding: '12px' }}>Địa chỉ</th>
-                  <th style={{ padding: '12px' }}>Tổng mua</th>
-                  <th style={{ padding: '12px' }}>Đã thanh toán</th>
-                  <th style={{ padding: '12px' }}>Công nợ</th>
-                  <th style={{ padding: '12px', textAlign: 'center' }}>Thao tác</th>
+                  <th style={cellStyle}>Mã KH</th>
+                  <th style={cellStyle}>Tên khách hàng</th>
+                  <th style={cellStyle}>Số điện thoại</th>
+                  <th style={cellStyle}>Địa chỉ</th>
+                  <th style={cellStyle}>Tổng mua</th>
+                  <th style={cellStyle}>Đã thanh toán</th>
+                  <th style={cellStyle}>Công nợ</th>
+                  <th style={{ ...cellStyle, textAlign: 'center' }}>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -814,14 +844,14 @@ export default function App() {
                 ) : (
                   customers.map((c) => (
                     <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '12px' }}>{c.code}</td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
-                      <td style={{ padding: '12px' }}>{c.phone || '-'}</td>
-                      <td style={{ padding: '12px' }}>{c.address || '-'}</td>
-                      <td style={{ padding: '12px' }}>{vnd(c.total_purchased)}</td>
-                      <td style={{ padding: '12px', color: '#16a34a' }}>{vnd(c.total_paid)}</td>
-                      <td style={{ padding: '12px', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
-                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                      <td style={cellStyle}>{c.code}</td>
+                      <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
+                      <td style={cellStyle}>{c.phone || '-'}</td>
+                      <td style={cellStyle}>{c.address || '-'}</td>
+                      <td style={cellStyle}>{vnd(c.total_purchased)}</td>
+                      <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(c.total_paid)}</td>
+                      <td style={{ ...cellStyle, color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
+                      <td style={{ ...cellStyle, textAlign: 'center' }}>
                         <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
                         <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                       </td>
@@ -836,7 +866,7 @@ export default function App() {
 
       {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
       {showViewPurchaseModal && selectedPurchaseOrder && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
@@ -870,7 +900,7 @@ export default function App() {
                       <td style={{ padding: '8px', textAlign: 'center' }}>{item.quantity}</td>
                       <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
                       <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
-                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((item.quantity * item.price) - item.discount)}</td>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((item.quantity * item.price) - (item.discount || 0))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -892,36 +922,35 @@ export default function App() {
 
       {/* POPUP TẠO / SỬA PHIẾU NHẬP HÀNG */}
       {showCreatePurchaseModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ padding: '20px', background: '#7c3aed', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>Tạo / Chỉnh sửa Phiếu Nhập Hàng</h3>
+              <h3 style={{ margin: 0 }}>{editingPurchaseId ? 'Chỉnh sửa Phiếu Nhập Hàng' : 'Tạo Phiếu Nhập Hàng'}</h3>
               <button onClick={() => setShowCreatePurchaseModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <div style={{ position: 'relative' }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Nhà cung cấp *:</label>
-                  <input 
-                    placeholder="Nhập tên, SĐT hoặc mã NCC..." 
+                  <label style={labelStyle}>Nhà cung cấp *:</label>
+                  <input
+                    placeholder="Nhập tên, SĐT hoặc mã NCC..."
                     value={supplierSearchKeyword}
-                    onChange={(e) => {
-                      setSupplierSearchKeyword(e.target.value);
-                      setShowSupplierDropdown(true);
-                    }}
+                    onChange={(e) => { setSupplierSearchKeyword(e.target.value); setShowSupplierDropdown(true); }}
                     onFocus={() => setShowSupplierDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 150)}
                     style={inputStyle}
                   />
                   {showSupplierDropdown && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                      {(suppliers || []).filter(s => 
-                        s.name.toLowerCase().includes(supplierSearchKeyword.toLowerCase()) || 
-                        (s.phone && s.phone.includes(supplierSearchKeyword)) || 
-                        s.code.toLowerCase().includes(supplierSearchKeyword.toLowerCase())
-                      ).map(s => (
-                        <div 
-                          key={s.id} 
+                      {(suppliers || []).filter((s) =>
+                        s.name.toLowerCase().includes(supplierSearchKeyword.toLowerCase()) ||
+                        (s.phone && s.phone.includes(supplierSearchKeyword)) ||
+                        (s.code || '').toLowerCase().includes(supplierSearchKeyword.toLowerCase())
+                      ).map((s) => (
+                        <div
+                          key={s.id}
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
                             setPurchaseForm({ ...purchaseForm, supplier_id: s.id });
                             setSupplierSearchKeyword(`${s.name} (${s.code})`);
@@ -937,10 +966,10 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Phương thức thanh toán:</label>
-                  <select 
-                    value={purchaseForm.payment_method} 
-                    onChange={(e) => setPurchaseForm({ ...purchaseForm, payment_method: e.target.value })} 
+                  <label style={labelStyle}>Phương thức thanh toán:</label>
+                  <select
+                    value={purchaseForm.payment_method}
+                    onChange={(e) => setPurchaseForm({ ...purchaseForm, payment_method: e.target.value })}
                     style={inputStyle}
                   >
                     <option value="Tiền mặt">Tiền mặt</option>
@@ -951,25 +980,25 @@ export default function App() {
               </div>
 
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
-                <input 
-                  placeholder="Nhập tên sản phẩm hoặc mã SKU..." 
+                <label style={labelStyle}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
+                <input
+                  placeholder="Nhập tên sản phẩm hoặc mã SKU..."
                   value={productSearchKeyword}
                   onChange={(e) => setProductSearchKeyword(e.target.value)}
                   style={inputStyle}
                 />
                 {productSearchKeyword.trim() && (
                   <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', marginTop: '5px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                    {(products || []).filter(p => 
-                      p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) || 
+                    {(products || []).filter((p) =>
+                      p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) ||
                       (p.sku && p.sku.toLowerCase().includes(productSearchKeyword.toLowerCase()))
-                    ).map(p => (
-                      <div 
+                    ).map((p) => (
+                      <div
                         key={p.id}
                         onClick={() => {
-                          const exist = purchaseItems.find(item => item.product_id === p.id);
+                          const exist = purchaseItems.find((item) => item.product_id === p.id);
                           if (exist) {
-                            setPurchaseItems(purchaseItems.map(item => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
+                            setPurchaseItems(purchaseItems.map((item) => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
                           } else {
                             setPurchaseItems([...purchaseItems, { product_id: p.id, name: p.name, sku: p.sku, unit: p.unit || 'Cái', quantity: 1, price: p.import_price || p.price || 0, discount: 0 }]);
                           }
@@ -1006,18 +1035,18 @@ export default function App() {
                       purchaseItems.map((item, index) => {
                         const lineTotal = (item.quantity * item.price) - item.discount;
                         return (
-                          <tr key={index} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <tr key={item.product_id ?? index} style={{ borderBottom: '1px solid #e2e8f0' }}>
                             <td style={{ padding: '10px' }}>{item.sku}</td>
                             <td style={{ padding: '10px', fontWeight: '500' }}>{item.name}</td>
                             <td style={{ padding: '10px' }}>{item.unit}</td>
                             <td style={{ padding: '10px' }}>
-                              <input type="number" min="1" value={item.quantity} onChange={(e) => setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, quantity: Number(e.target.value) } : it))} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
+                              <input type="number" min="1" value={item.quantity} onChange={(e) => updatePurchaseItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
                             </td>
                             <td style={{ padding: '10px' }}>
-                              <input type="number" value={item.price} onChange={(e) => setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, price: Number(e.target.value) } : it))} style={{ width: '110px', padding: '6px' }} />
+                              <input type="number" value={item.price} onChange={(e) => updatePurchaseItem(index, { price: Number(e.target.value) || 0 })} style={{ width: '110px', padding: '6px' }} />
                             </td>
                             <td style={{ padding: '10px' }}>
-                              <input type="number" value={item.discount} onChange={(e) => setPurchaseItems(purchaseItems.map((it, idx) => idx === index ? { ...it, discount: Number(e.target.value) } : it))} style={{ width: '90px', padding: '6px' }} />
+                              <input type="number" value={item.discount} onChange={(e) => updatePurchaseItem(index, { discount: Number(e.target.value) || 0 })} style={{ width: '90px', padding: '6px' }} />
                             </td>
                             <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(lineTotal)}</td>
                             <td style={{ padding: '10px' }}>
@@ -1046,27 +1075,8 @@ export default function App() {
                       <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(debtAmount)}</b></div>
                     </div>
 
-                    <button 
-                      onClick={async () => {
-                        if (!purchaseForm.supplier_id) return alert('Vui lòng chọn nhà cung cấp!');
-                        if (purchaseItems.length === 0) return alert('Vui lòng chọn sản phẩm nhập kho!');
-                        try {
-                          const res = await api('/api/purchase_orders', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                              supplier_id: purchaseForm.supplier_id,
-                              payment_method: purchaseForm.payment_method,
-                              paid_amount: Number(purchaseForm.paid_amount) || 0,
-                              items: purchaseItems
-                            })
-                          });
-                          setMsg({ type: 'ok', text: `Lưu phiếu nhập hàng thành công!` });
-                          setShowCreatePurchaseModal(false);
-                          loadData();
-                        } catch (err) {
-                          alert('Lỗi: ' + err.message);
-                        }
-                      }}
+                    <button
+                      onClick={handleSavePurchase}
                       style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                     >
                       💾 Hoàn tất
@@ -1081,39 +1091,39 @@ export default function App() {
 
       {/* MODAL THÊM / SỬA SẢN PHẨM */}
       {showProductModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</h3>
             <form onSubmit={handleSaveProduct}>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Mã sản phẩm (SKU):</label>
+                <label style={labelStyle}>Mã sản phẩm (SKU):</label>
                 <input placeholder="VD: SKU001" value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} style={inputStyle} />
               </div>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tên sản phẩm *:</label>
+                <label style={labelStyle}>Tên sản phẩm *:</label>
                 <input placeholder="Nhập tên sản phẩm" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} style={inputStyle} required />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Đơn vị tính:</label>
+                  <label style={labelStyle}>Đơn vị tính:</label>
                   <input placeholder="Cái, Bộ, Chiếc..." value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Tồn kho:</label>
+                  <label style={labelStyle}>Tồn kho:</label>
                   <input type="number" value={productForm.stock} onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })} style={inputStyle} />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '20px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Giá nhập:</label>
+                  <label style={labelStyle}>Giá nhập:</label>
                   <input type="number" value={productForm.import_price} onChange={(e) => setProductForm({ ...productForm, import_price: e.target.value })} style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Giá bán lẻ:</label>
+                  <label style={labelStyle}>Giá bán lẻ:</label>
                   <input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' }}>Giá bán sỉ:</label>
+                  <label style={labelStyle}>Giá bán sỉ:</label>
                   <input type="number" value={productForm.wholesale_price} onChange={(e) => setProductForm({ ...productForm, wholesale_price: e.target.value })} style={inputStyle} />
                 </div>
               </div>
@@ -1128,24 +1138,23 @@ export default function App() {
 
       {/* MODAL IMPORT SẢN PHẨM */}
       {showProductImportModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Sản phẩm</h3>
-            <textarea rows="8" placeholder="SKU | Tên | ĐVT | Giá nhập | Giá lẻ | Giá sỉ | Tồn kho" value={productImportText} onChange={(e) => setProductImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace' }} />
+            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>SKU | Tên | ĐVT | Giá nhập | Giá lẻ | Giá sỉ | Tồn kho</code></p>
+            <textarea rows="8" placeholder={'SKU001\tẮc quy 48V\tBộ\t1500000\t1800000\t1700000\t10'} value={productImportText} onChange={(e) => setProductImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
               <button onClick={() => setShowProductImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button onClick={async () => {
-                try {
-                  const lines = productImportText.split('\n');
-                  const items = lines.map(l => {
-                    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
-                    return c.length >= 2 ? { sku: c[0], name: c[1], unit: c[2] || 'Cái', import_price: Number(c[3]) || 0, price: Number(c[4]) || 0, wholesale_price: Number(c[5]) || 0, stock: Number(c[6]) || 0 } : null;
-                  }).filter(Boolean);
-                  const res = await api('/api/products/import', { method: 'POST', body: JSON.stringify({ items }) });
-                  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} sản phẩm!` });
-                  setShowProductImportModal(false); loadData();
-                } catch (err) { alert(err.message); }
-              }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
+              <button
+                onClick={() => runImport({
+                  text: productImportText,
+                  endpoint: '/api/products/import',
+                  label: 'sản phẩm',
+                  close: setShowProductImportModal,
+                  mapRow: (c) => c.length >= 2 ? { sku: c[0], name: c[1], unit: c[2] || 'Cái', import_price: num(c[3]), price: num(c[4]), wholesale_price: num(c[5]), stock: num(c[6]) } : null,
+                })}
+                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >Xác nhận</button>
             </div>
           </div>
         </div>
@@ -1153,7 +1162,7 @@ export default function App() {
 
       {/* MODAL NHÀ CUNG CẤP */}
       {showSupplierModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '20px', background: '#1e293b', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{editingSupplier ? `Chi tiết: ${selectedSupplier?.name}` : 'Thêm nhà cung cấp mới'}</h3>
@@ -1195,21 +1204,21 @@ export default function App() {
                   {supplierTab === 'purchases' && (
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Mã phiếu</th><th style={{ padding: '8px' }}>Tổng tiền</th><th style={{ padding: '8px' }}>Ngày tạo</th></tr></thead>
-                      <tbody>{(supplierHistory.purchases || []).map(p => (<tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>))}</tbody>
+                      <tbody>{(supplierHistory.purchases || []).map((p) => (<tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>))}</tbody>
                     </table>
                   )}
 
                   {supplierTab === 'payments' && (
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Số tiền</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                      <tbody>{(supplierHistory.payments || []).map(pay => (<tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>))}</tbody>
+                      <tbody>{(supplierHistory.payments || []).map((pay) => (<tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>))}</tbody>
                     </table>
                   )}
 
                   {supplierTab === 'returns' && (
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Tổng trả</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                      <tbody>{(supplierHistory.returns || []).map(ret => (<tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>))}</tbody>
+                      <tbody>{(supplierHistory.returns || []).map((ret) => (<tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>))}</tbody>
                     </table>
                   )}
                 </div>
@@ -1232,39 +1241,38 @@ export default function App() {
 
       {/* MODAL IMPORT NCC */}
       {showImportModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
             <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Nhà cung cấp</h3>
-            <textarea rows="8" placeholder="NCC01\tCông ty A\t0901234567\tQuận 1" value={importText} onChange={(e) => setImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace' }} />
+            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã NCC | Tên NCC | SĐT | Địa chỉ</code></p>
+            <textarea rows="8" placeholder={'NCC01\tCông ty A\t0901234567\tQuận 1'} value={importText} onChange={(e) => setImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
               <button onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button onClick={async () => {
-                try {
-                  const lines = importText.split('\n');
-                  const items = lines.map(l => {
-                    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
-                    return c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null;
-                  }).filter(Boolean);
-                  const res = await api('/api/suppliers/import', { method: 'POST', body: JSON.stringify({ items }) });
-                  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} nhà cung cấp!` });
-                  setShowImportModal(false); loadData();
-                } catch (err) { alert(err.message); }
-              }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
+              <button
+                onClick={() => runImport({
+                  text: importText,
+                  endpoint: '/api/suppliers/import',
+                  label: 'nhà cung cấp',
+                  close: setShowImportModal,
+                  mapRow: (c) => c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null,
+                })}
+                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >Xác nhận</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL THÊM KHÁCH HÀNG */}
+      {/* MODAL THÊM / SỬA KHÁCH HÀNG */}
       {showCustomerModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px' }}>
             <h3 style={{ marginTop: 0 }}>{editingCustomer ? 'Chỉnh sửa khách hàng' : 'Thêm khách hàng mới'}</h3>
             <form onSubmit={handleSaveCustomer}>
-              <div style={{ marginBottom: '10px' }}><label>Mã KH (tự sinh nếu trống):</label><input value={customerForm.code} onChange={e => setCustomerForm({...customerForm, code: e.target.value})} style={inputStyle} /></div>
-              <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={e => setCustomerForm({...customerForm, name: e.target.value})} style={inputStyle} required /></div>
-              <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={e => setCustomerForm({...customerForm, phone: e.target.value})} style={inputStyle} /></div>
-              <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={e => setCustomerForm({...customerForm, address: e.target.value})} style={inputStyle} /></div>
+              <div style={{ marginBottom: '10px' }}><label>Mã KH (tự sinh nếu trống):</label><input value={customerForm.code} onChange={(e) => setCustomerForm({ ...customerForm, code: e.target.value })} style={inputStyle} /></div>
+              <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} style={inputStyle} required /></div>
+              <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} style={inputStyle} /></div>
+              <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} style={inputStyle} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" onClick={() => setShowCustomerModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
                 <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu</button>
@@ -1276,34 +1284,23 @@ export default function App() {
 
       {/* MODAL IMPORT KHÁCH HÀNG */}
       {showCustomerImportModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
             <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Khách hàng</h3>
             <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã KH | Tên KH | SĐT | Địa chỉ</code></p>
-            <textarea rows="8" placeholder="KH01\tNguyễn Văn A\t0901234567\tQuận 1" value={customerImportText} onChange={e => setCustomerImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace' }} />
+            <textarea rows="8" placeholder={'KH01\tNguyễn Văn A\t0901234567\tQuận 1'} value={customerImportText} onChange={(e) => setCustomerImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
               <button onClick={() => setShowCustomerImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button onClick={async () => {
-                try {
-                  const lines = customerImportText.split('\n');
-                  const items = lines.map(l => {
-                    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
-                    return c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null;
-                  }).filter(Boolean);
-
-                  if (items.length === 0) {
-                    alert('Không đọc được dữ liệu hợp lệ! Vui lòng kiểm tra lại định dạng.');
-                    return;
-                  }
-
-                  const res = await api('/api/customers/import', { method: 'POST', body: JSON.stringify({ items }) });
-                  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} khách hàng!` });
-                  setShowCustomerImportModal(false); 
-                  loadData();
-                } catch (err) {
-                  alert('Lỗi chi tiết: ' + err.message);
-                }
-              }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
+              <button
+                onClick={() => runImport({
+                  text: customerImportText,
+                  endpoint: '/api/customers/import',
+                  label: 'khách hàng',
+                  close: setShowCustomerImportModal,
+                  mapRow: (c) => c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null,
+                })}
+                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >Xác nhận</button>
             </div>
           </div>
         </div>
@@ -1311,7 +1308,7 @@ export default function App() {
 
       {/* POPUP THỐNG KÊ CHI TIẾT KHÁCH HÀNG (2 TAB) */}
       {showCustomerDetailModal && selectedCustomerDetail && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, color: '#7c3aed' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
@@ -1324,19 +1321,19 @@ export default function App() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
-              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+              <div style={statBoxStyle}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{customerDetailData.invoices.length}</div>
                 <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
               </div>
-              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+              <div style={statBoxStyle}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#16a34a' }}>{vnd(selectedCustomerDetail.total_purchased)}</div>
                 <div style={{ fontSize: '12px', color: '#64748b' }}>Tổng chi tiêu</div>
               </div>
-              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+              <div style={statBoxStyle}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(selectedCustomerDetail.total_paid)}</div>
                 <div style={{ fontSize: '12px', color: '#64748b' }}>Đã thanh toán</div>
               </div>
-              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+              <div style={statBoxStyle}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: selectedCustomerDetail.total_debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedCustomerDetail.total_debt)}</div>
                 <div style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ</div>
               </div>
@@ -1365,9 +1362,9 @@ export default function App() {
                           <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
                           <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                           <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
-                          <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount || inv.total)}</td>
-                          <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt || 0)}</td>
-                          <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Completed</span></td>
+                          <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount ?? 0)}</td>
+                          <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt ?? 0)}</td>
+                          <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span></td>
                         </tr>
                       ))
                     )}
@@ -1418,7 +1415,12 @@ export default function App() {
   );
 }
 
+// ===== Styles dùng chung =====
 const navBtnStyle = (active) => ({ width: '100%', padding: '10px 15px', background: active ? '#0284c7' : 'transparent', color: '#fff', border: 'none', borderRadius: '6px', textAlign: 'left', cursor: 'pointer', fontWeight: active ? 'bold' : 'normal' });
 const tabBtnStyle = (active) => ({ flex: 1, padding: '12px', background: active ? '#fff' : 'transparent', border: 'none', borderBottom: active ? '3px solid #0284c7' : 'none', fontWeight: active ? 'bold' : 'normal', color: active ? '#0284c7' : '#64748b', cursor: 'pointer' });
 const inputStyle = { width: '100%', padding: '10px', margin: '6px 0', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' };
-const actionBtnStyle = { flex: 1, padding: '10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' };
+const labelStyle = { display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' };
+const cardStyle = { background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' };
+const cellStyle = { padding: '12px' };
+const statBoxStyle = { background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' };
+const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
