@@ -440,6 +440,28 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+        // GET /api/purchase_orders/:id — Lấy chi tiết phiếu nhập kèm danh sách sản phẩm
+      if (pathname.match(/^\/api\/purchase_orders\/\d+$/) && request.method === 'GET') {
+        const id = pathname.split('/')[3];
+        const po = await db.prepare(`
+          SELECT po.*, s.name as supplier_name 
+          FROM purchase_orders po 
+          LEFT JOIN suppliers s ON po.supplier_id = s.id 
+          WHERE po.id = ?
+        `).bind(id).first();
+
+        if (!po) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
+
+        const itemsRes = await db.prepare(`
+          SELECT poi.*, p.name as product_name, p.sku 
+          FROM purchase_order_items poi 
+          LEFT JOIN products p ON poi.product_id = p.id 
+          WHERE poi.purchase_order_id = ?
+        `).bind(id).all();
+
+        return json({ ...po, items: itemsRes.results || [] }, 200, origin);
+      }
+
       // Phục vụ giao diện Frontend
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
