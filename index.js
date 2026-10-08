@@ -464,35 +464,33 @@ export default {
 
         // GET /api/customers — Lấy danh sách khách hàng kèm tổng hợp Mua hàng, Thanh toán, Công nợ
       if (pathname === '/api/customers' && request.method === 'GET') {
-        const query = `
-          SELECT 
-            c.*,
-            COALESCE(i.total_purchased, 0) as total_purchased,
-            COALESCE(pay.total_paid, 0) as total_paid,
-            (COALESCE(i.total_purchased, 0) - COALESCE(pay.total_paid, 0)) as total_debt
-          FROM customers c
-          LEFT JOIN (
-            SELECT customer_name, SUM(total) as total_purchased 
-            FROM invoices 
-            GROUP BY customer_name
-          ) i ON c.name = i.customer_name
-          LEFT JOIN (
-            SELECT customer_name, SUM(amount) as total_paid 
-            FROM customer_payments 
-            GROUP BY customer_name
-          ) pay ON c.name = pay.customer_name
-          ORDER BY c.id DESC
-        `;
         let results = [];
         try {
+          // Thử lấy kèm thông tin tổng hợp nếu các bảng phụ đã tồn tại
+          const query = `
+            SELECT 
+              c.*,
+              COALESCE(i.total_purchased, 0) as total_purchased,
+              COALESCE(pay.total_paid, 0) as total_paid,
+              (COALESCE(i.total_purchased, 0) - COALESCE(pay.total_paid, 0)) as total_debt
+            FROM customers c
+            LEFT JOIN (
+              SELECT customer_name, SUM(total) as total_purchased FROM invoices GROUP BY customer_name
+            ) i ON c.name = i.customer_name
+            LEFT JOIN (
+              SELECT customer_name, SUM(amount) as total_paid FROM customer_payments GROUP BY customer_name
+            ) pay ON c.name = pay.customer_name
+            ORDER BY c.id DESC
+          `;
           const res = await db.prepare(query).all();
           results = res.results || [];
         } catch (e) {
-          // Nếu bảng chưa có, trả về mảng trống
+          // Nếu bảng phụ chưa có, fallback lấy danh sách trực tiếp từ bảng customers
+          const res = await db.prepare('SELECT *, 0 as total_purchased, 0 as total_paid, 0 as total_debt FROM customers ORDER BY id DESC').all();
+          results = res.results || [];
         }
         return json(results, 200, origin);
       }
-
       // POST /api/customers — Thêm mới khách hàng
       if (pathname === '/api/customers' && request.method === 'POST') {
         const b = await request.json();
