@@ -536,6 +536,51 @@ export default {
         return json({ success: true, successCount }, 200, origin);
       }
 
+        // GET /api/customers/:id/history — Lấy lịch sử đơn hàng và thanh toán của khách hàng
+      if (pathname.match(/^\/api\/customers\/\d+\/history$/) && request.method === 'GET') {
+        const id = pathname.split('/')[3];
+        const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
+        if (!customer) throw new HttpError(404, 'Không tìm thấy khách hàng');
+
+        // Lấy danh sách đơn hàng/hóa đơn của khách hàng này
+        const invoicesRes = await db.prepare(`
+          SELECT * FROM invoices WHERE customer_name = ? ORDER BY id DESC
+        `).bind(customer.name).all();
+
+        // Lấy lịch sử thanh toán của khách hàng này
+        const paymentsRes = await db.prepare(`
+          SELECT * FROM customer_payments WHERE customer_name = ? ORDER BY id DESC
+        `).bind(customer.name).all();
+
+        return json({
+          customer,
+          invoices: invoicesRes.results || [],
+          payments: paymentsRes.results || []
+        }, 200, origin);
+      }
+
+      // DELETE /api/customers/:id — Xóa khách hàng
+      if (pathname.match(/^\/api\/customers\/\d+$/) && request.method === 'DELETE') {
+        const id = pathname.split('/')[3];
+        await db.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
+        return json({ success: true }, 200, origin);
+      }
+
+      // PUT /api/customers/:id — Cập nhật khách hàng
+      if (pathname.match(/^\/api\/customers\/\d+$/) && request.method === 'PUT') {
+        const id = pathname.split('/')[3];
+        const b = await request.json();
+        const code = String(b.code || '').trim();
+        const name = String(b.name || '').trim();
+        const phone = String(b.phone || '').trim() || null;
+        const address = String(b.address || '').trim() || null;
+
+        await db.prepare('UPDATE customers SET code = ?, name = ?, phone = ?, address = ? WHERE id = ?')
+          .bind(code, name, phone, address, id).run();
+
+        return json({ success: true }, 200, origin);
+      }
+
       // Phục vụ giao diện Frontend
       if (env.ASSETS) {
         return await env.ASSETS.fetch(request);
