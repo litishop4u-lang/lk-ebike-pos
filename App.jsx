@@ -45,7 +45,6 @@ export default function App() {
   const [paidAmount, setPaidAmount] = useState(0);
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
   const [productSearchKeyword, setProductSearchKeyword] = useState('');
 
   // ===== States cho Quản lý Sản phẩm =====
