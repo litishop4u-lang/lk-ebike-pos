@@ -69,7 +69,6 @@ export default function App() {
 
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
   const [purchaseItems, setPurchaseItems] = useState([]);
-  const [productSearchKeyword, setProductSearchKeyword] = useState('');
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
 
@@ -185,11 +184,11 @@ export default function App() {
   const handlePosSubmit = async () => {
     setBusy(true); setMsg(null);
     try {
-      if (!posCustomer.name.trim()) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
-      if (cartLines.length === 0) throw new Error('Giỏ hàng trống!');
+      if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
+      if (lines.length === 0) throw new Error('Giỏ hàng trống!');
 
-      if (orderType === 'invoices') {
-        for (const l of cartLines) {
+      if (modalOrderType === 'invoices') {
+        for (const l of lines) {
           if (l.stock < l.quantity) {
             throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
           }
@@ -197,23 +196,25 @@ export default function App() {
       }
 
       const body = {
-        customer_name: posCustomer.name.trim(),
+        customer_name: posCustomer.name,
         customer_phone: posCustomer.phone,
         address: posCustomer.address,
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount })),
+        items: lines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
       };
 
-      const r = await api(`/api/${orderType}`, { method: 'POST', body: JSON.stringify(body) });
-      setMsg({ type: 'ok', text: `Tạo ${orderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công — Tổng: ${vnd(r.total)}` });
+      const r = await api(`/api/${modalOrderType}`, { method: 'POST', body: JSON.stringify(body) });
+      setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công — Tổng: ${vnd(r.total)}` });
       setCart({});
       setPosCustomer({ name: '', phone: '', address: '' });
       setCustomerSearch('');
       setPaidAmount(0);
+      setShowOrderModal(false);
       loadData();
     } catch (e) {
+      alert('Lỗi: ' + e.message);
       setMsg({ type: 'err', text: e.message });
     } finally {
       setBusy(false);
