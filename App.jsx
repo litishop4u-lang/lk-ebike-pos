@@ -1019,15 +1019,24 @@ export default function App() {
               <button onClick={() => setShowCustomerImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
               <button onClick={async () => {
                 try {
-                  const lines = customerImportText.split('\n');
-                  const items = lines.map(l => {
-                    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
-                    return c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null;
-                  }).filter(Boolean);
-                  const res = await api('/api/customers/import', { method: 'POST', body: JSON.stringify({ items }) });
-                  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} khách hàng!` });
-                  setShowCustomerImportModal(false); loadData();
-                } catch (err) { alert(err.message); }
+  const lines = customerImportText.split('\n');
+  const items = lines.map(l => {
+    const c = l.split(/\t|,|;/).map(x => x.trim().replace(/^["']|["']$/g, ''));
+    return c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null;
+  }).filter(Boolean);
+
+  if (items.length === 0) {
+    alert('Không đọc được dữ liệu hợp lệ! Vui lòng kiểm tra lại định dạng.');
+    return;
+  }
+
+  const res = await api('/api/customers/import', { method: 'POST', body: JSON.stringify({ items }) });
+  setMsg({ type: 'ok', text: `Nhập thành công ${res.successCount || items.length} khách hàng!` });
+  setShowCustomerImportModal(false); 
+  loadData();
+} catch (err) {
+  alert('Lỗi chi tiết: ' + err.message);
+}
               }} style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xác nhận</button>
             </div>
           </div>
