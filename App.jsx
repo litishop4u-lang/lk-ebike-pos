@@ -451,8 +451,7 @@ export default function App() {
                                 setSelectedPurchaseOrder(details);
                                 setShowViewPurchaseModal(true);
                               } catch (e) {
-                                setSelectedPurchaseOrder(po);
-                                setShowViewPurchaseModal(true);
+                                alert('Không thể tải chi tiết phiếu nhập: ' + e.message);
                               }
                             }}
                             title="Xem chi tiết"
@@ -462,7 +461,30 @@ export default function App() {
                           </button>
                           {/* Nút Sửa */}
                           <button 
-                            onClick={() => alert('Chức năng chỉnh sửa phiếu nhập đang được cập nhật!')}
+                            onClick={async () => {
+                              try {
+                                const details = await api(`/api/purchase_orders/${po.id}`);
+                                setPurchaseForm({
+                                  supplier_id: details.supplier_id,
+                                  payment_method: details.payment_method || 'Tiền mặt',
+                                  paid_amount: details.paid_amount || 0
+                                });
+                                setPurchaseItems((details.items || []).map(i => ({
+                                  product_id: i.product_id,
+                                  name: i.product_name,
+                                  sku: i.sku,
+                                  unit: 'Cái',
+                                  quantity: i.quantity,
+                                  price: i.price,
+                                  discount: i.discount || 0
+                                })));
+                                const foundSup = (suppliers || []).find(s => s.id === details.supplier_id);
+                                if (foundSup) setSupplierSearchKeyword(`${foundSup.name} (${foundSup.code})`);
+                                setShowCreatePurchaseModal(true);
+                              } catch (e) {
+                                alert('Không thể tải dữ liệu để sửa: ' + e.message);
+                              }
+                            }}
                             title="Chỉnh sửa"
                             style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}
                           >
@@ -487,37 +509,68 @@ export default function App() {
         )}
       </main>
 
-      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
+      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP (CÓ ĐẦY ĐỦ DANH SÁCH SẢN PHẨM) */}
       {showViewPurchaseModal && selectedPurchaseOrder && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+          <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
               <button onClick={() => setShowViewPurchaseModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
-            <p><b>Nhà cung cấp:</b> {selectedPurchaseOrder.supplier_name || '---'}</p>
-            <p><b>Ngày tạo:</b> {selectedPurchaseOrder.created_at ? new Date(selectedPurchaseOrder.created_at).toLocaleString('vi-VN') : '---'}</p>
-            <p><b>Phương thức thanh toán:</b> {selectedPurchaseOrder.payment_method || 'Tiền mặt'}</p>
-            <hr style={{ margin: '15px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />
-            <h4>Tổng kết thanh toán</h4>
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
-              <p><b>Tổng tiền hàng:</b> {vnd(selectedPurchaseOrder.total)}</p>
-              <p><b>Đã thanh toán:</b> {vnd(selectedPurchaseOrder.paid_amount)}</p>
-              <p><b>Còn nợ:</b> <span style={{ color: selectedPurchaseOrder.debt > 0 ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{vnd(selectedPurchaseOrder.debt)}</span></p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+              <div><b>Nhà cung cấp:</b> {selectedPurchaseOrder.supplier_name || '---'}</div>
+              <div><b>Ngày tạo:</b> {selectedPurchaseOrder.created_at ? new Date(selectedPurchaseOrder.created_at).toLocaleString('vi-VN') : '---'}</div>
+              <div><b>Phương thức thanh toán:</b> {selectedPurchaseOrder.payment_method || 'Tiền mặt'}</div>
             </div>
+
+            <h4 style={{ margin: '10px 0' }}>Danh sách sản phẩm nhập</h4>
+            <div style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>SKU</th>
+                    <th style={{ padding: '8px' }}>Tên sản phẩm</th>
+                    <th style={{ padding: '8px' }}>Số lượng</th>
+                    <th style={{ padding: '8px' }}>Đơn giá</th>
+                    <th style={{ padding: '8px' }}>Giảm giá</th>
+                    <th style={{ padding: '8px' }}>Thành tiền</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedPurchaseOrder.items || []).map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px' }}>{item.sku}</td>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>{item.product_name}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{item.quantity}</td>
+                      <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
+                      <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((item.quantity * item.price) - item.discount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Tổng tiền hàng:</span> <b>{vnd(selectedPurchaseOrder.total)}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Đã thanh toán:</span> <span>{vnd(selectedPurchaseOrder.paid_amount)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Còn nợ:</span> <b style={{ color: selectedPurchaseOrder.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedPurchaseOrder.debt)}</b></div>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowViewPurchaseModal(false)} style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Đóng</button>
+              <button onClick={() => setShowViewPurchaseModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* POPUP TẠO PHIẾU NHẬP HÀNG */}
+      {/* POPUP TẠO / SỬA PHIẾU NHẬP HÀNG */}
       {showCreatePurchaseModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ padding: '20px', background: '#7c3aed', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>Tạo Phiếu Nhập Hàng Mới</h3>
+              <h3 style={{ margin: 0 }}>Tạo / Chỉnh sửa Phiếu Nhập Hàng</h3>
               <button onClick={() => setShowCreatePurchaseModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
@@ -682,16 +735,16 @@ export default function App() {
                               items: purchaseItems
                             })
                           });
-                          setMsg({ type: 'ok', text: `Tạo phiếu nhập hàng ${res.code} thành công!` });
+                          setMsg({ type: 'ok', text: `Lưu phiếu nhập hàng thành công!` });
                           setShowCreatePurchaseModal(false);
                           loadData();
                         } catch (err) {
-                          alert('Lỗi tạo phiếu nhập: ' + err.message);
+                          alert('Lỗi: ' + err.message);
                         }
                       }}
                       style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                     >
-                      💾 Hoàn tất nhập hàng
+                      💾 Hoàn tất
                     </button>
                   </div>
                 );
