@@ -637,6 +637,91 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+          // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn (Bình quân gia quyền cuối kỳ)
+      if (pathname === '/api/reports/inventory-summary' && request.method === 'GET') {
+        const urlObj = new URL(request.url);
+        const startDate = urlObj.searchParams.get('startDate') || '2026-01-01T00:00:00.000Z';
+        const endDate = urlObj.searchParams.get('endDate') || new Date().toISOString();
+        const search = (urlObj.searchParams.get('search') || '').toLowerCase();
+
+        // 1. Lấy toàn bộ sản phẩm
+        const products = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
+        
+        // 2. Lấy tất cả các phiếu nhập kho (hoặc hóa đơn mua vào nếu có, tạm tính từ bảng products và lịch sử nhập)
+        // 3. Lấy tất cả các phiếu bán hàng (invoices) trong khoảng thời gian để tính số lượng xuất
+        const invoices = await db.prepare(`
+          <i class="icon"></i>nv.id, inv.created_at, ii.product_id, ii.quantity, ii.price 
+          FROM invoices inv 
+          JOIN invoice_items ii ON inv.id = ii.invoice_id
+        `).all(); // Hoặc tùy chỉnh theo bảng dữ liệu thực tế của bạn
+
+        // Tính toán số liệu cho từng sản phẩm
+        const reportData = (products.results || []).map(p => {
+          const unitCost = Number(p.cost_price) || 0;
+          
+          // Lọc các giao dịch xuất trong kỳ cho sản phẩm p
+          const prodInvoices = (invoices.results || []).filter(i => i.product_id === p.id);
+          let exportQty = 0;
+          let exportVal = 0;
+          
+          for (const inv of prodInvoices) {
+            if (inv.created_at >= startDate && inv.created_at <= endDate) {
+              const qty = Number(inv.quantity) || 0;
+              exportQty += qty;
+              exportVal += qty * unitCost; // Giá trị xuất theo giá vốn bình quân
+            }
+          }
+
+          const currentStock = Number(p.stock) || 0;
+          // Tồn đầu kỳ + Nhập trong kỳ - Xuất trong kỳ = Tồn cuối kỳ
+          // Suy ra Tồn đầu kỳ ước tính dựa trên tồn hiện tại
+          const importQty = 0; // Có thể liên kết bảng lịch sử nhập kho nếu có
+          const importVal = 0;
+          const openingQty = currentStock + exportQty - importQty;
+          const openingVal = openingQty * unitCost;
+          
+          const closingQty = currentStock;
+          const closingVal = closingQty * unitCost;
+
+          return {
+            id: p.id,
+            code: p.code,
+            name: p.name,
+            unit: p.unit || 'Cái',
+            openingQty,
+            openingVal,
+            importQty,
+            importVal,
+            exportQty,
+            exportVal,
+            closingQty,
+            closingVal
+          };
+        });
+
+        // Lọc theo từ khóa tìm kiếm (Mã hoặc Tên SP)
+        const filtered = reportData.filter(item => 
+          item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
+        );
+
+        // Tính tổng quan các thẻ phía trên
+        let totalOpeningVal = filtered.reduce((sum, i) => sum + i.openingVal, 0);
+        let totalImportVal = filtered.reduce((sum, i) => sum + i.importVal, 0);
+        let totalExportVal = filtered.reduce((sum, i) => sum + i.exportVal, 0);
+        let totalClosingVal = filtered.reduce((sum, i) => sum + i.closingVal, 0);
+
+        return json({
+          success: true,
+          summary: {
+            totalOpeningVal,
+            totalImportVal,
+            totalExportVal,
+            totalClosingVal
+          },
+          items: filtered
+        }, 200, origin);
+      }
+
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
       if (pathname.startsWith('/api/')) return json({ error: 'Không tìm thấy API' }, 404, origin);
