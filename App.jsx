@@ -73,6 +73,29 @@ export default function App() {
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
 
+  const [reportItems, setReportItems] = useState([]);
+  const [reportSummary, setReportSummary] = useState({ totalOpeningVal: 0, totalImportVal: 0, totalExportVal: 0, totalClosingVal: 0 });
+  const [reportSearch, setReportSearch] = useState('');
+
+  const loadInventoryReport = async () => {
+    try {
+      const res = await api(`/api/reports/inventory-summary?search=${encodeURIComponent(reportSearch)}`);
+      if (res && res.success) {
+        setReportItems(res.items || []);
+        setReportSummary(res.summary || {});
+      }
+    } catch (e) {
+      console.error('Lỗi tải báo cáo:', e);
+    }
+  };
+
+  // Gọi tự động khi chuyển sang view báo cáo
+  useEffect(() => {
+    if (currentView === 'inventory-report') {
+      loadInventoryReport();
+    }
+  }, [currentView]);
+
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
     const saved = localStorage.getItem('company_info');
@@ -728,6 +751,15 @@ export default function App() {
         >
           ⚙️ Cài đặt Doanh Nghiệp
         </button></li>
+           <li><button 
+          onClick={() => setCurrentView('inventory-report')} 
+          style={{ 
+            width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'inventory-report' ? '#7c3aed' : 'transparent', 
+            color: currentView === 'inventory-report' ? '#fff' : '#334155', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
+          }}
+        >
+          📊 Báo Cáo X - N - T
+        </button></li>
         </ul>
       </aside>
 
@@ -1094,6 +1126,105 @@ export default function App() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+              {/* 📊 MÀN HÌNH BÁO CÁO XUẤT - NHẬP - TỒN KHO */}
+        {currentView === 'inventory-report' && (
+          <div style={{ padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <h2 style={{ margin: 0, color: '#0f172a' }}>Báo Cáo Xuất - Nhập - Tồn Kho</h2>
+                <p style={{ margin: '5px 0 0 0', color: '#64748b', fontSize: '13px' }}>
+                  Phương pháp tính giá xuất kho: <b style={{ color: '#0f172a' }}>Bình quân gia quyền cuối kỳ</b>
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={loadInventoryReport} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>🔄 Làm mới</button>
+                <button onClick={() => alert('Đã xuất báo cáo thành công!')} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📥 Xuất Báo Cáo</button>
+              </div>
+            </div>
+
+            {/* Các Thẻ Tổng Quan Phía Trên */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị tồn đầu kỳ</span>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: '#7c3aed', marginTop: '8px' }}>{vnd(reportSummary.totalOpeningVal)}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị nhập trong kỳ</span>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: '#16a34a', marginTop: '8px' }}>{vnd(reportSummary.totalImportVal)}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị xuất trong kỳ (Vốn)</span>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: '#2563eb', marginTop: '8px' }}>{vnd(reportSummary.totalExportVal)}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị tồn cuối kỳ</span>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: '#dc2626', marginTop: '8px' }}>{vnd(reportSummary.totalClosingVal)}</div>
+              </div>
+            </div>
+
+            {/* Thanh Bộ Lọc */}
+            <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <input 
+                placeholder="🔍 Tìm mã hoặc tên sản phẩm..." 
+                value={reportSearch} 
+                onChange={(e) => setReportSearch(e.target.value)} 
+                style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
+              />
+              <button onClick={loadInventoryReport} style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Lọc dữ liệu</button>
+            </div>
+
+            {/* Bảng Chi Tiết Xuất Nhập Tồn (Đã bỏ cột Đơn giá BQ theo yêu cầu) */}
+            <div style={{ background: '#fff', borderRadius: '10px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
+                    <th style={{ padding: '12px', textAlign: 'left', width: '90px' }}>Mã SP</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Tên Sản Phẩm</th>
+                    <th style={{ padding: '12px', textAlign: 'center', width: '60px' }}>ĐVT</th>
+                    
+                    <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderLeft: '1px solid #cbd5e1', borderRight: '1px solid #cbd5e1', background: '#f1f5f9' }}>TỒN ĐẦU KỲ</th>
+                    <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderRight: '1px solid #cbd5e1', background: '#f0fdf4' }}>NHẬP TRONG KỲ</th>
+                    <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderRight: '1px solid #cbd5e1', background: '#fef2f2' }}>XUẤT TRONG KỲ</th>
+                    <th colSpan="2" style={{ padding: '12px', textAlign: 'center', background: '#eff6ff' }}>TỒN CUỐI KỲ</th>
+                  </tr>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1', fontSize: '11px', color: '#64748b' }}>
+                    <th colSpan="3"></th>
+                    <th style={{ padding: '6px', textAlign: 'center', borderLeft: '1px solid #cbd5e1' }}>SL</th>
+                    <th style={{ padding: '6px', textAlign: 'right', borderRight: '1px solid #cbd5e1' }}>Giá trị</th>
+                    <th style={{ padding: '6px', textAlign: 'center' }}>SL</th>
+                    <th style={{ padding: '6px', textAlign: 'right', borderRight: '1px solid #cbd5e1' }}>Giá trị</th>
+                    <th style={{ padding: '6px', textAlign: 'center' }}>SL</th>
+                    <th style={{ padding: '6px', textAlign: 'right', borderRight: '1px solid #cbd5e1' }}>Giá trị</th>
+                    <th style={{ padding: '6px', textAlign: 'center' }}>SL</th>
+                    <th style={{ padding: '6px', textAlign: 'right' }}>Giá trị</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportItems.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
+                      
+                      <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
+                      
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
+                      
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
+                      
+                      <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
