@@ -253,7 +253,6 @@ export default function App() {
 
     // === CHÈN ĐOẠN HÀM handlePrintOrder VÀO ĐÂY ===
   const handlePrintOrder = async (item, isOrder = false) => {
-    // Nếu dữ liệu item chưa có đầy đủ items chi tiết, gọi API lấy chi tiết
     let printData = item;
     if (!item.items) {
       try {
@@ -275,23 +274,41 @@ export default function App() {
     const codeText = printData.code || '---';
     const dateText = printData.created_at ? new Date(printData.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
     const paymentMethod = printData.payment_method || 'Tiền mặt';
-    const totalAmount = Number(printData.total) || 0;
+    
+    const items = printData.items || [];
+    let grossTotal = 0; 
+    let totalDiscount = 0; 
+
+    const itemsHtml = items.map((prod, index) => {
+      const price = Number(prod.price) || 0;
+      const qty = Number(prod.quantity) || 0;
+      const discount = Number(prod.discount) || 0;
+      const lineGross = price * qty;
+      const lineNet = lineGross - discount;
+
+      grossTotal += lineGross;
+      totalDiscount += discount;
+
+      return `
+        <tr>
+          <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.product_name || prod.name || 'Sản phẩm'}</td>
+          <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${qty}</td>
+          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0;">${price.toLocaleString('vi-VN')}</td>
+          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; color: #dc2626;">${discount > 0 ? discount.toLocaleString('vi-VN') : '0'}</td>
+          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${lineNet.toLocaleString('vi-VN')}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const finalTotal = grossTotal - totalDiscount;
     const paidAmount = Number(printData.paid_amount) || 0;
-    const debtAmount = totalAmount - paidAmount;
+    const debtAmount = finalTotal - paidAmount;
 
-    const itemsHtml = (printData.items || []).map((prod, index) => `
-      <tr>
-        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.product_name || prod.name || 'Sản phẩm'}</td>
-        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.quantity}</td>
-        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0;">${(Number(prod.price) || 0).toLocaleString('vi-VN')}</td>
-        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${((Number(prod.price) * prod.quantity) - (Number(prod.discount) || 0)).toLocaleString('vi-VN')}</td>
-      </tr>
-    `).join('');
-
+    // Logo chiếm 1/3 (33%), Thông tin công ty chiếm 2/3 (65%)
     const logoHtml = companyInfo.logoUrl 
-      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;" />`
-      : `<h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 26px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 2px 0 0 0; color: #64748b; font-size: 12px; font-weight: bold;">${companyInfo.subtitle}</p>`;
+      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 80px; max-width: 100%; object-fit: contain;" />`
+      : `<h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 32px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px; font-weight: bold;">${companyInfo.subtitle}</p>`;
 
     printWindow.document.write(`
       <html>
@@ -299,17 +316,18 @@ export default function App() {
           <title>${titleText} - ${codeText}</title>
           <style>
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 20px; font-size: 14px; }
-            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
-            .company-right { border: 1px solid #cbd5e1; padding: 10px 15px; border-radius: 6px; width: 340px; background: #f8fafc; }
-            .company-right h3 { margin: 0 0 5px 0; color: #2563eb; font-size: 14px; }
-            .company-right p { margin: 2px 0; font-size: 11px; color: #475569; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
+            .brand-left { width: 33%; }
+            .company-right { width: 65%; border: 1px solid #cbd5e1; padding: 12px 18px; border-radius: 6px; background: #f8fafc; }
+            .company-right h3 { margin: 0 0 6px 0; color: #2563eb; font-size: 16px; }
+            .company-right p { margin: 3px 0; font-size: 12px; color: #475569; }
             .title-area { text-align: center; margin-bottom: 20px; }
             .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
             .title-area p { margin: 5px 0 0 0; color: #64748b; font-size: 13px; }
             .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
-            .totals { width: 320px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
+            .totals { width: 350px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
             .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
             .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 30px; font-weight: bold; }
@@ -353,8 +371,9 @@ export default function App() {
                 <th style="width: 40px; text-align: center;">STT</th>
                 <th>Tên sản phẩm</th>
                 <th style="width: 50px; text-align: center;">SL</th>
-                <th style="width: 100px; text-align: right;">Đơn giá</th>
-                <th style="width: 110px; text-align: right;">Thành tiền</th>
+                <th style="width: 90px; text-align: right;">Đơn giá</th>
+                <th style="width: 90px; text-align: right;">Giảm giá</th>
+                <th style="width: 100px; text-align: right;">Thành tiền</th>
               </tr>
             </thead>
             <tbody>
@@ -363,7 +382,8 @@ export default function App() {
           </table>
 
           <div class="totals">
-            <div><span>Tổng cộng:</span> <b>${totalAmount.toLocaleString('vi-VN')} ₫</b></div>
+            <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
+            <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
             <div><span>Đã thanh toán / Tạm ứng:</span> <b>${paidAmount.toLocaleString('vi-VN')} ₫</b></div>
             <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
           </div>
