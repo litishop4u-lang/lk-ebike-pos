@@ -195,7 +195,7 @@ export default function App() {
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: lines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
+        items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
       };
 
       let r;
@@ -206,7 +206,7 @@ export default function App() {
       } else {
         // Tạo mới
         if (modalOrderType === 'invoices') {
-          for (const l of lines) {
+          for (const l of cartLines) {
             if (l.stock < l.quantity) {
               throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
             }
