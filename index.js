@@ -280,6 +280,45 @@ export default {
         return json(res.results || [], 200, origin);
       }
 
+      // PUT /api/orders/:id — Cập nhật đơn đặt hàng
+      if (pathname.match(/^\/api\/orders\/\d+$/) && request.method === 'PUT') {
+        const id = pathname.split('/')[3];
+        const b = await request.json();
+        const customer_name = String(b.customer_name || '').trim();
+        const customer_phone = String(b.customer_phone || '').trim() || null;
+        const address = String(b.address || '').trim() || null;
+        const created_at = b.created_at || new Date().toISOString();
+        const items = b.items || [];
+        const paid_amount = Number(b.paid_amount) || 0;
+        const payment_method = b.payment_method || 'Tiền mặt';
+
+        if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
+        if (items.length === 0) throw new HttpError(400, 'Giỏ hàng trống');
+
+        let total = 0;
+        for (const item of items) {
+          total += (item.quantity * item.price) - (item.discount || 0);
+        }
+        const debt = total - paid_amount;
+
+        const stmts = [
+          db.prepare('UPDATE orders SET customer_name = ?, customer_phone = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+            .bind(customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, id),
+          db.prepare('DELETE FROM order_items WHERE order_id = ?').bind(id)
+        ];
+
+        for (const item of items) {
+          const lineTotal = (item.quantity * item.price) - (item.discount || 0);
+          stmts.push(
+            db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total) VALUES (?, ?, ?, ?, ?, ?)')
+              .bind(id, item.product_id, item.quantity, item.price, item.discount || 0, lineTotal)
+          );
+        }
+
+        await db.batch(stmts);
+        return json({ success: true, total }, 200, origin);
+      }
+
       // GET /api/orders/:id hoặc /api/invoices/:id (lấy chi tiết kèm items)
       if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'GET') {
         const parts = pathname.split('/');
