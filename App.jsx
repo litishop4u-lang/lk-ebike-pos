@@ -73,6 +73,20 @@ export default function App() {
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
 
+  // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
+  const [companyInfo, setCompanyInfo] = useState(() => {
+    const saved = localStorage.getItem('company_info');
+    return saved ? JSON.parse(saved) : {
+      name: 'XE ĐIỆN LINH KHANG (LK EBIKE)',
+      brand: 'LK EBIKE',
+      subtitle: 'By BabyBikeStore',
+      address: '767/10 Trần Hưng Đạo, Phường Chợ Quán, Tp.HCM',
+      taxCode: '07918402804',
+      phone: '0768 640 918',
+      logoUrl: '' // Dán link ảnh logo vào đây hoặc để trống sẽ hiện chữ Brand
+    };
+  });
+
   // ===== States cho Khách hàng =====
   const [customers, setCustomers] = useState([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -236,6 +250,136 @@ export default function App() {
       setBusy(false);
     }
   }
+
+    // === CHÈN ĐOẠN HÀM handlePrintOrder VÀO ĐÂY ===
+  const handlePrintOrder = (item, isOrder = false) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Vui lòng cho phép trình duyệt mở popup để in hóa đơn!');
+      return;
+    }
+
+    const titleText = isOrder ? 'ĐƠN ĐẶT HÀNG' : 'HÓA ĐƠN BÁN HÀNG';
+    const codeText = item.code || '---';
+    const dateText = item.created_at ? new Date(item.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
+    const paymentMethod = item.payment_method || 'Tiền mặt';
+    const totalAmount = Number(item.total) || 0;
+    const paidAmount = Number(item.paid_amount) || 0;
+    const debtAmount = totalAmount - paidAmount;
+
+    const itemsHtml = (item.items || []).map((prod, index) => `
+      <tr>
+        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.product_name || prod.name || 'Sản phẩm'}</td>
+        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.quantity}</td>
+        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0;">${(Number(prod.price) || 0).toLocaleString('vi-VN')}</td>
+        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${((Number(prod.price) * prod.quantity) - (Number(prod.discount) || 0)).toLocaleString('vi-VN')}</td>
+      </tr>
+    `).join('');
+
+    // Hiển thị Logo tùy biến từ trang Cài đặt
+    const logoHtml = companyInfo.logoUrl 
+      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 55px; object-fit: contain;" />`
+      : `<h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 26px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 2px 0 0 0; color: #64748b; font-size: 12px; font-weight: bold;">${companyInfo.subtitle}</p>`;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${titleText} - ${codeText}</title>
+          <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 20px; font-size: 14px; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
+            .company-right { border: 1px solid #cbd5e1; padding: 10px 15px; border-radius: 6px; width: 340px; background: #f8fafc; }
+            .company-right h3 { margin: 0 0 5px 0; color: #2563eb; font-size: 14px; }
+            .company-right p { margin: 2px 0; font-size: 11px; color: #475569; }
+            .title-area { text-align: center; margin-bottom: 20px; }
+            .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
+            .title-area p { margin: 5px 0 0 0; color: #64748b; font-size: 13px; }
+            .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
+            .totals { width: 320px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
+            .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
+            .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
+            .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 30px; font-weight: bold; }
+            .signatures div { width: 200px; }
+            .signatures p { font-weight: normal; font-size: 12px; color: #64748b; font-style: italic; margin-top: 4px; }
+            .footer { text-align: center; font-style: italic; color: #64748b; font-size: 12px; margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 15px; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand-left">
+              ${logoHtml}
+            </div>
+            <div class="company-right">
+              <h3>${companyInfo.name}</h3>
+              <p><b>Địa chỉ:</b> ${companyInfo.address}</p>
+              <p><b>MST:</b> ${companyInfo.taxCode} | <b>SĐT:</b> ${companyInfo.phone}</p>
+            </div>
+          </div>
+
+          <div class="title-area">
+            <h2>${titleText}</h2>
+            <p>Mã hóa đơn: <b>${codeText}</b> &nbsp;|&nbsp; Ngày lập: ${dateText}</p>
+          </div>
+
+          <div class="info-grid">
+            <div>
+              <p><b>Khách hàng:</b> ${item.customer_name || 'Khách lẻ'}</p>
+              <p><b>Địa chỉ:</b> ${item.address || '—'}</p>
+              <p><b>SĐT:</b> ${item.customer_phone || '—'}</p>
+            </div>
+            <div>
+              <p><b>Hình thức TT:</b> ${paymentMethod}</p>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 40px; text-align: center;">STT</th>
+                <th>Tên sản phẩm</th>
+                <th style="width: 50px; text-align: center;">SL</th>
+                <th style="width: 100px; text-align: right;">Đơn giá</th>
+                <th style="width: 110px; text-align: right;">Thành tiền</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div><span>Tổng cộng:</span> <b>${totalAmount.toLocaleString('vi-VN')} ₫</b></div>
+            <div><span>Đã thanh toán / Tạm ứng:</span> <b>${paidAmount.toLocaleString('vi-VN')} ₫</b></div>
+            <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
+          </div>
+
+          <div class="signatures">
+            <div>
+              <b>Người lập phiếu</b>
+              <p>(Ký, ghi rõ họ tên)</p>
+            </div>
+            <div>
+              <b>Khách hàng</b>
+              <p>(Ký, ghi rõ họ tên)</p>
+            </div>
+          </div>
+
+          <div class="footer">
+            Cảm ơn quý khách và hẹn gặp lại!
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); window.close(); };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
       // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -539,6 +683,15 @@ export default function App() {
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
           <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>Khách hàng</button></li>
+          <li><button 
+          onClick={() => setCurrentView('settings')} 
+          style={{ 
+            width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'settings' ? '#7c3aed' : 'transparent', 
+            color: currentView === 'settings' ? '#fff' : '#334155', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
+          }}
+        >
+          ⚙️ Cài đặt Doanh Nghiệp
+        </button></li>
         </ul>
       </aside>
 
@@ -892,6 +1045,96 @@ export default function App() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+            {/* ⚙️ MÀN HÌNH CÀI ĐẶT THÔNG TIN DOANH NGHIỆP & LOGO */}
+        {currentView === 'settings' && (
+          <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', maxWidth: '700px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <h2 style={{ marginTop: 0, color: '#7c3aed', marginBottom: '20px' }}>⚙️ Cài đặt thông tin doanh nghiệp & Logo in hóa đơn</h2>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Tên doanh nghiệp đầy đủ (In trên hóa đơn):</label>
+                <input 
+                  value={companyInfo.name} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Tên thương hiệu ngắn (Brand):</label>
+                <input 
+                  value={companyInfo.brand} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, brand: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phụ đề / Slogan:</label>
+                <input 
+                  value={companyInfo.subtitle} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, subtitle: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Link ảnh Logo (URL hình ảnh):</label>
+                <input 
+                  placeholder="Dán đường dẫn ảnh logo vào đây (ví dụ: https://.../logo.png). Để trống sẽ hiện chữ Brand" 
+                  value={companyInfo.logoUrl} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, logoUrl: e.target.value })} 
+                  style={inputStyle} 
+                />
+                {companyInfo.logoUrl && (
+                  <div style={{ marginTop: '10px', padding: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', display: 'inline-block' }}>
+                    <span style={{ fontSize: '11px', display: 'block', color: '#64748b', marginBottom: '5px' }}>Xem trước Logo:</span>
+                    <img src={companyInfo.logoUrl} alt="Logo Preview" style={{ maxHeight: '40px', objectFit: 'contain' }} onError={(e) => e.target.style.display = 'none'} />
+                  </div>
+                )}
+              </div>
+
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Địa chỉ công ty:</label>
+                <input 
+                  value={companyInfo.address} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Mã số thuế (MST):</label>
+                <input 
+                  value={companyInfo.taxCode} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, taxCode: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số điện thoại liên hệ:</label>
+                <input 
+                  value={companyInfo.phone} 
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })} 
+                  style={inputStyle} 
+                />
+              </div>
+            </div>
+
+            <button 
+              onClick={() => {
+                localStorage.setItem('company_info', JSON.stringify(companyInfo));
+                setMsg({ type: 'ok', text: 'Đã lưu cài đặt thông tin doanh nghiệp thành công!' });
+                alert('Đã lưu thông tin doanh nghiệp thành công!');
+              }}
+              style={{ padding: '12px 24px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}
+            >
+              💾 Lưu Thay Đổi
+            </button>
           </div>
         )}
 
