@@ -252,7 +252,19 @@ export default function App() {
   }
 
     // === CHÈN ĐOẠN HÀM handlePrintOrder VÀO ĐÂY ===
-  const handlePrintOrder = (item, isOrder = false) => {
+  const handlePrintOrder = async (item, isOrder = false) => {
+    // Nếu dữ liệu item chưa có đầy đủ items chi tiết, gọi API lấy chi tiết
+    let printData = item;
+    if (!item.items) {
+      try {
+        const type = isOrder ? 'orders' : 'invoices';
+        printData = await api(`/api/${type}/${item.id}`);
+      } catch (e) {
+        alert('Không thể tải chi tiết để in: ' + e.message);
+        return;
+      }
+    }
+
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       alert('Vui lòng cho phép trình duyệt mở popup để in hóa đơn!');
@@ -260,14 +272,14 @@ export default function App() {
     }
 
     const titleText = isOrder ? 'ĐƠN ĐẶT HÀNG' : 'HÓA ĐƠN BÁN HÀNG';
-    const codeText = item.code || '---';
-    const dateText = item.created_at ? new Date(item.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
-    const paymentMethod = item.payment_method || 'Tiền mặt';
-    const totalAmount = Number(item.total) || 0;
-    const paidAmount = Number(item.paid_amount) || 0;
+    const codeText = printData.code || '---';
+    const dateText = printData.created_at ? new Date(printData.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
+    const paymentMethod = printData.payment_method || 'Tiền mặt';
+    const totalAmount = Number(printData.total) || 0;
+    const paidAmount = Number(printData.paid_amount) || 0;
     const debtAmount = totalAmount - paidAmount;
 
-    const itemsHtml = (item.items || []).map((prod, index) => `
+    const itemsHtml = (printData.items || []).map((prod, index) => `
       <tr>
         <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
         <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.product_name || prod.name || 'Sản phẩm'}</td>
@@ -277,9 +289,8 @@ export default function App() {
       </tr>
     `).join('');
 
-    // Hiển thị Logo tùy biến từ trang Cài đặt
     const logoHtml = companyInfo.logoUrl 
-      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 55px; object-fit: contain;" />`
+      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;" />`
       : `<h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 26px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 2px 0 0 0; color: #64748b; font-size: 12px; font-weight: bold;">${companyInfo.subtitle}</p>`;
 
     printWindow.document.write(`
@@ -322,14 +333,14 @@ export default function App() {
 
           <div class="title-area">
             <h2>${titleText}</h2>
-            <p>Mã hóa đơn: <b>${codeText}</b> &nbsp;|&nbsp; Ngày lập: ${dateText}</p>
+            <p>Mã chứng từ: <b>${codeText}</b> &nbsp;|&nbsp; Ngày lập: ${dateText}</p>
           </div>
 
           <div class="info-grid">
             <div>
-              <p><b>Khách hàng:</b> ${item.customer_name || 'Khách lẻ'}</p>
-              <p><b>Địa chỉ:</b> ${item.address || '—'}</p>
-              <p><b>SĐT:</b> ${item.customer_phone || '—'}</p>
+              <p><b>Khách hàng:</b> ${printData.customer_name || 'Khách lẻ'}</p>
+              <p><b>Địa chỉ:</b> ${printData.address || '—'}</p>
+              <p><b>SĐT:</b> ${printData.customer_phone || '—'}</p>
             </div>
             <div>
               <p><b>Hình thức TT:</b> ${paymentMethod}</p>
@@ -748,6 +759,11 @@ export default function App() {
                         <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount)}</td>
                         <td style={{ padding: '10px', color: inv.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(inv.debt)}</td>
                         <td style={{ padding: '10px' }}>{inv.payment_method || 'Tiền mặt'}</td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
+                          <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
+                          <button onClick={() => handleDeleteOrderOrInvoice('invoices', inv.id, inv.code)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -786,6 +802,7 @@ export default function App() {
                         <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#d97706', fontSize: '12px', fontWeight: 'bold' }}>{ord.status || 'Pending'}</span></td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button onClick={() => handleViewDetail('orders', ord.id)} title="Xem chi tiết" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
+                          <button onClick={() => handlePrintOrder(ord, true)} title="In đơn đặt hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleEditOrder(ord)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
                           <button onClick={() => handleDeleteOrderOrInvoice('orders', ord.id, ord.code)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                         </td>
@@ -841,10 +858,17 @@ export default function App() {
               <span>Tổng tiền:</span> <span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
+              <button 
+                onClick={() => handlePrintOrder(detailData, detailData.code.startsWith('DH'))} 
+                style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                🖨️ In Chứng Từ
+              </button>
               <button onClick={() => setShowDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
             </div>
-          </div>
+
+            </div>
         </div>
       )}
 
