@@ -280,6 +280,50 @@ export default {
         return json(res.results || [], 200, origin);
       }
 
+      // GET /api/orders/:id hoặc /api/invoices/:id (lấy chi tiết kèm items)
+      if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'GET') {
+        const parts = pathname.split('/');
+        const type = parts[2]; // 'orders' hoặc 'invoices'
+        const id = parts[3];
+        const itemTable = type === 'orders' ? 'order_items' : 'invoice_items';
+        const foreignKey = type === 'orders' ? 'order_id' : 'invoice_id';
+
+        const mainObj = await db.prepare(`SELECT * FROM ${type} WHERE id = ?`).bind(id).first();
+        if (!mainObj) throw new HttpError(404, 'Không tìm thấy dữ liệu');
+
+        const items = await db.prepare(`
+          select i.*, p.name as product_name, p.sku 
+          from ${itemTable} i 
+          left join products p on i.product_id = p.id 
+          where i.${foreignKey} = ?
+        `).bind(id).all();
+
+        return json({ ...mainObj, items: items.results || [] }, 200, origin);
+      }
+
+        // DELETE /api/orders/:id hoặc /api/invoices/:id
+      if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'DELETE') {
+        const parts = pathname.split('/');
+        const type = parts[2];
+        const id = parts[3];
+        const itemTable = type === 'orders' ? 'order_items' : 'invoice_items';
+        const foreignKey = type === 'orders' ? 'order_id' : 'invoice_id';
+
+        // Nếu là phiếu bán hàng (invoices), khi xóa cần hoàn lại tồn kho sản phẩm
+        if (type === 'invoices') {
+          const items = await db.prepare(`SELECT * FROM invoice_items WHERE invoice_id = ?`).bind(id).all();
+          for (const item of (items.results || [])) {
+            await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(item.quantity, item.product_id).run();
+          }
+        }
+
+        await db.batch([
+          db.prepare(`DELETE FROM ${itemTable} WHERE ${foreignKey} = ?`).bind(id),
+          db.prepare(`DELETE FROM ${type} WHERE id = ?`).bind(id)
+        ]);
+        return json({ success: true }, 200, origin);
+      }
+
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
