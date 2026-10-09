@@ -307,7 +307,7 @@ export default function App() {
 
     // Logo chiếm 1/3 (33%), Thông tin công ty chiếm 2/3 (65%)
     const logoHtml = companyInfo.logoUrl 
-      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="width: 100%; height: 75px; object-fit: contain; display: block;" />`
+      ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain; display: block;" />`
       : `<div style="text-align: center;"><h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 28px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px; font-weight: bold;">${companyInfo.subtitle}</p></div>`;
 
     printWindow.document.write(`
@@ -316,9 +316,9 @@ export default function App() {
           <title>${titleText} - ${codeText}</title>
           <style>
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 20px; font-size: 14px; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
-            .brand-left { width: 33%; border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
-            .company-right { width: 65%; border: 1px solid #cbd5e1; padding: 10px 15px; border-radius: 6px; background: #f8fafc; box-sizing: border-box; }
+            .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
+            .brand-left { width: 33%; border: 1px solid #cbd5e1; padding: 4px; border-radius: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+            .company-right { width: 65%; border: 1px solid #cbd5e1; padding: 10px 15px; border-radius: 6px; background: #f8fafc; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
             .company-right h3 { margin: 0 0 6px 0; color: #2563eb; font-size: 16px; }
             .company-right p { margin: 3px 0; font-size: 12px; color: #475569; }
             .title-area { text-align: center; margin-bottom: 20px; }
