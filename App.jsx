@@ -61,6 +61,7 @@ export default function App() {
   const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
   const [showViewPurchaseModal, setShowViewPurchaseModal] = useState(false);
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
+  const [importDate, setImportDate] = useState(() => new Date().toISOString().slice(0, 16));
 
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
   const [purchaseItems, setPurchaseItems] = useState([]);
@@ -644,7 +645,12 @@ export default function App() {
   const openCreatePurchase = () => {
     setEditingPurchaseId(null);
     setPurchaseItems([]);
-    setPurchaseForm({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
+    setPurchaseForm({ 
+      supplier_id: '', 
+      payment_method: 'Tiền mặt', 
+      paid_amount: 0, 
+      created_at: new Date().toISOString().slice(0, 16) // 👈 Khởi tạo ngày giờ hiện tại
+    });
     setSupplierSearchKeyword('');
     setProductSearchKeyword('');
     setShowCreatePurchaseModal(true);
@@ -688,6 +694,7 @@ export default function App() {
           supplier_id: purchaseForm.supplier_id,
           payment_method: purchaseForm.payment_method,
           paid_amount: Number(purchaseForm.paid_amount) || 0,
+          created_at: purchaseForm.created_at ? new Date(purchaseForm.created_at).toISOString() : new Date().toISOString(), // 👈 Thêm trường này để tùy chỉnh ngày nhập
           items: purchaseItems,
         }),
       });
@@ -742,24 +749,26 @@ export default function App() {
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
           <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>Khách hàng</button></li>
-          <li><button 
+          <button 
           onClick={() => setCurrentView('settings')} 
           style={{ 
             width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'settings' ? '#7c3aed' : 'transparent', 
-            color: currentView === 'settings' ? '#fff' : '#334155', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
+            color: '#fff', /* 👈 Đảm bảo luôn là màu trắng (#fff) */
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
           }}
         >
           ⚙️ Cài đặt Doanh Nghiệp
-        </button></li>
-           <li><button 
+        </button>
+           <button 
           onClick={() => setCurrentView('inventory-report')} 
           style={{ 
             width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'inventory-report' ? '#7c3aed' : 'transparent', 
-            color: currentView === 'inventory-report' ? '#fff' : '#334155', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
+            color: '#fff', /* 👈 Đảm bảo luôn là màu trắng (#fff) */
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
           }}
         >
           📊 Báo Cáo X - N - T
-        </button></li>
+        </button>
         </ul>
       </aside>
 
@@ -1489,7 +1498,17 @@ export default function App() {
                     <option value="Công nợ">Công nợ</option>
                   </select>
                 </div>
-              </div>
+                
+                <div>
+  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
+  <input 
+    type="datetime-local" 
+    value={purchaseForm.created_at || ''} 
+    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })} 
+    style={inputStyle} 
+  />
+</div>
+            </div>
 
               <div style={{ marginBottom: '20px' }}>
                 <label style={labelStyle}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
