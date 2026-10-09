@@ -40,6 +40,8 @@ export default function App() {
   const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
   const [posProductKeyword, setPosProductKeyword] = useState('');
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
+  const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
 
   // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
@@ -180,45 +182,53 @@ export default function App() {
     }
   };
 
-  const handlePosSubmit = async () => {
+  async function handlePosSubmit() {
     setBusy(true); setMsg(null);
     try {
-      if (!posCustomer.name.trim()) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
-      if (cartLines.length === 0) throw new Error('Giỏ hàng trống!');
-
-      if (modalOrderType === 'invoices') {
-        for (const l of cartLines) {
-          if (l.stock < l.quantity) {
-            throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
-          }
-        }
-      }
+      if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
+      if (lines.length === 0) throw new Error('Giỏ hàng trống!');
 
       const body = {
-        customer_name: posCustomer.name.trim(),
+        customer_name: posCustomer.name,
         customer_phone: posCustomer.phone,
         address: posCustomer.address,
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount })),
+        items: lines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
       };
 
-      const r = await api(`/api/${modalOrderType}`, { method: 'POST', body: JSON.stringify(body) });
-      setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công — Tổng: ${vnd(r.total)}` });
+      let r;
+      if (modalOrderType === 'orders' && editingOrderId) {
+        // Nếu đang sửa đơn đặt hàng
+        r = await api(`/api/orders/${editingOrderId}`, { method: 'PUT', body: JSON.stringify(body) });
+        setMsg({ type: 'ok', text: `Đã cập nhật đơn đặt hàng ${r.code || ''} thành công!` });
+      } else {
+        // Tạo mới
+        if (modalOrderType === 'invoices') {
+          for (const l of lines) {
+            if (l.stock < l.quantity) {
+              throw new Error(`Sản phẩm "${l.name}" chỉ còn ${l.stock} trong kho, không đủ xuất phiếu bán hàng!`);
+            }
+          }
+        }
+        r = await api(`/api/${modalOrderType}`, { method: 'POST', body: JSON.stringify(body) });
+        setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công!` });
+      }
+
       setCart({});
       setPosCustomer({ name: '', phone: '', address: '' });
       setCustomerSearch('');
       setPaidAmount(0);
+      setEditingOrderId(null);
       setShowOrderModal(false);
       loadData();
     } catch (e) {
-      alert('Lỗi: ' + e.message); // popup đang che thanh thông báo nên dùng alert
-      setMsg({ type: 'err', text: e.message });
+      alert('Lỗi: ' + e.message);
     } finally {
       setBusy(false);
     }
-  };
+  }
 
       // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -238,10 +248,12 @@ export default function App() {
   const handleEditOrder = async (ord) => {
     try {
       const details = await api(`/api/orders/${ord.id}`);
+      setEditingOrderId(ord.id); // Lưu lại ID để biết đang sửa đơn này
       setModalOrderType('orders');
       setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
       setCustomerSearch(details.customer_name);
       setPaidAmount(details.paid_amount || 0);
+      setPaymentMethod(details.payment_method || 'Tiền mặt');
       setOrderDate(details.created_at ? details.created_at.split('T')[0] : new Date().toISOString().split('T')[0]);
 
       const newCart = {};
@@ -533,19 +545,19 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Đơn hàng & Phiếu bán hàng</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={() => openOrderModal('invoices')}
-                  style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                >
-                  + Tạo Phiếu Bán Hàng
-                </button>
-                <button
-                  onClick={() => openOrderModal('orders')}
-                  style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                >
-                  + Tạo Đơn Đặt Hàng
-                </button>
-              </div>
+                <button 
+                onClick={() => { setEditingOrderId(null); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                + Tạo Phiếu Bán Hàng
+              </button>
+              <button 
+                onClick={() => { setEditingOrderId(null); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                + Tạo Đơn Đặt Hàng
+              </button>
+            </div>
             </div>
 
             {/* Bảng Danh sách Phiếu Bán Hàng */}
