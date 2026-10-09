@@ -156,6 +156,30 @@ export default function App() {
       return next;
     });
 
+  const handleSelectOrderToInvoice = async (orderId) => {
+    if (!orderId) return;
+    try {
+      const details = await api(`/api/orders/${orderId}`);
+      // Điền thông tin khách hàng
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setCustomerSearch(details.customer_name);
+      
+      // Lấy số tiền đã cọc từ đơn đặt hàng làm mặc định đã thanh toán / tạm ứng
+      setPaidAmount(details.paid_amount || 0);
+
+      // Đưa sản phẩm vào giỏ hàng
+      const newCart = {};
+      details.items.forEach(item => {
+        newCart[item.product_id] = item.quantity;
+        newCart[item.product_id + '_price'] = item.price;
+        newCart[item.product_id + '_discount'] = item.discount || 0;
+      });
+      setCart(newCart);
+    } catch (e) {
+      alert('Lỗi tải đơn đặt hàng: ' + e.message);
+    }
+  };
+
   const handlePosSubmit = async () => {
     setBusy(true); setMsg(null);
     try {
@@ -520,21 +544,29 @@ export default function App() {
                     <th style={{ padding: '10px' }}>Ngày đặt</th>
                     <th style={{ padding: '10px' }}>Khách hàng</th>
                     <th style={{ padding: '10px' }}>Tổng tiền</th>
+                    <th style={{ padding: '10px' }}>Đã tạm ứng</th>
+                    <th style={{ padding: '10px' }}>Còn nợ</th>
                     <th style={{ padding: '10px' }}>Trạng thái</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ordersList.length === 0 ? (
-                    <tr><td colSpan="5" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có đơn đặt hàng nào.</td></tr>
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có đơn đặt hàng nào.</td></tr>
                   ) : (
-                    ordersList.map((ord) => (
+                    ordersList.map(ord => (
                       <tr key={ord.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px', fontWeight: 'bold', color: '#7c3aed' }}>{ord.code}</td>
                         <td style={{ padding: '10px' }}>{ord.created_at ? new Date(ord.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                         <td style={{ padding: '10px', fontWeight: '500' }}>{ord.customer_name}</td>
                         <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(ord.total)}</td>
-                        <td style={{ padding: '10px' }}>
-                          <span style={{ padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#d97706', fontSize: '12px', fontWeight: 'bold' }}>{ord.status || 'Pending'}</span>
+                        <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(ord.paid_amount)}</td>
+                        <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(ord.debt)}</td>
+                        <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#d97706', fontSize: '12px', fontWeight: 'bold' }}>{ord.status || 'Pending'}</span></td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <button onClick={() => handleViewDetail('orders', ord.id)} title="Xem chi tiết" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
+                          <button onClick={() => handleEditOrder(ord)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
+                          <button onClick={() => handleDeleteOrderOrInvoice('orders', ord.id, ord.code)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                         </td>
                       </tr>
                     ))
@@ -1075,6 +1107,22 @@ export default function App() {
 
               {/* ===== Cột phải: thông tin đơn + giỏ hàng ===== */}
               <div style={{ display: 'flex', flexDirection: 'column' }}>
+
+                {modalOrderType === 'invoices' && (
+                  <div style={{ marginBottom: '10px', background: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
+                    <select 
+                      onChange={(e) => handleSelectOrderToInvoice(e.target.value)}
+                      style={{ ...inputStyle, margin: '4px 0 0 0' }}
+                    >
+                      <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
+                      {ordersList.map(o => (
+                        <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                
                 <div style={{ marginBottom: '15px' }}>
                   <label style={labelStyle}>Ngày tạo:</label>
                   <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
