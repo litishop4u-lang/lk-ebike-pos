@@ -220,6 +220,55 @@ export default function App() {
     }
   };
 
+      // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [detailData, setDetailData] = useState(null);
+
+  const handleViewDetail = async (type, id) => {
+    try {
+      const data = await api(`/api/${type}/${id}`);
+      setDetailData(data);
+      setShowDetailModal(true);
+    } catch (e) {
+      alert('Lỗi tải chi tiết: ' + e.message);
+    }
+  };
+
+  // 2. Hàm chỉnh sửa đơn đặt hàng (nạp lại vào popup)
+  const handleEditOrder = async (ord) => {
+    try {
+      const details = await api(`/api/orders/${ord.id}`);
+      setModalOrderType('orders');
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setCustomerSearch(details.customer_name);
+      setPaidAmount(details.paid_amount || 0);
+      setOrderDate(details.created_at ? details.created_at.split('T')[0] : new Date().toISOString().split('T')[0]);
+
+      const newCart = {};
+      details.items.forEach(item => {
+        newCart[item.product_id] = item.quantity;
+        newCart[item.product_id + '_price'] = item.price;
+        newCart[item.product_id + '_discount'] = item.discount || 0;
+      });
+      setCart(newCart);
+      setShowOrderModal(true);
+    } catch (e) {
+      alert('Lỗi khi tải dữ liệu sửa đơn: ' + e.message);
+    }
+  };
+
+  // 3. Hàm xóa đơn đặt hàng hoặc phiếu bán hàng
+  const handleDeleteOrderOrInvoice = async (type, id, code) => {
+    if (!confirm(`Bạn có chắc muốn xóa ${type === 'orders' ? 'đơn đặt hàng' : 'phiếu bán hàng'} ${code}?`)) return;
+    try {
+      await api(`/api/${type}/${id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: `Đã xóa ${code} thành công!` });
+      loadData();
+    } catch (e) {
+      alert('Lỗi khi xóa: ' + e.message);
+    }
+  };
+
   // ===== Quản lý Sản phẩm =====
   const handleSaveProduct = async (e) => {
     e.preventDefault();
@@ -576,6 +625,56 @@ export default function App() {
             </div>
           </div>
         )}
+
+              {showDetailModal && detailData && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết: {detailData.code}</h3>
+              <button onClick={() => setShowDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+            
+            <div style={{ marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+              <div><b>Khách hàng:</b> {detailData.customer_name} ({detailData.customer_phone || 'Chưa có SĐT'})</div>
+              <div><b>Địa chỉ:</b> {detailData.address || '---'}</div>
+              <div><b>Ngày tạo:</b> {detailData.created_at ? new Date(detailData.created_at).toLocaleDateString('vi-VN') : '---'}</div>
+            </div>
+
+            <div style={{ flex: 1, maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Sản phẩm</th>
+                    <th style={{ padding: '8px' }}>SL</th>
+                    <th style={{ padding: '8px' }}>Đơn giá</th>
+                    <th style={{ padding: '8px' }}>Giảm</th>
+                    <th style={{ padding: '8px' }}>Thành tiền</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(detailData.items || []).map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px' }}>{item.product_name}</td>
+                      <td style={{ padding: '8px' }}>{item.quantity}</td>
+                      <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
+                      <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '20px' }}>
+              <span>Tổng tiền:</span> <span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+            </div>
+          </div>
+        </div>
+      )}
 
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
