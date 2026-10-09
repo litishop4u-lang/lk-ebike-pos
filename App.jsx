@@ -185,6 +185,13 @@ export default function App() {
   async function handlePosSubmit() {
     setBusy(true); setMsg(null);
     try {
+      const lines = products.filter((p) => cart[p.id]).map((p) => ({ 
+        ...p, 
+        quantity: cart[p.id], 
+        price: cart[p.id + '_price'] !== undefined ? cart[p.id + '_price'] : p.price,
+        discount: cart[p.id + '_discount'] || 0 
+      }));
+      
       if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
       if (lines.length === 0) throw new Error('Giỏ hàng trống!');
 
