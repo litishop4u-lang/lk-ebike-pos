@@ -316,12 +316,17 @@ export default function App() {
           <title>${titleText} - ${codeText}</title>
           <style>
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 15px; font-size: 14px; }
-            .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: 2px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 10px; }
+            
+            /* Thu nhỏ khoảng cách dưới header */
+            .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: none; padding-bottom: 0px; margin-bottom: 5px; }
+            
             .brand-left { width: 33%; border: none; padding: 0; background: transparent; display: flex; align-items: center; justify-content: flex-start; box-sizing: border-box; }
             .company-right { width: 65%; border: none; padding: 0; background: transparent; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
             .company-right h3 { margin: 0 0 4px 0; color: #2563eb; font-size: 16px; }
             .company-right p { margin: 2px 0; font-size: 12px; color: #475569; }
-            .title-area { text-align: center; margin-bottom: 15px; }
+            
+            /* Dịch phần tiêu đề sát lên trên, thêm đường viền gạch ngang ngay phía trên tiêu đề */
+            .title-area { text-align: center; margin-top: 0px; margin-bottom: 15px; border-top: 2px solid #cbd5e1; padding-top: 8px; }
             .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
             .title-area p { margin: 3px 0 0 0; color: #64748b; font-size: 13px; }
             .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
