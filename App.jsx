@@ -1082,17 +1082,21 @@ export default function App() {
               </div>
 
               <div style={{ gridColumn: 'span 2' }}>
-                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Link ảnh Logo (URL hình ảnh):</label>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Link ảnh Logo (URL hoặc Base64):</label>
                 <input 
-                  placeholder="Dán đường dẫn ảnh logo vào đây (ví dụ: https://.../logo.png). Để trống sẽ hiện chữ Brand" 
+                  placeholder="Dán đường dẫn ảnh hoặc mã Base64 vào đây" 
                   value={companyInfo.logoUrl} 
                   onChange={(e) => setCompanyInfo({ ...companyInfo, logoUrl: e.target.value })} 
                   style={inputStyle} 
                 />
                 {companyInfo.logoUrl && (
-                  <div style={{ marginTop: '10px', padding: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', display: 'inline-block' }}>
-                    <span style={{ fontSize: '11px', display: 'block', color: '#64748b', marginBottom: '5px' }}>Xem trước Logo:</span>
-                    <img src={companyInfo.logoUrl} alt="Logo Preview" style={{ maxHeight: '40px', objectFit: 'contain' }} onError={(e) => e.target.style.display = 'none'} />
+                  <div style={{ marginTop: '10px', padding: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>Xem trước Logo:</span>
+                    <img 
+                      src={companyInfo.logoUrl} 
+                      alt="Logo Preview" 
+                      style={{ maxHeight: '50px', maxWidth: '200px', objectFit: 'contain', background: '#fff', padding: '4px', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                    />
                   </div>
                 )}
               </div>
