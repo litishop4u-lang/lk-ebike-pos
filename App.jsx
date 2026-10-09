@@ -315,15 +315,15 @@ export default function App() {
         <head>
           <title>${titleText} - ${codeText}</title>
           <style>
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 20px; font-size: 14px; }
-            .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; margin-bottom: 20px; }
-            .brand-left { width: 33%; border: 1px solid #cbd5e1; padding: 4px; border-radius: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
-            .company-right { width: 65%; border: 1px solid #cbd5e1; padding: 10px 15px; border-radius: 6px; background: #f8fafc; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
-            .company-right h3 { margin: 0 0 6px 0; color: #2563eb; font-size: 16px; }
-            .company-right p { margin: 3px 0; font-size: 12px; color: #475569; }
-            .title-area { text-align: center; margin-bottom: 20px; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 15px; font-size: 14px; }
+            .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: 2px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 10px; }
+            .brand-left { width: 33%; border: none; padding: 0; background: transparent; display: flex; align-items: center; justify-content: flex-start; box-sizing: border-box; }
+            .company-right { width: 65%; border: none; padding: 0; background: transparent; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
+            .company-right h3 { margin: 0 0 4px 0; color: #2563eb; font-size: 16px; }
+            .company-right p { margin: 2px 0; font-size: 12px; color: #475569; }
+            .title-area { text-align: center; margin-bottom: 15px; }
             .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
-            .title-area p { margin: 5px 0 0 0; color: #64748b; font-size: 13px; }
+            .title-area p { margin: 3px 0 0 0; color: #64748b; font-size: 13px; }
             .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
