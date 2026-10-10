@@ -647,38 +647,10 @@ export default {
 
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
-        try {
-          const urlObj = new URL(request.url);
-          const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
-          const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
-
-          // Test lấy sản phẩm trước xem có dữ liệu không
-          const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
-          const products = prodRes.results || [];
-
-          return json({
-            success: true,
-            summary: { totalOpeningVal: 0, totalImportVal: 0, totalExportVal: 0, totalClosingVal: 0 },
-            items: products.map(p => ({
-              id: p.id,
-              code: p.code || 'SP',
-              name: p.name || 'Sản phẩm',
-              unit: p.unit || 'Cái',
-              openingQty: Number(p.stock) || 0,
-              openingVal: (Number(p.stock) || 0) * (Number(p.cost_price) || 0),
-              importQty: 0,
-              importVal: 0,
-              exportQty: 0,
-              exportVal: 0,
-              closingQty: Number(p.stock) || 0,
-              closingVal: (Number(p.stock) || 0) * (Number(p.cost_price) || 0)
-            }))
-          }, 200, origin);
-        } catch (err) {
-          console.error("LỖI BÁO CÁO XNT:", err);
-          return json({ success: false, message: err.message, items: [] }, 500, origin);
-        }
-      }
+        const urlObj = new URL(request.url);
+        const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
+        const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
+        const search = (urlObj.searchParams.get('search') || '').toLowerCase();
 
         // 1. Lấy toàn bộ danh sách sản phẩm từ bảng products
         const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products ORDER BY id DESC').all();
