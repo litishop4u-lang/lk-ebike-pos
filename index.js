@@ -528,6 +528,21 @@ export default {
     ...po.lines.map((l) =>
       db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
   ]);
+        // 2. 👉 TỰ ĐỘNG SINH PHIẾU CHI NẾU CÓ THANH TOÁN TIỀN NGAY TRÊN PHIẾU NHẬP
+        if (Number(po.paid_amount) > 0) {
+          const cashCode = genCode('TC');
+          // Lấy tên nhà cung cấp để ghi chú chi tiết
+          const sup = await db.prepare('SELECT name FROM suppliers WHERE id = ?').bind(po.supplier_id).first();
+          const supName = sup ? sup.name : 'Nhà cung cấp';
+          const noteText = `Thanh toán tiền mua hàng cho ${supName} theo phiếu ${code}`;
+
+          batchStmts.push(
+            db.prepare(`
+              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+              VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
+            `).bind(cashCode, po.paid_amount, po.payment_method || 'Chuyển khoản', code, noteText, customDate)
+          );
+        }
   return json({ success: true, code, total: po.total }, 201, origin);
 }
 
