@@ -120,8 +120,9 @@ async function createInvoice(db, b) {
     db.prepare('INSERT INTO invoices (code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method) VALUES (?,?,?,?,?,?,?,?)')
       .bind(code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method),
     ...lines.map((l) =>
-      db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?)')
-        .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
+      // Bảng invoice_items của bạn có cột unit_price (NOT NULL) nên ghi thêm cả unit_price lẫn price
+      db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.price, l.price, l.discount, l.total)),
     ...lines.map((l) =>
       db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
     stockGuard(db, ids),
