@@ -18,12 +18,14 @@ async function api(path, options) {
   return data;
 }
 
-const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', _price: 0, price: 0, wholesale_price: 0, stock: 0 };
+// SỬA: trước đây là "_price: 0", đúng phải là "import_price: 0"
+const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 };
 const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'active' };
 const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
+const EMPTY_CASH_FORM = { type: 'OUT', amount: '', category: 'Mua hàng / Trả nợ NCC', payment_method: 'Chuyển khoản', note: '' };
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers'
+  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book'
 
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
   const [products, setProducts] = useState([]);
@@ -64,11 +66,11 @@ export default function App() {
   const [importDate, setImportDate] = useState(() => new Date().toISOString().slice(0, 16));
 
   const [purchaseForm, setPurchaseForm] = useState({
-  supplier_id: '',
-  payment_method: 'cash',
-  paid_amount: '',
-  created_at: new Date().toISOString().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
-});
+    supplier_id: '',
+    payment_method: 'cash',
+    paid_amount: '',
+    created_at: new Date().toISOString().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
+  });
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
@@ -79,6 +81,7 @@ export default function App() {
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
 
+  // ===== States cho Báo cáo Xuất - Nhập - Tồn =====
   const [reportItems, setReportItems] = useState([]);
   const [reportSummary, setReportSummary] = useState({ totalOpeningVal: 0, totalImportVal: 0, totalExportVal: 0, totalClosingVal: 0 });
   const [reportSearch, setReportSearch] = useState('');
@@ -87,6 +90,43 @@ export default function App() {
   const [reportValue, setReportValue] = useState(new Date().toISOString().slice(0, 7)); // ví dụ: '2026-10'
   const [reportStartDate, setReportStartDate] = useState('');
   const [reportEndDate, setReportEndDate] = useState('');
+
+  // ===== States cho Khách hàng =====
+  const [customers, setCustomers] = useState([]);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomerImportModal, setShowCustomerImportModal] = useState(false);
+  const [customerForm, setCustomerForm] = useState(EMPTY_CUSTOMER);
+  const [customerImportText, setCustomerImportText] = useState('');
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
+  const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
+  const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
+  const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
+
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // ===== States cho Thu chi (Sổ quỹ) — SỬA: trước đây thiếu hoàn toàn nên gây trắng màn hình =====
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashItems, setCashItems] = useState([]);
+  const [cashSummary, setCashSummary] = useState({ totalIn: 0, totalOut: 0, netProfit: 0, balance: 0 });
+  const [cashForm, setCashForm] = useState(EMPTY_CASH_FORM);
+
+  const loadCashBook = async () => {
+    try {
+      const res = await api('/api/cash-book');
+      if (res && res.success) {
+        setCashItems(res.items || []);
+        setCashSummary(res.summary || { totalIn: 0, totalOut: 0, netProfit: 0, balance: 0 });
+      }
+    } catch (e) {
+      setMsg({ type: 'err', text: 'Không tải được thu chi: ' + e.message });
+    }
+  };
+
+  useEffect(() => {
+    if (currentView === 'cash-book') loadCashBook();
+  }, [currentView]);
 
   const loadInventoryReport = async () => {
     try {
@@ -122,15 +162,15 @@ export default function App() {
 
       // Gọi API với ngày tháng chuẩn dạng YYYY-MM-DD
       const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
-      
+
       if (res && res.success) {
         setReportItems(res.items || []);
         setReportSummary(res.summary || {});
       }
     } catch (e) {
-  console.error('Lỗi tải báo cáo:', e);
-  setMsg({ type: 'err', text: 'Không tải được báo cáo: ' + e.message });
-}
+      console.error('Lỗi tải báo cáo:', e);
+      setMsg({ type: 'err', text: 'Không tải được báo cáo: ' + e.message });
+    }
   };
 
   // Gọi tự động khi chuyển sang view báo cáo
@@ -153,21 +193,6 @@ export default function App() {
       logoUrl: '' // Dán link ảnh logo vào đây hoặc để trống sẽ hiện chữ Brand
     };
   });
-
-  // ===== States cho Khách hàng =====
-  const [customers, setCustomers] = useState([]);
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
-  const [showCustomerImportModal, setShowCustomerImportModal] = useState(false);
-  const [customerForm, setCustomerForm] = useState(EMPTY_CUSTOMER);
-  const [customerImportText, setCustomerImportText] = useState('');
-  const [editingCustomer, setEditingCustomer] = useState(null);
-  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
-  const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
-  const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
-  const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
-
-  const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
 
   const asArray = (d) => (Array.isArray(d) ? d : []);
 
@@ -246,7 +271,7 @@ export default function App() {
       // Điền thông tin khách hàng
       setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
       setCustomerSearch(details.customer_name);
-      
+
       // Lấy số tiền đã cọc từ đơn đặt hàng làm mặc định đã thanh toán / tạm ứng
       setPaidAmount(details.paid_amount || 0);
 
@@ -266,13 +291,13 @@ export default function App() {
   async function handlePosSubmit() {
     setBusy(true); setMsg(null);
     try {
-      const lines = products.filter((p) => cart[p.id]).map((p) => ({ 
-        ...p, 
-        quantity: cart[p.id], 
+      const lines = products.filter((p) => cart[p.id]).map((p) => ({
+        ...p,
+        quantity: cart[p.id],
         price: cart[p.id + '_price'] !== undefined ? cart[p.id + '_price'] : p.price,
-        discount: cart[p.id + '_discount'] || 0 
+        discount: cart[p.id + '_discount'] || 0
       }));
-      
+
       if (!posCustomer.name) throw new Error('Vui lòng chọn hoặc nhập tên khách hàng!');
       if (lines.length === 0) throw new Error('Giỏ hàng trống!');
 
@@ -318,7 +343,7 @@ export default function App() {
     }
   }
 
-    // === CHÈN ĐOẠN HÀM handlePrintOrder VÀO ĐÂY ===
+  // === Hàm in phiếu / đơn ===
   const handlePrintOrder = async (item, isOrder = false) => {
     let printData = item;
     if (!item.items) {
@@ -341,10 +366,10 @@ export default function App() {
     const codeText = printData.code || '---';
     const dateText = printData.created_at ? new Date(printData.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
     const paymentMethod = printData.payment_method || 'Tiền mặt';
-    
+
     const items = printData.items || [];
-    let grossTotal = 0; 
-    let totalDiscount = 0; 
+    let grossTotal = 0;
+    let totalDiscount = 0;
 
     const itemsHtml = items.map((prod, index) => {
       const price = Number(prod.price) || 0;
@@ -373,7 +398,7 @@ export default function App() {
     const debtAmount = finalTotal - paidAmount;
 
     // Logo chiếm 1/3 (33%), Thông tin công ty chiếm 2/3 (65%)
-    const logoHtml = companyInfo.logoUrl 
+    const logoHtml = companyInfo.logoUrl
       ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain; display: block;" />`
       : `<div style="text-align: center;"><h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 28px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px; font-weight: bold;">${companyInfo.subtitle}</p></div>`;
 
@@ -383,15 +408,15 @@ export default function App() {
           <title>${titleText} - ${codeText}</title>
           <style>
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 15px; font-size: 14px; }
-            
+
             /* Thu nhỏ khoảng cách dưới header */
             .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: none; padding-bottom: 0px; margin-bottom: 5px; }
-            
+
             .brand-left { width: 33%; border: none; padding: 0; background: transparent; display: flex; align-items: center; justify-content: flex-start; box-sizing: border-box; }
             .company-right { width: 65%; border: none; padding: 0; background: transparent; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
             .company-right h3 { margin: 0 0 4px 0; color: #2563eb; font-size: 16px; }
             .company-right p { margin: 2px 0; font-size: 12px; color: #475569; }
-            
+
             /* Dịch phần tiêu đề sát lên trên, thêm đường viền gạch ngang ngay phía trên tiêu đề */
             .title-area { text-align: center; margin-top: 0px; margin-bottom: 15px; border-top: 2px solid #cbd5e1; padding-top: 8px; }
             .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
@@ -484,7 +509,7 @@ export default function App() {
     printWindow.document.close();
   };
 
-      // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
+  // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailData, setDetailData] = useState(null);
 
@@ -508,7 +533,7 @@ export default function App() {
       setCustomerSearch(details.customer_name);
       setPaidAmount(details.paid_amount || 0);
       setPaymentMethod(details.payment_method || 'Tiền mặt');
-      setOrderDate(details.created_at ? details.created_at.split('T')[0] : new Date().toISOString().split('T')[0]);
+      setOrderDate(details.created_at ? details.created_at.split('T')[0] : todayLocal());
 
       const newCart = {};
       details.items.forEach(item => {
@@ -688,11 +713,11 @@ export default function App() {
   const openCreatePurchase = () => {
     setEditingPurchaseId(null);
     setPurchaseItems([]);
-    setPurchaseForm({ 
-      supplier_id: '', 
-      payment_method: 'Tiền mặt', 
-      paid_amount: 0, 
-      created_at: new Date().toISOString().slice(0, 16) // 👈 Khởi tạo ngày giờ hiện tại
+    setPurchaseForm({
+      supplier_id: '',
+      payment_method: 'Tiền mặt',
+      paid_amount: 0,
+      created_at: new Date().toISOString().slice(0, 16) // Khởi tạo ngày giờ hiện tại
     });
     setSupplierSearchKeyword('');
     setProductSearchKeyword('');
@@ -707,6 +732,8 @@ export default function App() {
         supplier_id: details.supplier_id,
         payment_method: details.payment_method || 'Tiền mặt',
         paid_amount: details.paid_amount || 0,
+        // SỬA: nạp ngày nhập cũ vào form để khi lưu không bị ghi đè thành ngày hiện tại
+        created_at: details.created_at ? details.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16),
       });
       setPurchaseItems((details.items || []).map((i) => ({
         product_id: i.product_id,
@@ -737,7 +764,7 @@ export default function App() {
           supplier_id: purchaseForm.supplier_id,
           payment_method: purchaseForm.payment_method,
           paid_amount: Number(purchaseForm.paid_amount) || 0,
-          created_at: purchaseForm.created_at, // 👈 Gửi chính xác giá trị ngày chọn từ input datetime-local lên
+          created_at: purchaseForm.created_at, // Gửi chính xác giá trị ngày chọn từ input datetime-local lên
           items: purchaseItems,
         }),
       });
@@ -750,7 +777,7 @@ export default function App() {
     }
   };
 
-    // 🔹 ĐẶT CÁC STATE VÀ HÀM NÀY BÊN TRONG COMPONENT `App`
+  // ===== Thêm nhanh nhà cung cấp (trong popup phiếu nhập) =====
   const [showQuickAddSupplierModal, setShowQuickAddSupplierModal] = useState(false);
   const [newSupplierForm, setNewSupplierForm] = useState({ name: '', phone: '', address: '' });
 
@@ -819,26 +846,42 @@ export default function App() {
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
           <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>Khách hàng</button></li>
-          <button 
-          onClick={() => setCurrentView('settings')} 
-          style={{ 
-            width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'settings' ? '#7c3aed' : 'transparent', 
-            color: '#fff', /* 👈 Đảm bảo luôn là màu trắng (#fff) */
-            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
-          }}
-        >
-          ⚙️ Cài đặt Doanh Nghiệp
-        </button>
-           <button 
-          onClick={() => setCurrentView('inventory-report')} 
-          style={{ 
-            width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'inventory-report' ? '#7c3aed' : 'transparent', 
-            color: '#fff', /* 👈 Đảm bảo luôn là màu trắng (#fff) */
-            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px' 
-          }}
-        >
-          📊 Báo Cáo X - N - T
-        </button>
+          <li>
+            <button
+              onClick={() => setCurrentView('cash-book')}
+              style={{
+                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'cash-book' ? '#7c3aed' : 'transparent',
+                color: '#fff',
+                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
+              }}
+            >
+              💰 Thu Chi
+            </button>
+          </li>
+          <li>
+            <button
+              onClick={() => setCurrentView('settings')}
+              style={{
+                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'settings' ? '#7c3aed' : 'transparent',
+                color: '#fff', /* Đảm bảo luôn là màu trắng (#fff) */
+                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
+              }}
+            >
+              ⚙️ Cài đặt Doanh Nghiệp
+            </button>
+          </li>
+          <li>
+            <button
+              onClick={() => setCurrentView('inventory-report')}
+              style={{
+                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'inventory-report' ? '#7c3aed' : 'transparent',
+                color: '#fff', /* Đảm bảo luôn là màu trắng (#fff) */
+                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
+              }}
+            >
+              📊 Báo Cáo X - N - T
+            </button>
+          </li>
         </ul>
       </aside>
 
@@ -852,19 +895,19 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Đơn hàng & Phiếu bán hàng</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                onClick={() => { setEditingOrderId(null); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
-                style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                + Tạo Phiếu Bán Hàng
-              </button>
-              <button 
-                onClick={() => { setEditingOrderId(null); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
-                style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                + Tạo Đơn Đặt Hàng
-              </button>
-            </div>
+                <button
+                  onClick={() => { setEditingOrderId(null); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  + Tạo Phiếu Bán Hàng
+                </button>
+                <button
+                  onClick={() => { setEditingOrderId(null); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  + Tạo Đơn Đặt Hàng
+                </button>
+              </div>
             </div>
 
             {/* Bảng Danh sách Phiếu Bán Hàng */}
@@ -880,11 +923,12 @@ export default function App() {
                     <th style={{ padding: '10px' }}>Đã thanh toán</th>
                     <th style={{ padding: '10px' }}>Còn nợ</th>
                     <th style={{ padding: '10px' }}>Thanh toán</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoicesList.length === 0 ? (
-                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có phiếu bán hàng nào.</td></tr>
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có phiếu bán hàng nào.</td></tr>
                   ) : (
                     invoicesList.map((inv) => (
                       <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -951,63 +995,62 @@ export default function App() {
           </div>
         )}
 
-              {showDetailModal && detailData && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết: {detailData.code}</h3>
-              <button onClick={() => setShowDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-            
-            <div style={{ marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-              <div><b>Khách hàng:</b> {detailData.customer_name} ({detailData.customer_phone || 'Chưa có SĐT'})</div>
-              <div><b>Địa chỉ:</b> {detailData.address || '---'}</div>
-              <div><b>Ngày tạo:</b> {detailData.created_at ? new Date(detailData.created_at).toLocaleDateString('vi-VN') : '---'}</div>
-            </div>
+        {showDetailModal && detailData && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết: {detailData.code}</h3>
+                <button onClick={() => setShowDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
 
-            <div style={{ flex: 1, maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                    <th style={{ padding: '8px' }}>Sản phẩm</th>
-                    <th style={{ padding: '8px' }}>SL</th>
-                    <th style={{ padding: '8px' }}>Đơn giá</th>
-                    <th style={{ padding: '8px' }}>Giảm</th>
-                    <th style={{ padding: '8px' }}>Thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(detailData.items || []).map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '8px' }}>{item.product_name}</td>
-                      <td style={{ padding: '8px' }}>{item.quantity}</td>
-                      <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
-                      <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
-                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.total)}</td>
+              <div style={{ marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+                <div><b>Khách hàng:</b> {detailData.customer_name} ({detailData.customer_phone || 'Chưa có SĐT'})</div>
+                <div><b>Địa chỉ:</b> {detailData.address || '---'}</div>
+                <div><b>Ngày tạo:</b> {detailData.created_at ? new Date(detailData.created_at).toLocaleDateString('vi-VN') : '---'}</div>
+              </div>
+
+              <div style={{ flex: 1, maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>Sản phẩm</th>
+                      <th style={{ padding: '8px' }}>SL</th>
+                      <th style={{ padding: '8px' }}>Đơn giá</th>
+                      <th style={{ padding: '8px' }}>Giảm</th>
+                      <th style={{ padding: '8px' }}>Thành tiền</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {(detailData.items || []).map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '8px' }}>{item.product_name}</td>
+                        <td style={{ padding: '8px' }}>{item.quantity}</td>
+                        <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
+                        <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
+                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '20px' }}>
-              <span>Tổng tiền:</span> <span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
-            </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '20px' }}>
+                <span>Tổng tiền:</span> <span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
+              </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
-              <button 
-                onClick={() => handlePrintOrder(detailData, detailData.code.startsWith('DH'))} 
-                style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                🖨️ In Chứng Từ
-              </button>
-              <button onClick={() => setShowDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
-            </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
+                <button
+                  onClick={() => handlePrintOrder(detailData, (detailData.code || '').startsWith('DH'))}
+                  style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  🖨️ In Chứng Từ
+                </button>
+                <button onClick={() => setShowDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+              </div>
 
             </div>
-        </div>
-      )}
-        
+          </div>
+        )}
 
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
@@ -1076,13 +1119,14 @@ export default function App() {
           </div>
         )}
 
-          {currentView === 'cash-book' && (
+        {/* MÀN HÌNH QUẢN LÝ THU CHI */}
+        {currentView === 'cash-book' && (
           <div style={{ padding: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                  onClick={() => setShowCashModal(true)} 
+                <button
+                  onClick={() => setShowCashModal(true)}
                   style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm Thu Chi
@@ -1179,11 +1223,15 @@ export default function App() {
                         <td style={{ padding: '12px' }}>{item.payment_method}</td>
                         <td style={{ padding: '12px', color: '#475569' }}>{item.note || item.reference_code}</td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <button 
+                          <button
                             onClick={async () => {
                               if (confirm('Bạn có chắc muốn xóa giao dịch này?')) {
-                                await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
-                                loadCashBook();
+                                try {
+                                  await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
+                                  loadCashBook();
+                                } catch (err) {
+                                  alert('Lỗi: ' + err.message);
+                                }
                               }
                             }}
                             style={{ background: '#fee2e2', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
@@ -1333,7 +1381,7 @@ export default function App() {
           </div>
         )}
 
-              {/* 📊 MÀN HÌNH BÁO CÁO XUẤT - NHẬP - TỒN KHO */}
+        {/* 📊 MÀN HÌNH BÁO CÁO XUẤT - NHẬP - TỒN KHO */}
         {currentView === 'inventory-report' && (
           <div style={{ padding: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -1371,24 +1419,24 @@ export default function App() {
 
             {/* Thanh Bộ Lọc Thời Gian Chi Tiết */}
             <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', flexWrap: 'wrap' }}>
-              <input 
-                placeholder="🔍 Tìm mã hoặc tên sản phẩm..." 
-                value={reportSearch} 
-                onChange={(e) => setReportSearch(e.target.value)} 
+              <input
+                placeholder="🔍 Tìm mã hoặc tên sản phẩm..."
+                value={reportSearch}
+                onChange={(e) => setReportSearch(e.target.value)}
                 style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
               />
-              
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xem theo:</span>
-                <select 
-                  value={reportType} 
+                <select
+                  value={reportType}
                   onChange={(e) => {
                     setReportType(e.target.value);
                     if (e.target.value === 'day') setReportValue(new Date().toISOString().slice(0, 10));
                     else if (e.target.value === 'month') setReportValue(new Date().toISOString().slice(0, 7));
                     else if (e.target.value === 'year') setReportValue(String(new Date().getFullYear()));
                     else if (e.target.value === 'quarter') setReportValue(`${new Date().getFullYear()}-Q1`);
-                  }} 
+                  }}
                   style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
                 >
                   <option value="day">Theo Ngày</option>
@@ -1453,82 +1501,83 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-  {(!reportItems || reportItems.length === 0) ? (
-    <tr>
-      <td colSpan="11" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
-        Không có dữ liệu sản phẩm trong khoảng thời gian này.
-      </td>
-    </tr>
-  ) : (
-    reportItems.map((item) => (
-      <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
-        <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
-      </tr>
-    ))
-  )}
-</tbody>
+                  {(!reportItems || reportItems.length === 0) ? (
+                    <tr>
+                      <td colSpan="11" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
+                        Không có dữ liệu sản phẩm trong khoảng thời gian này.
+                      </td>
+                    </tr>
+                  ) : (
+                    reportItems.map((item) => (
+                      <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
               </table>
             </div>
           </div>
         )}
-            {/* ⚙️ MÀN HÌNH CÀI ĐẶT THÔNG TIN DOANH NGHIỆP & LOGO */}
+
+        {/* ⚙️ MÀN HÌNH CÀI ĐẶT THÔNG TIN DOANH NGHIỆP & LOGO */}
         {currentView === 'settings' && (
           <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', maxWidth: '700px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0, color: '#7c3aed', marginBottom: '20px' }}>⚙️ Cài đặt thông tin doanh nghiệp & Logo in hóa đơn</h2>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
               <div style={{ gridColumn: 'span 2' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Tên doanh nghiệp đầy đủ (In trên hóa đơn):</label>
-                <input 
-                  value={companyInfo.name} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.name}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
 
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Tên thương hiệu ngắn (Brand):</label>
-                <input 
-                  value={companyInfo.brand} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, brand: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.brand}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, brand: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
 
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phụ đề / Slogan:</label>
-                <input 
-                  value={companyInfo.subtitle} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, subtitle: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.subtitle}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, subtitle: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
 
               <div style={{ gridColumn: 'span 2' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Link ảnh Logo (URL hoặc Base64):</label>
-                <input 
-                  placeholder="Dán đường dẫn ảnh hoặc mã Base64 vào đây" 
-                  value={companyInfo.logoUrl} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, logoUrl: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  placeholder="Dán đường dẫn ảnh hoặc mã Base64 vào đây"
+                  value={companyInfo.logoUrl}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, logoUrl: e.target.value })}
+                  style={inputStyle}
                 />
                 {companyInfo.logoUrl && (
                   <div style={{ marginTop: '10px', padding: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>Xem trước Logo:</span>
-                    <img 
-                      src={companyInfo.logoUrl} 
-                      alt="Logo Preview" 
-                      style={{ maxHeight: '50px', maxWidth: '200px', objectFit: 'contain', background: '#fff', padding: '4px', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                    <img
+                      src={companyInfo.logoUrl}
+                      alt="Logo Preview"
+                      style={{ maxHeight: '50px', maxWidth: '200px', objectFit: 'contain', background: '#fff', padding: '4px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
                     />
                   </div>
                 )}
@@ -1536,33 +1585,33 @@ export default function App() {
 
               <div style={{ gridColumn: 'span 2' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Địa chỉ công ty:</label>
-                <input 
-                  value={companyInfo.address} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.address}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
 
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Mã số thuế (MST):</label>
-                <input 
-                  value={companyInfo.taxCode} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, taxCode: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.taxCode}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, taxCode: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
 
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số điện thoại liên hệ:</label>
-                <input 
-                  value={companyInfo.phone} 
-                  onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })} 
-                  style={inputStyle} 
+                <input
+                  value={companyInfo.phone}
+                  onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })}
+                  style={inputStyle}
                 />
               </div>
             </div>
 
-            <button 
+            <button
               onClick={() => {
                 localStorage.setItem('company_info', JSON.stringify(companyInfo));
                 setMsg({ type: 'ok', text: 'Đã lưu cài đặt thông tin doanh nghiệp thành công!' });
@@ -1681,6 +1730,60 @@ export default function App() {
         </div>
       )}
 
+      {/* POPUP THÊM NHANH NHÀ CUNG CẤP (đặt ở cấp ngoài cùng để không bị lồng trong popup phiếu nhập) */}
+      {showQuickAddSupplierModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
+          <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 15px 0', color: '#7c3aed' }}>Thêm Nhanh Nhà Cung Cấp</h3>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
+              <input
+                placeholder="Nhập tên công ty / cửa hàng..."
+                value={newSupplierForm.name}
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, name: e.target.value })}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Số điện thoại:</label>
+              <input
+                placeholder="Nhập số điện thoại..."
+                value={newSupplierForm.phone}
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phone: e.target.value })}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Địa chỉ:</label>
+              <input
+                placeholder="Nhập địa chỉ..."
+                value={newSupplierForm.address}
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, address: e.target.value })}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setShowQuickAddSupplierModal(false)}
+                style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleQuickSaveSupplier}
+                style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Lưu nhà cung cấp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* POPUP TẠO / SỬA PHIẾU NHẬP HÀNG */}
       {showCreatePurchaseModal && (
         <div style={overlayStyle}>
@@ -1717,60 +1820,6 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* 🔹 ĐẶT HOẶC CHÈN ĐOẠN POPUP NÀY Ở KHU VỰC CÁC MODAL CỦA ỨNG DỤNG */}
-      {showQuickAddSupplierModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
-          <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#7c3aed' }}>Thêm Nhanh Nhà Cung Cấp</h3>
-            
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
-              <input 
-                placeholder="Nhập tên công ty / cửa hàng..." 
-                value={newSupplierForm.name} 
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, name: e.target.value })} 
-                style={inputStyle} 
-              />
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Số điện thoại:</label>
-              <input 
-                placeholder="Nhập số điện thoại..." 
-                value={newSupplierForm.phone} 
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phone: e.target.value })} 
-                style={inputStyle} 
-              />
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Địa chỉ:</label>
-              <input 
-                placeholder="Nhập địa chỉ..." 
-                value={newSupplierForm.address} 
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, address: e.target.value })} 
-                style={inputStyle} 
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button 
-                onClick={() => setShowQuickAddSupplierModal(false)} 
-                style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Hủy
-              </button>
-              <button 
-                onClick={handleQuickSaveSupplier} 
-                style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Lưu nhà cung cấp
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-                  
                   {showSupplierDropdown && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
                       {(suppliers || []).filter((s) =>
@@ -1807,17 +1856,17 @@ export default function App() {
                     <option value="Công nợ">Công nợ</option>
                   </select>
                 </div>
-                
+
                 <div style={{ marginBottom: '15px' }}>
-  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
-  <input
-    type="datetime-local"
-    value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
-    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
-    style={{ ...inputStyle, width: '100%' }}
-  />
-</div>
-            </div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
+                  <input
+                    type="datetime-local"
+                    value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
+                    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
+                    style={{ ...inputStyle, width: '100%' }}
+                  />
+                </div>
+              </div>
 
               <div style={{ marginBottom: '20px' }}>
                 <label style={labelStyle}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
@@ -1929,16 +1978,21 @@ export default function App() {
         </div>
       )}
 
-          {showCashModal && (
+      {/* POPUP TẠO PHIẾU THU / CHI */}
+      {showCashModal && (
         <div style={overlayStyle}>
           <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px' }}>
             <h3 style={{ marginTop: 0, color: '#0f172a' }}>Tạo Phiếu Thu / Chi Mới</h3>
-            
+
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Loại giao dịch:</label>
-              <select 
-                value={cashForm.type} 
-                onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })}
+              <select
+                value={cashForm.type}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  // Đổi loại thì đặt lại danh mục mặc định cho đúng loại
+                  setCashForm({ ...cashForm, type: t, category: t === 'OUT' ? 'Mua hàng / Trả nợ NCC' : 'Bán hàng / Thu nợ KH' });
+                }}
                 style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
               >
                 <option value="OUT">Phiếu Chi (Trả NCC, Lương, Vận chuyển, Thuế...)</option>
@@ -1948,8 +2002,8 @@ export default function App() {
 
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Danh mục:</label>
-              <select 
-                value={cashForm.category} 
+              <select
+                value={cashForm.category}
                 onChange={(e) => setCashForm({ ...cashForm, category: e.target.value })}
                 style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
               >
@@ -1974,10 +2028,10 @@ export default function App() {
 
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
-              <input 
-                type="number" 
-                placeholder="Nhập số tiền..." 
-                value={cashForm.amount} 
+              <input
+                type="number"
+                placeholder="Nhập số tiền..."
+                value={cashForm.amount}
                 onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })}
                 style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
               />
@@ -1985,8 +2039,8 @@ export default function App() {
 
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phương thức thanh toán:</label>
-              <select 
-                value={cashForm.payment_method} 
+              <select
+                value={cashForm.payment_method}
                 onChange={(e) => setCashForm({ ...cashForm, payment_method: e.target.value })}
                 style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
               >
@@ -1997,10 +2051,10 @@ export default function App() {
 
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ghi chú / Chứng từ liên quan:</label>
-              <textarea 
-                rows="3" 
-                placeholder="Nhập nội dung giải trình..." 
-                value={cashForm.note} 
+              <textarea
+                rows="3"
+                placeholder="Nhập nội dung giải trình..."
+                value={cashForm.note}
                 onChange={(e) => setCashForm({ ...cashForm, note: e.target.value })}
                 style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
               />
@@ -2008,7 +2062,7 @@ export default function App() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button onClick={() => setShowCashModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button 
+              <button
                 onClick={async () => {
                   if (!cashForm.amount || Number(cashForm.amount) <= 0) {
                     alert('Vui lòng nhập số tiền hợp lệ!');
@@ -2020,12 +2074,12 @@ export default function App() {
                       body: JSON.stringify(cashForm)
                     });
                     setShowCashModal(false);
-                    setCashForm({ type: 'OUT', amount: '', category: 'Mua hàng / Trả nợ NCC', payment_method: 'Chuyển khoản', note: '' });
+                    setCashForm(EMPTY_CASH_FORM);
                     loadCashBook();
                   } catch (err) {
                     alert('Lỗi: ' + err.message);
                   }
-                }} 
+                }}
                 style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Lưu giao dịch
@@ -2090,7 +2144,7 @@ export default function App() {
                 {modalOrderType === 'invoices' && (
                   <div style={{ marginBottom: '10px', background: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
                     <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
-                    <select 
+                    <select
                       onChange={(e) => handleSelectOrderToInvoice(e.target.value)}
                       style={{ ...inputStyle, margin: '4px 0 0 0' }}
                     >
@@ -2101,7 +2155,7 @@ export default function App() {
                     </select>
                   </div>
                 )}
-                
+
                 <div style={{ marginBottom: '15px' }}>
                   <label style={labelStyle}>Ngày tạo:</label>
                   <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
