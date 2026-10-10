@@ -461,21 +461,24 @@ export default {
       }
 
       if (pathname === '/api/purchase_orders' && method === 'POST') {
-        const po = await buildPurchase(db, await request.json());
-        const code = genCode('PN');
-        const customDate = po.created_at || new Date().toISOString();
-        // Toàn bộ trong 1 batch (transaction): hoặc lưu hết, hoặc không lưu gì
-        await db.batch([
-          db.prepare('INSERT INTO purchase_orders (code, supplier_id, total, paid_amount, debt, payment_method, created_at) VALUES (?,?,?,?,?,?,?)')
-    .bind(code, po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate),
-          ...po.lines.map((l) =>
-            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?,?,?)')
-              .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
-          ...po.lines.map((l) =>
-            db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
-        ]);
-        return json({ success: true, code, total: po.total }, 201, origin);
-      }
+  const reqData = await request.json();
+  const po = await buildPurchase(db, reqData);
+  const code = genCode('PN');
+  
+  // 👉 Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
+  const customDate = reqData.created_at || new Date().toISOString();
+
+  await db.batch([
+    db.prepare('INSERT INTO purchase_orders (code, supplier_id, total, paid_amount, debt, payment_method, created_at) VALUES (?,?,?,?,?,?,?)')
+      .bind(code, po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate),
+    ...po.lines.map((l) =>
+      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
+    ...po.lines.map((l) =>
+      db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+  ]);
+  return json({ success: true, code, total: po.total }, 201, origin);
+}
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'GET')) {
         const id = idOf(pathname);
@@ -495,27 +498,31 @@ export default {
 
       // PUT: trước đây Worker KHÔNG có route này nên nút "Sửa phiếu nhập" không lưu được gì
       if (is(/^\/api\/purchase_orders\/\d+$/, 'PUT')) {
-        const id = idOf(pathname);
-        const existing = await db.prepare('SELECT id FROM purchase_orders WHERE id = ?').bind(id).first();
-        if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
+  const id = idOf(pathname);
+  const existing = await db.prepare('SELECT id FROM purchase_orders WHERE id = ?').bind(id).first();
+  if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
 
-        const po = await buildPurchase(db, await request.json());
-        const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
-        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
+  const reqData = await request.json();
+  const po = await buildPurchase(db, reqData);
+  const customDate = reqData.created_at || new Date().toISOString();
 
-        await runBatch(db, [
-          ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)), // hoàn kho cũ
-          db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
-          db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ? WHERE id = ?')
-            .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, id),
-          ...po.lines.map((l) =>
-            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
-              .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
-          ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)), // cộng kho mới
-          stockGuard(db, ids),
-        ], 'Không thể sửa phiếu: một số hàng đã bán nên tồn kho không đủ để hoàn lại');
-        return json({ success: true }, 200, origin);
-      }
+  const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
+  const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
+
+  await runBatch(db, [
+    ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
+    db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+    // 👉 Cập nhật thêm created_at vào câu lệnh UPDATE
+    db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+      .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
+    ...po.lines.map((l) =>
+      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
+        .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
+    ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+    stockGuard(db, ids),
+  ], 'Không thể sửa phiếu...');
+  return json({ success: true }, 200, origin);
+}
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
