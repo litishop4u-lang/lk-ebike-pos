@@ -85,38 +85,39 @@ export default function App() {
 
   const loadInventoryReport = async () => {
     try {
-      let start = '2026-01-01T00:00:00.000Z';
-      let end = '2026-12-31T23:59:59.599Z';
+      let start = '2025-01-01';
+      let end = '2030-12-31';
       const now = new Date();
 
       if (reportType === 'day') {
         const d = reportValue || now.toISOString().slice(0, 10);
-        start = `${d}T00:00:00.000Z`;
-        end = `${d}T23:59:59.599Z`;
+        start = d;
+        end = d;
       } else if (reportType === 'month') {
-        // reportValue dạng '2026-10'
-        const [y, m] = (reportValue || now.toISOString().slice(0, 7)).split('-');
+        // reportValue dạng '2025-01'
+        const [y, m] = (reportValue || '2025-01').split('-');
         const lastDay = new Date(y, m, 0).getDate();
-        start = `${y}-${m}-01T00:00:00.000Z`;
-        end = `${y}-${m}-${lastDay}T23:59:59.599Z`;
+        start = `${y}-${m}-01`;
+        end = `${y}-${m}-${lastDay}`;
       } else if (reportType === 'quarter') {
-        // reportValue dạng '2026-Q1' hoặc chọn năm + quý
-        const year = reportValue.split('-')[0] || now.getFullYear();
+        const year = reportValue.split('-')[0] || '2025';
         const q = reportValue.split('-')[1] || 'Q1';
-        if (q === 'Q1') { start = `${year}-01-01T00:00:00.000Z`; end = `${year}-03-31T23:59:59.599Z`; }
-        else if (q === 'Q2') { start = `${year}-04-01T00:00:00.000Z`; end = `${year}-06-30T23:59:59.599Z`; }
-        else if (q === 'Q3') { start = `${year}-07-01T00:00:00.000Z`; end = `${year}-09-30T23:59:59.599Z`; }
-        else { start = `${year}-10-01T00:00:00.000Z`; end = `${year}-12-31T23:59:59.599Z`; }
+        if (q === 'Q1') { start = `${year}-01-01`; end = `${year}-03-31`; }
+        else if (q === 'Q2') { start = `${year}-04-01`; end = `${year}-06-30`; }
+        else if (q === 'Q3') { start = `${year}-07-01`; end = `${year}-09-30`; }
+        else { start = `${year}-10-01`; end = `${year}-12-31`; }
       } else if (reportType === 'year') {
-        const y = reportValue || now.getFullYear();
-        start = `${y}-01-01T00:00:00.000Z`;
-        end = `${y}-12-31T23:59:59.599Z`;
+        const y = reportValue || '2025';
+        start = `${y}-01-01`;
+        end = `${y}-12-31`;
       } else if (reportType === 'custom') {
-        start = reportStartDate ? `${reportStartDate}T00:00:00.000Z` : start;
-        end = reportEndDate ? `${reportEndDate}T23:59:59.599Z` : end;
+        start = reportStartDate || '2025-01-01';
+        end = reportEndDate || '2030-12-31';
       }
 
-      const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch)}`);
+      // Gọi API với ngày tháng chuẩn dạng YYYY-MM-DD
+      const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
+      
       if (res && res.success) {
         setReportItems(res.items || []);
         setReportSummary(res.summary || {});
