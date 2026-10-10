@@ -363,6 +363,57 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+        // ===== 7. QUẢN LÝ THU CHI =====
+      if (pathname === '/api/cash-book' && method === 'GET') {
+        const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
+        
+        // Tính toán Tổng thu, Tổng chi, Lợi nhuận và Số dư tích lũy
+        let totalIn = 0;
+        let totalOut = 0;
+        (results || []).forEach(item => {
+          if (item.type === 'IN') totalIn += Number(item.amount) || 0;
+          if (item.type === 'OUT') totalOut += Number(item.amount) || 0;
+        });
+        const netProfit = totalIn - totalOut;
+
+        return json({
+          success: true,
+          summary: { totalIn, totalOut, netProfit, balance: netProfit },
+          items: results || []
+        }, 200, origin);
+      }
+
+      if (pathname === '/api/cash-book' && method === 'POST') {
+        const b = await request.json();
+        const type = b.type; // 'IN' hoặc 'OUT'
+        const amount = Number(b.amount) || 0;
+        const category = str(b.category) || 'Khác';
+        if (amount <= 0) throw new HttpError(400, 'Số tiền giao dịch phải lớn hơn 0');
+
+        const code = genCode(type === 'IN' ? 'PT' : 'TC');
+        await db.prepare(`
+          INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          code, 
+          type, 
+          amount, 
+          category, 
+          str(b.payment_method) || 'Chuyển khoản', 
+          str(b.reference_code) || '', 
+          str(b.note) || '', 
+          b.created_at || new Date().toISOString()
+        ).run();
+
+        return json({ success: true, code }, 201, origin);
+      }
+
+      if (is(/^\/api\/cash-book\/\d+$/, 'DELETE')) {
+        const id = idOf(pathname);
+        await db.prepare('DELETE FROM cash_books WHERE id = ?').bind(id).run();
+        return json({ success: true }, 200, origin);
+      }
+
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
