@@ -1548,6 +1548,19 @@ export default function App() {
                       </tr>
                     ))
                   )}
+                      {reportItems && reportItems.length > 0 && (
+                      <tr style={{ background: '#f8fafc', fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
+                      <td colSpan="3" style={{ padding: '12px', textAlign: 'left' }}>Tổng cộng</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.openingQty}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.openingVal)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.importQty}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.importVal)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.exportQty}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.exportVal)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.closingQty}</td>
+                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.closingVal)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
