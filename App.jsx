@@ -63,7 +63,12 @@ export default function App() {
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
   const [importDate, setImportDate] = useState(() => new Date().toISOString().slice(0, 16));
 
-  const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', payment_method: 'Tiền mặt', paid_amount: 0 });
+  const [purchaseForm, setPurchaseForm] = useState({
+  supplier_id: '',
+  payment_method: 'cash',
+  paid_amount: '',
+  created_at: new Date().toISOString().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
+});
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
@@ -1677,13 +1682,13 @@ export default function App() {
                   </select>
                 </div>
                 
-                <div>
+                <div style={{ marginBottom: '15px' }}>
   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
-  <input 
-    type="datetime-local" 
-    value={purchaseForm.created_at || ''} 
-    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })} 
-    style={inputStyle} 
+  <input
+    type="datetime-local"
+    value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
+    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
+    style={{ ...inputStyle, width: '100%' }}
   />
 </div>
             </div>
