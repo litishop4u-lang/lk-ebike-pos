@@ -776,13 +776,25 @@ export default {
 
         // 4. Tính toán số liệu cho từng sản phẩm
         const reportData = products.map(p => {
-          // SỬA: bảng products dùng cột import_price (không có cost_price)
-          const unitCost = Number(p.import_price ?? p.cost_price) || 0;
           const currentStock = Number(p.stock) || 0;
+          // Giá nhập dự phòng trên thẻ sản phẩm (nếu chưa có lịch sử nhập)
+          const fallbackCost = Number(p.import_price ?? p.cost_price) || 0;
           // SỬA: ưu tiên cột sku làm mã sản phẩm
           const prodCode = String(p.sku || p.code || p.product_code || '---');
           const prodName = String(p.name || p.product_name || 'Không tên');
           const prodUnit = String(p.unit || 'Cái');
+
+          // Giá vốn bình quân gia quyền = tổng giá trị nhập / tổng số lượng nhập (tính đến hết kỳ báo cáo)
+          // Nếu chưa có lịch sử nhập thì dùng giá nhập trên thẻ sản phẩm
+          let histQty = 0, histVal = 0;
+          for (const i of purchaseItems) {
+            if (String(i.product_id) !== String(p.id)) continue;
+            const d = (i.created_at || '').slice(0, 10);
+            if (d && d > cleanEnd) continue;
+            histQty += Number(i.quantity) || 0;
+            histVal += Number(i.total) || 0;
+          }
+          const unitCost = histQty > 0 && histVal > 0 ? histVal / histQty : fallbackCost;
 
           // Lọc lượng nhập trong kỳ
           const pImports = purchaseItems.filter(i => {
