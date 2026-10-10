@@ -1226,13 +1226,11 @@ export default function App() {
                         <td style={{ padding: '12px', color: '#475569' }}>{item.note || item.reference_code}</td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
-                            <button 
+                            <button
                               onClick={() => setSelectedCashItem(item)}
                               style={{ background: '#dbeafe', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
                               title="Xem chi tiết"
-                            >
-                              👁️
-                            </button>
+                            >👁️</button>
                             <button
                               onClick={() => {
                                 setEditingCashId(item.id);
@@ -2116,78 +2114,6 @@ export default function App() {
         </div>
       )}
 
-                  {selectedCashItem && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-              <h3 style={{ margin: 0, color: '#0f172a' }}>Chi Tiết Giao Dịch</h3>
-              <button 
-                onClick={() => setSelectedCashItem(null)} 
-                style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px', color: '#334155' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Mã Giao Dịch:</span>
-                <strong style={{ color: '#7c3aed' }}>{selectedCashItem.code}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Loại Giao Dịch:</span>
-                <span style={{ 
-                  padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold',
-                  background: selectedCashItem.type === 'IN' ? '#dcfce7' : '#fee2e2',
-                  color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626'
-                }}>
-                  {selectedCashItem.type === 'IN' ? 'Phiếu Thu' : 'Phiếu Chi'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Số Tiền:</span>
-                <strong style={{ fontSize: '16px', color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626' }}>
-                  {selectedCashItem.type === 'IN' ? '+' : '-'}{vnd(selectedCashItem.amount)}
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Danh Mục:</span>
-                <strong>{selectedCashItem.category}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Phương Thức Thanh Toán:</span>
-                <span>{selectedCashItem.payment_method}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Chứng Từ Liên Quan:</span>
-                <span style={{ color: '#2563eb', fontWeight: '500' }}>{selectedCashItem.reference_code || 'Không có'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Ngày Tạo:</span>
-                <span>{selectedCashItem.created_at}</span>
-              </div>
-              <div style={{ marginTop: '5px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '4px', fontSize: '12px' }}>Ghi chú:</span>
-                <span style={{ fontStyle: 'italic', color: '#475569' }}>{selectedCashItem.note || 'Không có ghi chú'}</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button 
-                onClick={() => setSelectedCashItem(null)} 
-                style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
       {/* POPUP TẠO PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
       {showOrderModal && (
         <div style={{ ...overlayStyle, zIndex: 900 }}>
@@ -2749,6 +2675,76 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* POPUP XEM CHI TIẾT GIAO DỊCH THU CHI */}
+      {selectedCashItem && (
+        <div style={overlayStyle}>
+          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#0f172a' }}>Chi Tiết Giao Dịch</h3>
+              <button
+                onClick={() => setSelectedCashItem(null)}
+                style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px', color: '#334155' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Mã Giao Dịch:</span>
+                <strong style={{ color: '#7c3aed' }}>{selectedCashItem.code}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Loại Giao Dịch:</span>
+                <span style={{
+                  padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold',
+                  background: selectedCashItem.type === 'IN' ? '#dcfce7' : '#fee2e2',
+                  color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626'
+                }}>
+                  {selectedCashItem.type === 'IN' ? 'Phiếu Thu' : 'Phiếu Chi'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Số Tiền:</span>
+                <strong style={{ fontSize: '16px', color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                  {selectedCashItem.type === 'IN' ? '+' : '-'}{vnd(selectedCashItem.amount)}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Danh Mục:</span>
+                <strong>{selectedCashItem.category}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Phương Thức Thanh Toán:</span>
+                <span>{selectedCashItem.payment_method}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Chứng Từ Liên Quan:</span>
+                <span style={{ color: '#2563eb', fontWeight: '500' }}>{selectedCashItem.reference_code || 'Không có'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Ngày Tạo:</span>
+                <span>{selectedCashItem.created_at}</span>
+              </div>
+              <div style={{ marginTop: '5px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <span style={{ color: '#64748b', display: 'block', marginBottom: '4px', fontSize: '12px' }}>Ghi chú:</span>
+                <span style={{ fontStyle: 'italic', color: '#475569' }}>{selectedCashItem.note || 'Không có ghi chú'}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button
+                onClick={() => setSelectedCashItem(null)}
+                style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
