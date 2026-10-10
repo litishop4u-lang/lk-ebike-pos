@@ -645,7 +645,6 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
-          // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn (Bình quân gia quyền cuối kỳ)
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
         const urlObj = new URL(request.url);
@@ -653,41 +652,38 @@ export default {
         const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
         const search = (urlObj.searchParams.get('search') || '').toLowerCase();
 
-        // 1. Lấy toàn bộ sản phẩm
         const products = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
         
-        // 2. Lấy tất cả các mục nhập kho khớp theo khoảng thời gian (so sánh chuỗi ngày YYYY-MM-DD)
+        // Lấy toàn bộ lịch sử nhập kho và hóa đơn để lọc an toàn ở tầng code
         const purchaseItems = await db.prepare(`
           SELECT poi.product_id, poi.quantity, poi.total, po.created_at
           FROM purchase_order_items poi
           JOIN purchase_orders po ON poi.purchase_order_id = po.id
         `).all();
 
-        // 3. Lấy tất cả các mục xuất kho
         const invoiceItems = await db.prepare(`
           SELECT ii.product_id, ii.quantity, ii.price, inv.created_at
           FROM invoice_items ii
           JOIN invoices inv ON ii.invoice_id = inv.id
         `).all();
 
-        // 4. Tính toán số liệu tổng hợp
         const reportData = (products.results || []).map(p => {
           const unitCost = Number(p.cost_price) || 0;
 
-          // Lọc các giao dịch nhập trong kỳ (so sánh theo tiền tố ngày YYYY-MM-DD)
+          // Lọc nhập trong kỳ theo khoảng ngày (YYYY-MM-DD)
           const pImports = (purchaseItems.results || []).filter(i => {
             if (i.product_id !== p.id) return false;
-            const itemDate = (i.created_at || '').slice(0, 10);
-            return itemDate >= startDate.slice(0, 10) && itemDate <= endDate.slice(0, 10);
+            const d = (i.created_at || '').slice(0, 10);
+            return d >= startDate.slice(0, 10) && d <= endDate.slice(0, 10);
           });
           const importQty = pImports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const importVal = pImports.reduce((sum, i) => sum + (Number(i.total) || (Number(i.quantity) * unitCost)), 0);
 
-          // Lọc các giao dịch xuất trong kỳ
+          // Lọc xuất trong kỳ
           const pExports = (invoiceItems.results || []).filter(i => {
             if (i.product_id !== p.id) return false;
-            const itemDate = (i.created_at || '').slice(0, 10);
-            return itemDate >= startDate.slice(0, 10) && itemDate <= endDate.slice(0, 10);
+            const d = (i.created_at || '').slice(0, 10);
+            return d >= startDate.slice(0, 10) && d <= endDate.slice(0, 10);
           });
           const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const exportVal = exportQty * unitCost;
@@ -719,14 +715,14 @@ export default {
           item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
         );
 
-        const totalOpeningVal = filtered.reduce((sum, i) => sum + i.openingVal, 0);
-        const totalImportVal = filtered.reduce((sum, i) => sum + i.importVal, 0);
-        const totalExportVal = filtered.reduce((sum, i) => sum + i.exportVal, 0);
-        const totalClosingVal = filtered.reduce((sum, i) => sum + i.closingVal, 0);
-
         return json({
           success: true,
-          summary: { totalOpeningVal, totalImportVal, totalExportVal, totalClosingVal },
+          summary: {
+            totalOpeningVal: filtered.reduce((s, i) => s + i.openingVal, 0),
+            totalImportVal: filtered.reduce((s, i) => s + i.importVal, 0),
+            totalExportVal: filtered.reduce((s, i) => s + i.exportVal, 0),
+            totalClosingVal: filtered.reduce((s, i) => s + i.closingVal, 0)
+          },
           items: filtered
         }, 200, origin);
       }
