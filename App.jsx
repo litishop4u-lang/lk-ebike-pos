@@ -2084,37 +2084,39 @@ export default function App() {
                     return;
                   }
                   const rows = importText.split(/\r?\n/).filter(r => r.trim() !== '');
-                  let successCount = 0;
-                  
-                  for (const row of rows) {
+                  const items = rows.map(row => {
                     const cols = row.split(/\t|,/).map(c => c.trim());
-                    // Cấu trúc map cột khớp với hướng dẫn: [Mã, Tên, SĐT, Địa chỉ]
-                    const supplierData = {
+                    return {
                       code: cols[0] || '',
                       name: cols[1] || '',
                       phone: cols[2] || '',
-                      address: cols.slice(3).join(', ') || ''
+                      address: cols.slice(3).join(', ') || '',
+                      status: 'active'
                     };
+                  }).filter(i => i.name !== '');
 
-                    if (supplierData.name) {
-                      try {
-                        const res = await api('/api/suppliers', {
-                          method: 'POST',
-                          body: JSON.stringify(supplierData)
-                        });
-                        if (res && (res.success || res.id)) {
-                          successCount++;
-                        }
-                      } catch (err) {
-                        console.error('Lỗi dòng:', row, err);
-                      }
-                    }
+                  if (items.length === 0) {
+                    alert('Không có dữ liệu hợp lệ!');
+                    return;
                   }
 
-                  alert(`Nhập thành công ${successCount} nhà cung cấp!`);
-                  setShowImportModal(false);
-                  setImportText('');
-                  loadData();
+                  try {
+                    const res = await api('/api/suppliers/import', {
+                      method: 'POST',
+                      body: JSON.stringify({ items })
+                    });
+
+                    if (res && res.success) {
+                      alert(`Nhập thành công ${res.successCount || items.length} nhà cung cấp! (Lỗi: ${res.errorCount || 0})`);
+                      setShowImportModal(false);
+                      setImportText('');
+                      loadData();
+                    } else {
+                      alert('Nhập khẩu không thành công.');
+                    }
+                  } catch (err) {
+                    alert('Lỗi: ' + err.message);
+                  }
                 }}
                 style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >Xác nhận</button>
