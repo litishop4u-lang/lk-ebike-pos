@@ -652,11 +652,11 @@ export default {
         const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
         const search = (urlObj.searchParams.get('search') || '').toLowerCase();
 
-        // 1. Lấy toàn bộ danh sách sản phẩm từ bảng products
-        const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products ORDER BY id DESC').all();
+        // 1. Lấy toàn bộ sản phẩm
+        const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
         const products = prodRes.results || [];
 
-        // 2. Lấy tất cả lịch sử chi tiết nhập kho
+        // 2. Lấy chi tiết lịch sử nhập kho
         const purchaseRes = await db.prepare(`
           SELECT poi.product_id, poi.quantity, poi.total, po.created_at
           FROM purchase_order_items poi
@@ -664,7 +664,7 @@ export default {
         `).all();
         const purchaseItems = purchaseRes.results || [];
 
-        // 3. Lấy tất cả lịch sử chi tiết xuất kho (hóa đơn bán hàng)
+        // 3. Lấy chi tiết lịch sử xuất kho
         const invoiceRes = await db.prepare(`
           SELECT ii.product_id, ii.quantity, ii.price, inv.created_at
           FROM invoice_items ii
@@ -672,33 +672,39 @@ export default {
         `).all();
         const invoiceItems = invoiceRes.results || [];
 
-        // 4. Duyệt qua từng sản phẩm để tính toán Xuất - Nhập - Tồn trong kỳ
+        const cleanStart = startDate.slice(0, 10);
+        const cleanEnd = endDate.slice(0, 10);
+
+        // 4. Tính toán
         const reportData = products.map(p => {
           const unitCost = Number(p.cost_price) || 0;
+          const currentStock = Number(p.stock) || 0;
 
-          // Lọc lượng nhập trong kỳ theo khoảng ngày (YYYY-MM-DD)
+          // Lọc nhập trong kỳ
           const pImports = purchaseItems.filter(i => {
             if (String(i.product_id) !== String(p.id)) return false;
-            const d = (i.created_at || '').slice(0, 10);
-            return d >= startDate.slice(0, 10) && d <= endDate.slice(0, 10);
+            const itemDate = (i.created_at || '').slice(0, 10);
+            // Nếu phiếu không có ngày hoặc ngày nằm trong khoảng lọc thì nhận
+            if (!itemDate) return true; 
+            return itemDate >= cleanStart && itemDate <= cleanEnd;
           });
+
           const importQty = pImports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const importVal = pImports.reduce((sum, i) => sum + (Number(i.total) || (Number(i.quantity) * unitCost)), 0);
 
-          // Lọc lượng xuất trong kỳ theo khoảng ngày (YYYY-MM-DD)
+          // Lọc xuất trong kỳ
           const pExports = invoiceItems.filter(i => {
             if (String(i.product_id) !== String(p.id)) return false;
-            const d = (i.created_at || '').slice(0, 10);
-            return d >= startDate.slice(0, 10) && d <= endDate.slice(0, 10);
+            const itemDate = (i.created_at || '').slice(0, 10);
+            if (!itemDate) return false;
+            return itemDate >= cleanStart && itemDate <= cleanEnd;
           });
+
           const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const exportVal = exportQty * unitCost;
 
-          // Tồn cuối kỳ là tồn kho hiện tại của sản phẩm
-          const closingQty = Number(p.stock) || 0;
+          const closingQty = currentStock;
           const closingVal = closingQty * unitCost;
-
-          // Suy luận Tồn đầu kỳ = Tồn hiện tại - Nhập trong kỳ + Xuất trong kỳ
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
 
@@ -718,12 +724,10 @@ export default {
           };
         });
 
-        // Lọc theo từ khóa tìm kiếm (mã hoặc tên sản phẩm)
         const filtered = reportData.filter(item => 
           item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
         );
 
-        // Tính tổng quan các thẻ phía trên
         const totalOpeningVal = filtered.reduce((sum, i) => sum + i.openingVal, 0);
         const totalImportVal = filtered.reduce((sum, i) => sum + i.importVal, 0);
         const totalExportVal = filtered.reduce((sum, i) => sum + i.exportVal, 0);
