@@ -414,6 +414,34 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+      // Cập nhật phiếu thu / chi hiện có (không tạo mới)
+      if (is(/^\/api\/cash-book\/\d+$/, 'PUT')) {
+        const id = idOf(pathname);
+        const existing = await db.prepare('SELECT id FROM cash_books WHERE id = ?').bind(id).first();
+        if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu thu chi');
+
+        const b = await request.json();
+        const type = b.type; // 'IN' hoặc 'OUT'
+        const amount = Number(b.amount) || 0;
+        const category = str(b.category) || 'Khác';
+        if (amount <= 0) throw new HttpError(400, 'Số tiền giao dịch phải lớn hơn 0');
+
+        await db.prepare(`
+          UPDATE cash_books 
+          SET type = ?, amount = ?, category = ?, payment_method = ?, reference_code = ?, note = ?
+          WHERE id = ?
+        `).bind(
+          type,
+          amount,
+          category,
+          str(b.payment_method) || 'Chuyển khoản',
+          str(b.reference_code) || '',
+          str(b.note) || '',
+          id
+        ).run();
+
+        return json({ success: true }, 200, origin);
+      }
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
