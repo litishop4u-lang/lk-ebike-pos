@@ -128,8 +128,9 @@ export default function App() {
         setReportSummary(res.summary || {});
       }
     } catch (e) {
-      console.error('Lỗi tải báo cáo:', e);
-    }
+  console.error('Lỗi tải báo cáo:', e);
+  setMsg({ type: 'err', text: 'Không tải được báo cáo: ' + e.message });
+}
   };
 
   // Gọi tự động khi chuyển sang view báo cáo
