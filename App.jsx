@@ -78,9 +78,45 @@ export default function App() {
   const [reportSummary, setReportSummary] = useState({ totalOpeningVal: 0, totalImportVal: 0, totalExportVal: 0, totalClosingVal: 0 });
   const [reportSearch, setReportSearch] = useState('');
 
+  const [reportType, setReportType] = useState('month'); // 'day', 'month', 'quarter', 'year', 'custom'
+  const [reportValue, setReportValue] = useState(new Date().toISOString().slice(0, 7)); // ví dụ: '2026-10'
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
+
   const loadInventoryReport = async () => {
     try {
-      const res = await api(`/api/reports/inventory-summary?search=${encodeURIComponent(reportSearch)}`);
+      let start = '2026-01-01T00:00:00.000Z';
+      let end = '2026-12-31T23:59:59.599Z';
+      const now = new Date();
+
+      if (reportType === 'day') {
+        const d = reportValue || now.toISOString().slice(0, 10);
+        start = `${d}T00:00:00.000Z`;
+        end = `${d}T23:59:59.599Z`;
+      } else if (reportType === 'month') {
+        // reportValue dạng '2026-10'
+        const [y, m] = (reportValue || now.toISOString().slice(0, 7)).split('-');
+        const lastDay = new Date(y, m, 0).getDate();
+        start = `${y}-${m}-01T00:00:00.000Z`;
+        end = `${y}-${m}-${lastDay}T23:59:59.599Z`;
+      } else if (reportType === 'quarter') {
+        // reportValue dạng '2026-Q1' hoặc chọn năm + quý
+        const year = reportValue.split('-')[0] || now.getFullYear();
+        const q = reportValue.split('-')[1] || 'Q1';
+        if (q === 'Q1') { start = `${year}-01-01T00:00:00.000Z`; end = `${year}-03-31T23:59:59.599Z`; }
+        else if (q === 'Q2') { start = `${year}-04-01T00:00:00.000Z`; end = `${year}-06-30T23:59:59.599Z`; }
+        else if (q === 'Q3') { start = `${year}-07-01T00:00:00.000Z`; end = `${year}-09-30T23:59:59.599Z`; }
+        else { start = `${year}-10-01T00:00:00.000Z`; end = `${year}-12-31T23:59:59.599Z`; }
+      } else if (reportType === 'year') {
+        const y = reportValue || now.getFullYear();
+        start = `${y}-01-01T00:00:00.000Z`;
+        end = `${y}-12-31T23:59:59.599Z`;
+      } else if (reportType === 'custom') {
+        start = reportStartDate ? `${reportStartDate}T00:00:00.000Z` : start;
+        end = reportEndDate ? `${reportEndDate}T23:59:59.599Z` : end;
+      }
+
+      const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch)}`);
       if (res && res.success) {
         setReportItems(res.items || []);
         setReportSummary(res.summary || {});
@@ -1181,7 +1217,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Các Thẻ Tổng Quan Phía Trên */}
+            {/* Các Thẻ Tổng Quan */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị tồn đầu kỳ</span>
@@ -1201,18 +1237,65 @@ export default function App() {
               </div>
             </div>
 
-            {/* Thanh Bộ Lọc */}
-            <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            {/* Thanh Bộ Lọc Thời Gian Chi Tiết */}
+            <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', flexWrap: 'wrap' }}>
               <input 
                 placeholder="🔍 Tìm mã hoặc tên sản phẩm..." 
                 value={reportSearch} 
                 onChange={(e) => setReportSearch(e.target.value)} 
-                style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
+                style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
               />
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xem theo:</span>
+                <select 
+                  value={reportType} 
+                  onChange={(e) => {
+                    setReportType(e.target.value);
+                    if (e.target.value === 'day') setReportValue(new Date().toISOString().slice(0, 10));
+                    else if (e.target.value === 'month') setReportValue(new Date().toISOString().slice(0, 7));
+                    else if (e.target.value === 'year') setReportValue(String(new Date().getFullYear()));
+                    else if (e.target.value === 'quarter') setReportValue(`${new Date().getFullYear()}-Q1`);
+                  }} 
+                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
+                >
+                  <option value="day">Theo Ngày</option>
+                  <option value="month">Theo Tháng</option>
+                  <option value="quarter">Theo Quý</option>
+                  <option value="year">Theo Năm</option>
+                  <option value="custom">Tùy chọn khoảng ngày</option>
+                </select>
+
+                {reportType === 'day' && (
+                  <input type="date" value={reportValue} onChange={(e) => setReportValue(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {reportType === 'month' && (
+                  <input type="month" value={reportValue} onChange={(e) => setReportValue(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {reportType === 'quarter' && (
+                  <select value={reportValue} onChange={(e) => setReportValue(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                    <option value="2026-Q1">Quý 1 / 2026</option>
+                    <option value="2026-Q2">Quý 2 / 2026</option>
+                    <option value="2026-Q3">Quý 3 / 2026</option>
+                    <option value="2026-Q4">Quý 4 / 2026</option>
+                  </select>
+                )}
+                {reportType === 'year' && (
+                  <input type="number" value={reportValue} onChange={(e) => setReportValue(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {reportType === 'custom' && (
+                  <>
+                    <input type="date" value={reportStartDate} onChange={(e) => setReportStartDate(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                    <span>đến</span>
+                    <input type="date" value={reportEndDate} onChange={(e) => setReportEndDate(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+              </div>
+
               <button onClick={loadInventoryReport} style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Lọc dữ liệu</button>
             </div>
 
-            {/* Bảng Chi Tiết Xuất Nhập Tồn (Đã bỏ cột Đơn giá BQ theo yêu cầu) */}
+            {/* Bảng Chi Tiết X-N-T */}
             <div style={{ background: '#fff', borderRadius: '10px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
@@ -1220,7 +1303,6 @@ export default function App() {
                     <th style={{ padding: '12px', textAlign: 'left', width: '90px' }}>Mã SP</th>
                     <th style={{ padding: '12px', textAlign: 'left' }}>Tên Sản Phẩm</th>
                     <th style={{ padding: '12px', textAlign: 'center', width: '60px' }}>ĐVT</th>
-                    
                     <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderLeft: '1px solid #cbd5e1', borderRight: '1px solid #cbd5e1', background: '#f1f5f9' }}>TỒN ĐẦU KỲ</th>
                     <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderRight: '1px solid #cbd5e1', background: '#f0fdf4' }}>NHẬP TRONG KỲ</th>
                     <th colSpan="2" style={{ padding: '12px', textAlign: 'center', borderRight: '1px solid #cbd5e1', background: '#fef2f2' }}>XUẤT TRONG KỲ</th>
@@ -1244,16 +1326,12 @@ export default function App() {
                       <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
                       <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
-                      
                       <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
-                      
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
-                      
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
-                      
                       <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
                     </tr>
@@ -1263,7 +1341,6 @@ export default function App() {
             </div>
           </div>
         )}
-
             {/* ⚙️ MÀN HÌNH CÀI ĐẶT THÔNG TIN DOANH NGHIỆP & LOGO */}
         {currentView === 'settings' && (
           <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', maxWidth: '700px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
