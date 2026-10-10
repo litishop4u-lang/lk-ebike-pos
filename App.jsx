@@ -707,6 +707,33 @@ export default function App() {
     }
   };
 
+    // 🔹 ĐẶT CÁC STATE VÀ HÀM NÀY BÊN TRONG COMPONENT `App`
+  const [showQuickAddSupplierModal, setShowQuickAddSupplierModal] = useState(false);
+  const [newSupplierForm, setNewSupplierForm] = useState({ name: '', phone: '', address: '' });
+
+  const handleQuickSaveSupplier = async () => {
+    if (!newSupplierForm.name) return alert('Vui lòng nhập tên nhà cung cấp!');
+    try {
+      const res = await api('/api/suppliers', {
+        method: 'POST',
+        body: JSON.stringify(newSupplierForm)
+      });
+      if (res && res.success) {
+        alert('Thêm nhà cung cấp thành công!');
+        setShowQuickAddSupplierModal(false);
+        setNewSupplierForm({ name: '', phone: '', address: '' });
+        // Tự động chọn luôn nhà cung cấp vừa tạo vào form mua hàng
+        if (res.id) {
+          setPurchaseForm((f) => ({ ...f, supplier_id: res.id }));
+          setSupplierSearchKeyword(newSupplierForm.name);
+        }
+        loadData(); // Tải lại danh sách
+      }
+    } catch (err) {
+      alert('Lỗi thêm nhà cung cấp: ' + err.message);
+    }
+  };
+
   const updatePurchaseItem = (index, patch) =>
     setPurchaseItems((items) => items.map((it, idx) => (idx === index ? { ...it, ...patch } : it)));
 
@@ -1450,18 +1477,83 @@ export default function App() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <div style={{ position: 'relative' }}>
                   <label style={labelStyle}>Nhà cung cấp *:</label>
-                  <input
-                    placeholder="Nhập tên, SĐT hoặc mã NCC..."
-                    value={supplierSearchKeyword}
-                    onChange={(e) => {
-                      setSupplierSearchKeyword(e.target.value);
-                      setPurchaseForm((f) => ({ ...f, supplier_id: '' })); // gõ lại thì bỏ NCC đã chọn trước đó
-                      setShowSupplierDropdown(true);
-                    }}
-                    onFocus={() => setShowSupplierDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 150)}
-                    style={inputStyle}
-                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      placeholder="Nhập tên, SĐT hoặc mã NCC..."
+                      value={supplierSearchKeyword}
+                      onChange={(e) => {
+                        setSupplierSearchKeyword(e.target.value);
+                        setPurchaseForm((f) => ({ ...f, supplier_id: '' })); // gõ lại thì bỏ NCC đã chọn trước đó
+                        setShowSupplierDropdown(true);
+                      }}
+                      onFocus={() => setShowSupplierDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 150)}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickAddSupplierModal(true)}
+                      title="Thêm nhà cung cấp mới"
+                      style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '0 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                    >
+                      + Thêm
+                    </button>
+                  </div>
+
+                  {/* 🔹 ĐẶT HOẶC CHÈN ĐOẠN POPUP NÀY Ở KHU VỰC CÁC MODAL CỦA ỨNG DỤNG */}
+      {showQuickAddSupplierModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
+          <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 15px 0', color: '#7c3aed' }}>Thêm Nhanh Nhà Cung Cấp</h3>
+            
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
+              <input 
+                placeholder="Nhập tên công ty / cửa hàng..." 
+                value={newSupplierForm.name} 
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, name: e.target.value })} 
+                style={inputStyle} 
+              />
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Số điện thoại:</label>
+              <input 
+                placeholder="Nhập số điện thoại..." 
+                value={newSupplierForm.phone} 
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phone: e.target.value })} 
+                style={inputStyle} 
+              />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Địa chỉ:</label>
+              <input 
+                placeholder="Nhập địa chỉ..." 
+                value={newSupplierForm.address} 
+                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, address: e.target.value })} 
+                style={inputStyle} 
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                onClick={() => setShowQuickAddSupplierModal(false)} 
+                style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={handleQuickSaveSupplier} 
+                style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Lưu nhà cung cấp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+                  
                   {showSupplierDropdown && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
                       {(suppliers || []).filter((s) =>
