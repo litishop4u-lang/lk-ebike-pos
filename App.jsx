@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useState } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
 const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
@@ -24,7 +24,36 @@ const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'ac
 const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
 const EMPTY_CASH_FORM = { type: 'OUT', amount: '', category: 'Mua hàng / Trả nợ NCC', payment_method: 'Chuyển khoản', reference_code: '', note: '' };
 
+// Hiện lỗi ngay trên màn hình thay vì trắng trơn, để biết chính xác lỗi ở đâu
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('Lỗi giao diện:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: '24px', fontFamily: 'sans-serif' }}>
+          <h3 style={{ color: '#991b1b' }}>Có lỗi hiển thị giao diện</h3>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#fee2e2', padding: '12px', borderRadius: '6px', fontSize: '12px' }}>
+            {String(this.state.error?.stack || this.state.error)}
+          </pre>
+          <button onClick={() => window.location.reload()} style={{ padding: '8px 16px', cursor: 'pointer' }}>Tải lại trang</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppMain />
+    </ErrorBoundary>
+  );
+}
+
+function AppMain() {
   const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book'
 
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
@@ -166,8 +195,26 @@ export default function App() {
       const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
 
       if (res && res.success) {
-        setReportItems(res.items || []);
-        setReportSummary(res.summary || {});
+        // Chuẩn hóa dữ liệu: ép số, tránh null/undefined làm sập giao diện
+        const n0 = (v) => Number(v) || 0;
+        const rows = Array.isArray(res.items) ? res.items : [];
+        setReportItems(rows.map((it, i) => ({
+          id: it.id ?? i,
+          code: String(it.code ?? ''),
+          name: String(it.name ?? ''),
+          unit: String(it.unit ?? ''),
+          openingQty: n0(it.openingQty), openingVal: n0(it.openingVal),
+          importQty: n0(it.importQty), importVal: n0(it.importVal),
+          exportQty: n0(it.exportQty), exportVal: n0(it.exportVal),
+          closingQty: n0(it.closingQty), closingVal: n0(it.closingVal),
+        })));
+        const sm = res.summary || {};
+        setReportSummary({
+          totalOpeningVal: n0(sm.totalOpeningVal),
+          totalImportVal: n0(sm.totalImportVal),
+          totalExportVal: n0(sm.totalExportVal),
+          totalClosingVal: n0(sm.totalClosingVal),
+        });
       }
     } catch (e) {
       console.error('Lỗi tải báo cáo:', e);
@@ -1547,19 +1594,6 @@ export default function App() {
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
                       </tr>
                     ))
-                  )}
-                      {reportItems && reportItems.length > 0 && (
-                      <tr style={{ background: '#f8fafc', fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
-                      <td colSpan="3" style={{ padding: '12px', textAlign: 'left' }}>Tổng cộng</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.openingQty}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.openingVal)}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.importQty}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.importVal)}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.exportQty}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.exportVal)}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{reportTotals.closingQty}</td>
-                      <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(reportTotals.closingVal)}</td>
-                    </tr>
                   )}
                 </tbody>
               </table>
