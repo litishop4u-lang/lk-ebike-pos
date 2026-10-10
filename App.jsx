@@ -1007,6 +1007,7 @@ export default function App() {
             </div>
         </div>
       )}
+        
 
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
@@ -1069,6 +1070,130 @@ export default function App() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+          {currentView === 'cash-book' && (
+          <div style={{ padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi</h2>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  onClick={() => setShowCashModal(true)} 
+                  style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  + Thêm Thu Chi
+                </button>
+                <button onClick={() => alert('Đã xuất Excel thành công!')} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                  📥 Xuất Excel
+                </button>
+              </div>
+            </div>
+
+            {/* Các thẻ tổng quan chuẩn mẫu */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#16a34a', fontWeight: 'bold' }}>Tổng Thu</span>
+                  <span style={{ background: '#dcfce7', color: '#16a34a', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>+</span>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: '900', color: '#16a34a', marginTop: '10px' }}>{vnd(cashSummary.totalIn || 0)}</div>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>Trong kỳ</span>
+              </div>
+
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>Tổng Chi</span>
+                  <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>-</span>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: '900', color: '#dc2626', marginTop: '10px' }}>{vnd(cashSummary.totalOut || 0)}</div>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>Trong kỳ</span>
+              </div>
+
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #2563eb' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#2563eb', fontWeight: 'bold' }}>Lợi Nhuận Ròng</span>
+                  <span style={{ background: '#dbeafe', color: '#2563eb', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>↗</span>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: '900', color: '#2563eb', marginTop: '10px' }}>{vnd(cashSummary.netProfit || 0)}</div>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>Thu - Chi</span>
+              </div>
+
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#7c3aed', fontWeight: 'bold' }}>Số Dư</span>
+                  <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>$</span>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: '900', color: '#7c3aed', marginTop: '10px' }}>{vnd(cashSummary.balance || 0)}</div>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>Tích lũy</span>
+              </div>
+            </div>
+
+            {/* Bảng Danh Sách Giao Dịch Thu Chi */}
+            <div style={{ background: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: '15px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold', fontSize: '15px', color: '#0f172a' }}>
+                Danh Sách Giao Dịch
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Mã GD</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Ngày</th>
+                    <th style={{ padding: '12px', textAlign: 'center' }}>Loại</th>
+                    <th style={{ padding: '12px', textAlign: 'right' }}>Số Tiền</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Danh Mục</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Phương Thức TT</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Ghi Chú</th>
+                    <th style={{ padding: '12px', textAlign: 'center' }}>Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(!cashItems || cashItems.length === 0) ? (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Chưa có giao dịch thu chi nào.</td>
+                    </tr>
+                  ) : (
+                    cashItems.map((item) => (
+                      <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
+                        <td style={{ padding: '12px' }}>{item.created_at ? item.created_at.slice(0, 10) : ''}</td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <span style={{
+                            padding: '4px 10px',
+                            borderRadius: '20px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            background: item.type === 'IN' ? '#dcfce7' : '#fee2e2',
+                            color: item.type === 'IN' ? '#16a34a' : '#dc2626'
+                          }}>
+                            {item.type === 'IN' ? 'Thu' : 'Chi'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: item.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                          {item.type === 'IN' ? '+' : '-'}{vnd(item.amount)}
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: '500' }}>{item.category}</td>
+                        <td style={{ padding: '12px' }}>{item.payment_method}</td>
+                        <td style={{ padding: '12px', color: '#475569' }}>{item.note || item.reference_code}</td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <button 
+                            onClick={async () => {
+                              if (confirm('Bạn có chắc muốn xóa giao dịch này?')) {
+                                await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
+                                loadCashBook();
+                              }
+                            }}
+                            style={{ background: '#fee2e2', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1799,6 +1924,112 @@ export default function App() {
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+          {showCashModal && (
+        <div style={overlayStyle}>
+          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px' }}>
+            <h3 style={{ marginTop: 0, color: '#0f172a' }}>Tạo Phiếu Thu / Chi Mới</h3>
+            
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Loại giao dịch:</label>
+              <select 
+                value={cashForm.type} 
+                onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                <option value="OUT">Phiếu Chi (Trả NCC, Lương, Vận chuyển, Thuế...)</option>
+                <option value="IN">Phiếu Thu (Thu tiền khách, Khác...)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Danh mục:</label>
+              <select 
+                value={cashForm.category} 
+                onChange={(e) => setCashForm({ ...cashForm, category: e.target.value })}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                {cashForm.type === 'OUT' ? (
+                  <>
+                    <option value="Mua hàng / Trả nợ NCC">Mua hàng / Trả nợ NCC</option>
+                    <option value="Chi hoàn trả khách hàng">Chi hoàn trả khách hàng</option>
+                    <option value="Chi phí vận chuyển">Chi phí vận chuyển</option>
+                    <option value="Chi thuế">Chi thuế</option>
+                    <option value="Chi lương nhân viên">Chi lương nhân viên</option>
+                    <option value="Chi phí khác">Chi phí khác</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="Bán hàng / Thu nợ KH">Bán hàng / Thu nợ KH</option>
+                    <option value="Thu hoàn trả từ NCC">Thu hoàn trả từ NCC</option>
+                    <option value="Thu nhập khác">Thu nhập khác</option>
+                  </>
+                )}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
+              <input 
+                type="number" 
+                placeholder="Nhập số tiền..." 
+                value={cashForm.amount} 
+                onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phương thức thanh toán:</label>
+              <select 
+                value={cashForm.payment_method} 
+                onChange={(e) => setCashForm({ ...cashForm, payment_method: e.target.value })}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                <option value="Chuyển khoản">Chuyển khoản</option>
+                <option value="Tiền mặt">Tiền mặt</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ghi chú / Chứng từ liên quan:</label>
+              <textarea 
+                rows="3" 
+                placeholder="Nhập nội dung giải trình..." 
+                value={cashForm.note} 
+                onChange={(e) => setCashForm({ ...cashForm, note: e.target.value })}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button onClick={() => setShowCashModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+              <button 
+                onClick={async () => {
+                  if (!cashForm.amount || Number(cashForm.amount) <= 0) {
+                    alert('Vui lòng nhập số tiền hợp lệ!');
+                    return;
+                  }
+                  try {
+                    await api('/api/cash-book', {
+                      method: 'POST',
+                      body: JSON.stringify(cashForm)
+                    });
+                    setShowCashModal(false);
+                    setCashForm({ type: 'OUT', amount: '', category: 'Mua hàng / Trả nợ NCC', payment_method: 'Chuyển khoản', note: '' });
+                    loadCashBook();
+                  } catch (err) {
+                    alert('Lỗi: ' + err.message);
+                  }
+                }} 
+                style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Lưu giao dịch
+              </button>
             </div>
           </div>
         </div>
