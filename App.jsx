@@ -730,7 +730,7 @@ export default function App() {
           supplier_id: purchaseForm.supplier_id,
           payment_method: purchaseForm.payment_method,
           paid_amount: Number(purchaseForm.paid_amount) || 0,
-          created_at: purchaseForm.created_at ? new Date(purchaseForm.created_at).toISOString() : new Date().toISOString(), // 👈 Thêm trường này để tùy chỉnh ngày nhập
+          created_at: purchaseForm.created_at, // 👈 Gửi chính xác giá trị ngày chọn từ input datetime-local lên
           items: purchaseItems,
         }),
       });
