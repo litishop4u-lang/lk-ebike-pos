@@ -747,8 +747,7 @@ export default {
         const search = (urlObj.searchParams.get('search') || '').toLowerCase();
 
         // 1. Lấy toàn bộ sản phẩm
-        // SỬA: bảng products dùng cột sku và import_price (không có code, cost_price)
-        const prodRes = await db.prepare('SELECT id, sku AS code, name, unit, import_price AS cost_price, stock FROM products').all();
+        const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
         const products = prodRes.results || [];
 
         // 2. Lấy chi tiết lịch sử nhập kho
@@ -761,25 +760,24 @@ export default {
 
         // 3. Lấy chi tiết lịch sử xuất kho
         const invoiceRes = await db.prepare(`
-  SELECT ii.product_id, ii.quantity, inv.created_at
-  FROM invoice_items ii
-  JOIN invoices inv ON ii.invoice_id = inv.id
-`).all();
-const invoiceItems = invoiceRes.results || [];
+          SELECT ii.product_id, ii.quantity, inv.created_at
+          FROM invoice_items ii
+          JOIN invoices inv ON ii.invoice_id = inv.id
+        `).all();
+        const invoiceItems = invoiceRes.results || [];
 
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
 
-        // 4. Tính toán
+        // 4. Tính toán số liệu cho từng sản phẩm
         const reportData = products.map(p => {
           const unitCost = Number(p.cost_price) || 0;
           const currentStock = Number(p.stock) || 0;
 
-          // Lọc nhập trong kỳ
+          // Lọc lượng nhập trong kỳ
           const pImports = purchaseItems.filter(i => {
             if (String(i.product_id) !== String(p.id)) return false;
             const itemDate = (i.created_at || '').slice(0, 10);
-            // Nếu phiếu không có ngày hoặc ngày nằm trong khoảng lọc thì nhận
             if (!itemDate) return true; 
             return itemDate >= cleanStart && itemDate <= cleanEnd;
           });
@@ -787,7 +785,7 @@ const invoiceItems = invoiceRes.results || [];
           const importQty = pImports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const importVal = pImports.reduce((sum, i) => sum + (Number(i.total) || (Number(i.quantity) * unitCost)), 0);
 
-          // Lọc xuất trong kỳ
+          // Lọc lượng xuất trong kỳ
           const pExports = invoiceItems.filter(i => {
             if (String(i.product_id) !== String(p.id)) return false;
             const itemDate = (i.created_at || '').slice(0, 10);
@@ -798,17 +796,8 @@ const invoiceItems = invoiceRes.results || [];
           const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const exportVal = exportQty * unitCost;
 
-          // SỬA: tính phát sinh SAU kỳ báo cáo để suy ra tồn cuối kỳ đúng
-          const importAfterQty = purchaseItems
-            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
-            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-          const exportAfterQty = invoiceItems
-            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
-            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-
-          // SỬA: tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ
-          const closingQty = currentStock + exportAfterQty - importAfterQty;
-          const closingVal = closingQty * unitCost;
+          const closingQty = currentStock;
+          const closingVal = closingQty * unitCost; // 👉 Đã sửa: Tính chính xác giá trị tồn cuối kỳ
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
 
@@ -828,19 +817,36 @@ const invoiceItems = invoiceRes.results || [];
           };
         });
 
-        const filtered = reportData.filter(item => 
-          item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
-        );
+        // 5. Lọc: Chỉ giữ lại sản phẩm có phát sinh (tồn đầu, nhập, xuất hoặc tồn cuối khác 0) và khớp từ khóa tìm kiếm
+        const activeItems = reportData.filter(item => {
+          const hasActivity = item.openingQty !== 0 || item.importQty !== 0 || item.exportQty !== 0 || item.closingQty !== 0;
+          const matchesSearch = item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
+          return hasActivity && matchesSearch;
+        });
 
-        const totalOpeningVal = filtered.reduce((sum, i) => sum + i.openingVal, 0);
-        const totalImportVal = filtered.reduce((sum, i) => sum + i.importVal, 0);
-        const totalExportVal = filtered.reduce((sum, i) => sum + i.exportVal, 0);
-        const totalClosingVal = filtered.reduce((sum, i) => sum + i.closingVal, 0);
+        // 6. Tính tổng cộng các chỉ số bên dưới bảng
+        const totals = activeItems.reduce((acc, item) => {
+          acc.openingQty += item.openingQty;
+          acc.openingVal += item.openingVal;
+          acc.importQty += item.importQty;
+          acc.importVal += item.importVal;
+          acc.exportQty += item.exportQty;
+          acc.exportVal += item.exportVal;
+          acc.closingQty += item.closingQty;
+          acc.closingVal += item.closingVal;
+          return acc;
+        }, { openingQty: 0, openingVal: 0, importQty: 0, importVal: 0, exportQty: 0, exportVal: 0, closingQty: 0, closingVal: 0 });
+
+        const totalOpeningVal = totals.openingVal;
+        const totalImportVal = totals.importVal;
+        const totalExportVal = totals.exportVal;
+        const totalClosingVal = totals.closingVal;
 
         return json({
           success: true,
           summary: { totalOpeningVal, totalImportVal, totalExportVal, totalClosingVal },
-          items: filtered
+          totals, // Gửi kèm dòng tổng cộng số lượng và giá trị
+          items: activeItems
         }, 200, origin);
       }
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
