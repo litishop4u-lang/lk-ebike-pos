@@ -1596,6 +1596,31 @@ function AppMain() {
                     ))
                   )}
                 </tbody>
+                {reportItems.length > 0 && (() => {
+                  const t = reportItems.reduce((acc, it) => ({
+                    openingQty: acc.openingQty + it.openingQty, openingVal: acc.openingVal + it.openingVal,
+                    importQty: acc.importQty + it.importQty, importVal: acc.importVal + it.importVal,
+                    exportQty: acc.exportQty + it.exportQty, exportVal: acc.exportVal + it.exportVal,
+                    closingQty: acc.closingQty + it.closingQty, closingVal: acc.closingVal + it.closingVal,
+                  }), { openingQty: 0, openingVal: 0, importQty: 0, importVal: 0, exportQty: 0, exportVal: 0, closingQty: 0, closingVal: 0 });
+                  const qty = (n) => n.toLocaleString('vi-VN');
+                  const cell = { padding: '12px', fontWeight: 'bold', background: '#f1f5f9', borderTop: '2px solid #0f172a' };
+                  return (
+                    <tfoot>
+                      <tr>
+                        <td colSpan="3" style={{ ...cell, textAlign: 'right', color: '#0f172a' }}>TỔNG CỘNG</td>
+                        <td style={{ ...cell, textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{qty(t.openingQty)}</td>
+                        <td style={{ ...cell, textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(t.openingVal)}</td>
+                        <td style={{ ...cell, textAlign: 'center' }}>{qty(t.importQty)}</td>
+                        <td style={{ ...cell, textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(t.importVal)}</td>
+                        <td style={{ ...cell, textAlign: 'center' }}>{qty(t.exportQty)}</td>
+                        <td style={{ ...cell, textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(t.exportVal)}</td>
+                        <td style={{ ...cell, textAlign: 'center' }}>{qty(t.closingQty)}</td>
+                        <td style={{ ...cell, textAlign: 'right', color: '#dc2626' }}>{vnd(t.closingVal)}</td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           </div>
