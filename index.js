@@ -667,11 +667,11 @@ export default {
 
         // 3. Lấy chi tiết lịch sử xuất kho
         const invoiceRes = await db.prepare(`
-          SELECT ii.product_id, ii.quantity, ii.price, inv.created_at
-          FROM invoice_items ii
-          JOIN invoices inv ON ii.invoice_id = inv.id
-        `).all();
-        const invoiceItems = invoiceRes.results || [];
+  SELECT ii.product_id, ii.quantity, inv.created_at
+  FROM invoice_items ii
+  JOIN invoices inv ON ii.invoice_id = inv.id
+`).all();
+const invoiceItems = invoiceRes.results || [];
 
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
