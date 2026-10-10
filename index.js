@@ -340,7 +340,7 @@ export default {
         return json({ ...mainObj, items: items.results || [] }, 200, origin);
       }
 
-        // DELETE /api/orders/:id hoặc /api/invoices/:id
+      // DELETE /api/orders/:id hoặc /api/invoices/:id
       if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'DELETE') {
         const parts = pathname.split('/');
         const type = parts[2];
@@ -363,10 +363,10 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
-        // ===== 7. QUẢN LÝ THU CHI =====
+      // ===== 7. QUẢN LÝ THU CHI =====
       if (pathname === '/api/cash-book' && method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
-        
+
         // Tính toán Tổng thu, Tổng chi, Lợi nhuận và Số dư tích lũy
         let totalIn = 0;
         let totalOut = 0;
@@ -395,13 +395,13 @@ export default {
           INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
-          code, 
-          type, 
-          amount, 
-          category, 
-          str(b.payment_method) || 'Chuyển khoản', 
-          str(b.reference_code) || '', 
-          str(b.note) || '', 
+          code,
+          type,
+          amount,
+          category,
+          str(b.payment_method) || 'Chuyển khoản',
+          str(b.reference_code) || '',
+          str(b.note) || '',
           b.created_at || new Date().toISOString()
         ).run();
 
@@ -442,6 +442,7 @@ export default {
 
         return json({ success: true }, 200, origin);
       }
+
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
@@ -465,14 +466,16 @@ export default {
         const name = str(b.name);
         if (!name) throw new HttpError(400, 'Thiếu tên nhà cung cấp');
         const code = str(b.code) || genCode('NCC');
+        let r;
         try {
-          await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?,?,?,?,?)')
+          r = await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?,?,?,?,?)')
             .bind(code, name, str(b.phone) || null, str(b.address) || null, b.status === 'inactive' ? 'inactive' : 'active').run();
         } catch (err) {
           if (isUnique(err)) throw new HttpError(400, 'Trùng mã NCC');
           throw err;
         }
-        return json({ success: true, code }, 201, origin);
+        // Trả thêm id để giao diện tự chọn nhà cung cấp vừa tạo (nút "Thêm nhanh NCC")
+        return json({ success: true, code, id: r.meta?.last_row_id }, 201, origin);
       }
 
       if (pathname === '/api/suppliers/import' && method === 'POST') {
@@ -540,39 +543,41 @@ export default {
       }
 
       if (pathname === '/api/purchase_orders' && method === 'POST') {
-  const reqData = await request.json();
-  const po = await buildPurchase(db, reqData);
-  const code = genCode('PN');
-  
-  // 👉 Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
-  const customDate = reqData.created_at || new Date().toISOString();
+        const reqData = await request.json();
+        const po = await buildPurchase(db, reqData);
+        const code = genCode('PN');
 
-  await db.batch([
-    db.prepare('INSERT INTO purchase_orders (code, supplier_id, total, paid_amount, debt, payment_method, created_at) VALUES (?,?,?,?,?,?,?)')
-      .bind(code, po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate),
-    ...po.lines.map((l) =>
-      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?,?,?)')
-        .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
-    ...po.lines.map((l) =>
-      db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
-  ]);
-        // 2. 👉 TỰ ĐỘNG SINH PHIẾU CHI NẾU CÓ THANH TOÁN TIỀN NGAY TRÊN PHIẾU NHẬP
+        // Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
+        const customDate = reqData.created_at || new Date().toISOString();
+
+        const stmts = [
+          db.prepare('INSERT INTO purchase_orders (code, supplier_id, total, paid_amount, debt, payment_method, created_at) VALUES (?,?,?,?,?,?,?)')
+            .bind(code, po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate),
+          ...po.lines.map((l) =>
+            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM purchase_orders WHERE code = ?),?,?,?,?,?)')
+              .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
+          ...po.lines.map((l) =>
+            db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+        ];
+
+        // Tự động sinh phiếu chi nếu có thanh toán tiền ngay trên phiếu nhập
+        // (gộp chung vào 1 lần db.batch: phiếu nhập và phiếu chi cùng thành công hoặc cùng bị hủy)
         if (Number(po.paid_amount) > 0) {
-          const cashCode = genCode('TC');
-          // Lấy tên nhà cung cấp để ghi chú chi tiết
           const sup = await db.prepare('SELECT name FROM suppliers WHERE id = ?').bind(po.supplier_id).first();
           const supName = sup ? sup.name : 'Nhà cung cấp';
           const noteText = `Thanh toán tiền mua hàng cho ${supName} theo phiếu ${code}`;
 
-          batchStmts.push(
+          stmts.push(
             db.prepare(`
               INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
               VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
-            `).bind(cashCode, po.paid_amount, po.payment_method || 'Chuyển khoản', code, noteText, customDate)
+            `).bind(genCode('TC'), po.paid_amount, po.payment_method || 'Chuyển khoản', code, noteText, customDate)
           );
         }
-  return json({ success: true, code, total: po.total }, 201, origin);
-}
+
+        await db.batch(stmts);
+        return json({ success: true, code, total: po.total }, 201, origin);
+      }
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'GET')) {
         const id = idOf(pathname);
@@ -592,31 +597,31 @@ export default {
 
       // PUT: trước đây Worker KHÔNG có route này nên nút "Sửa phiếu nhập" không lưu được gì
       if (is(/^\/api\/purchase_orders\/\d+$/, 'PUT')) {
-  const id = idOf(pathname);
-  const existing = await db.prepare('SELECT id FROM purchase_orders WHERE id = ?').bind(id).first();
-  if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
+        const id = idOf(pathname);
+        const existing = await db.prepare('SELECT id FROM purchase_orders WHERE id = ?').bind(id).first();
+        if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
 
-  const reqData = await request.json();
-  const po = await buildPurchase(db, reqData);
-  const customDate = reqData.created_at || new Date().toISOString();
+        const reqData = await request.json();
+        const po = await buildPurchase(db, reqData);
+        const customDate = reqData.created_at || new Date().toISOString();
 
-  const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
-  const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
+        const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
 
-  await runBatch(db, [
-    ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
-    db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
-    // 👉 Cập nhật thêm created_at vào câu lệnh UPDATE
-    db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-      .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
-    ...po.lines.map((l) =>
-      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
-        .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
-    ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
-    stockGuard(db, ids),
-  ], 'Không thể sửa phiếu...');
-  return json({ success: true }, 200, origin);
-}
+        await runBatch(db, [
+          ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
+          db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+          // Cập nhật thêm created_at vào câu lệnh UPDATE
+          db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+            .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
+          ...po.lines.map((l) =>
+            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
+              .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
+          ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+          stockGuard(db, ids),
+        ], 'Không thể sửa phiếu...');
+        return json({ success: true }, 200, origin);
+      }
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
@@ -771,9 +776,11 @@ export default {
 
         // 4. Tính toán số liệu cho từng sản phẩm
         const reportData = products.map(p => {
-          const unitCost = Number(p.cost_price) || 0;
+          // SỬA: bảng products dùng cột import_price (không có cost_price)
+          const unitCost = Number(p.import_price ?? p.cost_price) || 0;
           const currentStock = Number(p.stock) || 0;
-          const prodCode = String(p.code || p.product_code || p.sku || '---');
+          // SỬA: ưu tiên cột sku làm mã sản phẩm
+          const prodCode = String(p.sku || p.code || p.product_code || '---');
           const prodName = String(p.name || p.product_name || 'Không tên');
           const prodUnit = String(p.unit || 'Cái');
 
@@ -781,7 +788,7 @@ export default {
           const pImports = purchaseItems.filter(i => {
             if (String(i.product_id) !== String(p.id)) return false;
             const itemDate = (i.created_at || '').slice(0, 10);
-            if (!itemDate) return true; 
+            if (!itemDate) return true;
             return itemDate >= cleanStart && itemDate <= cleanEnd;
           });
 
@@ -799,7 +806,16 @@ export default {
           const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const exportVal = exportQty * unitCost;
 
-          const closingQty = currentStock;
+          // SỬA: tính phát sinh SAU kỳ báo cáo để suy ra tồn cuối kỳ đúng
+          const importAfterQty = purchaseItems
+            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
+            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+          const exportAfterQty = invoiceItems
+            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
+            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+
+          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ
+          const closingQty = currentStock + exportAfterQty - importAfterQty;
           const closingVal = closingQty * unitCost;
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
@@ -842,16 +858,17 @@ export default {
 
         return json({
           success: true,
-          summary: { 
-            totalOpeningVal: totals.openingVal, 
-            totalImportVal: totals.importVal, 
-            totalExportVal: totals.exportVal, 
-            totalClosingVal: totals.closingVal 
+          summary: {
+            totalOpeningVal: totals.openingVal,
+            totalImportVal: totals.importVal,
+            totalExportVal: totals.exportVal,
+            totalClosingVal: totals.closingVal
           },
           totals,
           items: activeItems
         }, 200, origin);
       }
+
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
       if (pathname.startsWith('/api/')) return json({ error: 'Không tìm thấy API' }, 404, origin);
