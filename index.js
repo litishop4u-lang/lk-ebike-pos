@@ -653,7 +653,8 @@ export default {
         const search = (urlObj.searchParams.get('search') || '').toLowerCase();
 
         // 1. Lấy toàn bộ sản phẩm
-        const prodRes = await db.prepare('SELECT id, code, name, unit, cost_price, stock FROM products').all();
+        // SỬA: bảng products dùng cột sku và import_price (không có code, cost_price)
+        const prodRes = await db.prepare('SELECT id, sku AS code, name, unit, import_price AS cost_price, stock FROM products').all();
         const products = prodRes.results || [];
 
         // 2. Lấy chi tiết lịch sử nhập kho
@@ -703,7 +704,16 @@ export default {
           const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
           const exportVal = exportQty * unitCost;
 
-          const closingQty = currentStock;
+          // SỬA: tính phát sinh SAU kỳ báo cáo để suy ra tồn cuối kỳ đúng
+          const importAfterQty = purchaseItems
+            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
+            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+          const exportAfterQty = invoiceItems
+            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
+            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+
+          // SỬA: tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ
+          const closingQty = currentStock + exportAfterQty - importAfterQty;
           const closingVal = closingQty * unitCost;
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
