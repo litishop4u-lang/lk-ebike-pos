@@ -1712,8 +1712,7 @@ export default function App() {
             </table>
           </div>
         )}
-      </main>
-
+    
       {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
       {showViewPurchaseModal && selectedPurchaseOrder && (
         <div style={overlayStyle}>
