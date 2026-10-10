@@ -18,7 +18,7 @@ async function api(path, options) {
   return data;
 }
 
-const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 };
+const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', _price: 0, price: 0, wholesale_price: 0, stock: 0 };
 const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'active' };
 const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
 
@@ -2078,13 +2078,44 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
               <button onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
               <button
-                onClick={() => runImport({
-                  text: importText,
-                  endpoint: '/api/suppliers/import',
-                  label: 'nhà cung cấp',
-                  close: setShowImportModal,
-                  mapRow: (c) => c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null,
-                })}
+                onClick={async () => {
+                  if (!importText.trim()) {
+                    alert('Vui lòng dán dữ liệu vào ô trống!');
+                    return;
+                  }
+                  const rows = importText.split(/\r?\n/).filter(r => r.trim() !== '');
+                  let successCount = 0;
+                  
+                  for (const row of rows) {
+                    const cols = row.split(/\t|,/).map(c => c.trim());
+                    // Cấu trúc map cột khớp với hướng dẫn: [Mã, Tên, SĐT, Địa chỉ]
+                    const supplierData = {
+                      code: cols[0] || '',
+                      name: cols[1] || '',
+                      phone: cols[2] || '',
+                      address: cols.slice(3).join(', ') || ''
+                    };
+
+                    if (supplierData.name) {
+                      try {
+                        const res = await api('/api/suppliers', {
+                          method: 'POST',
+                          body: JSON.stringify(supplierData)
+                        });
+                        if (res && (res.success || res.id)) {
+                          successCount++;
+                        }
+                      } catch (err) {
+                        console.error('Lỗi dòng:', row, err);
+                      }
+                    }
+                  }
+
+                  alert(`Nhập thành công ${successCount} nhà cung cấp!`);
+                  setShowImportModal(false);
+                  setImportText('');
+                  loadData();
+                }}
                 style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >Xác nhận</button>
             </div>
