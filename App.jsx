@@ -1322,22 +1322,30 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reportItems.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
-                      <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
+  {(!reportItems || reportItems.length === 0) ? (
+    <tr>
+      <td colSpan="11" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
+        Không có dữ liệu sản phẩm trong khoảng thời gian này.
+      </td>
+    </tr>
+  ) : (
+    reportItems.map((item) => (
+      <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
+        <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#475569' }}>{vnd(item.openingVal)}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.importQty}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#16a34a' }}>{vnd(item.importVal)}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.exportQty}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'right', borderRight: '1px solid #e2e8f0', color: '#2563eb' }}>{vnd(item.exportVal)}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>{item.closingQty}</td>
+        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.closingVal)}</td>
+      </tr>
+    ))
+  )}
+</tbody>
               </table>
             </div>
           </div>
