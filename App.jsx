@@ -1584,17 +1584,19 @@ const loadProfitLossReport = async () => {
 
       {/* Nội dung Tab 1: Thông tin sản phẩm */}
       {activeProductTab === 'info' && (
-        <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '15px' }}>
-            <p><strong>Mã sản phẩm:</strong> {selectedProduct.code || selectedProduct.id}</p>
-            <p><strong>Tên sản phẩm:</strong> {selectedProduct.name}</p>
-            <p><strong>Danh mục / Loại:</strong> {selectedProduct.category || 'N/A'}</p>
-            <p><strong>Đơn vị tính:</strong> {selectedProduct.unit || 'Cái'}</p>
-            <p><strong>Giá bán:</strong> <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{vnd(selectedProduct.price)}</span></p>
-            <p><strong>Tồn kho hiện tại:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.stock}</span></p>
-          </div>
-        </div>
-      )}
+  <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '15px' }}>
+      <p><strong>Mã sản phẩm (SKU):</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{selectedProduct.sku || '-'}</span></p>
+      <p><strong>Tên sản phẩm:</strong> {selectedProduct.name}</p>
+      <p><strong>Danh mục / Loại:</strong> {selectedProduct.category || 'N/A'}</p>
+      <p><strong>Đơn vị tính:</strong> {selectedProduct.unit || 'Cái'}</p>
+      <p><strong>Giá mua vào:</strong> <span style={{ color: '#475569', fontWeight: 'bold' }}>{vnd(selectedProduct.import_price)}</span></p>
+      <p><strong>Giá bán lẻ:</strong> <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{vnd(selectedProduct.price)}</span></p>
+      <p><strong>Giá bán sỉ:</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{vnd(selectedProduct.wholesale_price)}</span></p>
+      <p><strong>Tồn kho hiện tại:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.stock}</span></p>
+    </div>
+  </div>
+)}
 
       {/* Nội dung Tab 2: Thẻ kho */}
       {activeProductTab === 'card' && (
