@@ -260,6 +260,69 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+        // ===== API THẺ KHO CHI TIẾT SẢN PHẨM =====
+      if (pathname === '/api/products/stock-card' && method === 'GET') {
+        const urlObj = new URL(request.url);
+        const productId = urlObj.searchParams.get('productId');
+
+        // 1. Lấy lịch sử Nhập hàng
+        const importsRes = await db.prepare(`
+          SELECT po.id as code, po.created_at, sup.name as partner_name, poi.price, poi.quantity
+          FROM purchase_order_items poi
+          JOIN purchase_orders po ON poi.purchase_order_id = po.id
+          LEFT JOIN suppliers sup ON po.supplier_id = sup.id
+          WHERE poi.product_id = ?
+        `).bind(productId).all();
+
+        // 2. Lấy lịch sử Bán hàng (Xuất kho)
+        const exportsRes = await db.prepare(`
+          SELECT i.id as code, i.created_at, i.customer_name as partner_name, ii.price, ii.quantity
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE ii.product_id = ?
+        `).bind(productId).all();
+
+        let transactions = [];
+
+        // Đưa phiếu nhập vào (Số lượng dương)
+        (importsRes.results || []).forEach(item => {
+          transactions.push({
+            code: 'NK-' + item.code,
+            date: item.created_at,
+            partner: item.partner_name || 'Nhà cung cấp',
+            import_price: Number(item.price) || 0,
+            export_price: 0,
+            qty: Number(item.quantity) || 0
+          });
+        });
+
+        // Đưa phiếu xuất/bán vào (Số lượng âm)
+        (exportsRes.results || []).forEach(item => {
+          transactions.push({
+            code: 'HD-' + item.code,
+            date: item.created_at,
+            partner: item.customer_name || 'Khách lẻ',
+            import_price: 0,
+            export_price: Number(item.price) || 0,
+            qty: -(Number(item.quantity) || 0)
+          });
+        });
+
+        // Sắp xếp theo thời gian tăng dần để tính lũy kế chính xác
+        transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        let runningStock = 0;
+        const stockCard = transactions.map(tx => {
+          runningStock += tx.qty;
+          return {
+            ...tx,
+            running_stock: runningStock
+          };
+        });
+
+        return json({ success: true, data: stockCard }, 200, origin);
+      }
+
       // ===== 2. PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG =====
       if (pathname === '/api/invoices' && method === 'POST') {
         const payload = await request.json();
