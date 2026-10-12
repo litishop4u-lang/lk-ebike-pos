@@ -987,18 +987,16 @@ export default {
         let cogs = 0;
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
-          // Lấy chi tiết các sản phẩm đã xuất bán và tính theo giá vốn thực tế (cost_price hoặc unit_price gốc)
           const itemsRes = await db.prepare(`
-            SELECT ii.quantity, 
-                   COALESCE(p.cost_price, p.cost, ii.unit_price, ii.price * 0.7) as actual_cost
-            FROM invoice_items ii
-            LEFT JOIN products p ON ii.product_id = p.id
-            WHERE ii.invoice_id IN (${placeholders})
+            SELECT quantity, unit_price, price 
+            FROM invoice_items 
+            WHERE invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
           (itemsRes.results || []).forEach(item => {
             const qty = Number(item.quantity) || 0;
-            const cost = Number(item.actual_cost) || 0;
+            // Sử dụng unit_price hoặc price có sẵn trong invoice_items
+            const cost = Number(item.unit_price) || Number(item.price) || 0;
             cogs += qty * cost;
           });
         }
