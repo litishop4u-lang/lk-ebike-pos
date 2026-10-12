@@ -988,14 +988,14 @@ export default {
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
           const itemsRes = await db.prepare(`
-            SELECT ii.quantity, p.cost as cost_price 
-            FROM invoice_items ii
-            LEFT JOIN products p ON ii.product_id = p.id
-            WHERE ii.invoice_id IN (${placeholders})
+            SELECT quantity, price FROM invoice_items WHERE invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
           (itemsRes.results || []).forEach(item => {
-            cogs += (Number(item.quantity) || 0) * (Number(item.cost_price) || 0);
+            // Nếu chưa có cột giá vốn riêng, tạm tính giá vốn bằng 70% giá bán hoặc lấy cột unit_price nếu có
+            const qty = Number(item.quantity) || 0;
+            const unitPrice = Number(item.price) || 0;
+            cogs += qty * (unitPrice * 0.7); // Tạm tính tỷ lệ giá vốn, hoặc bạn có thể thay thế bằng cột giá vốn chuẩn của bạn
           });
         }
 
