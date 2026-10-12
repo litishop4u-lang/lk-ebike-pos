@@ -1030,31 +1030,6 @@ const loadProfitLossReport = async () => {
         </ul>
       </aside>
 
-          {/* Nút bấm trên menu sidebar */}
-<button 
-  onClick={() => {
-    setCurrentView('profit-loss-report');
-    loadProfitLossReport(); // Gọi hàm tải dữ liệu báo cáo KQKD
-  }}
-  style={{
-    width: '100%',
-    padding: '12px 15px',
-    textAlign: 'left',
-    background: currentView === 'profit-loss-report' ? '#7c3aed' : 'transparent',
-    color: currentView === 'profit-loss-report' ? '#fff' : '#334155',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: '500',
-    marginBottom: '5px',
-    display: 'flex',
-    alignItem: 'center',
-    gap: '10px'
-  }}
->
-  📊 Báo Cáo KQ Kinh Doanh
-</button>
-
       {/* Nội dung chính bên phải */}
       <main className="main-content" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
         {msg && <div style={{ padding: '10px', marginBottom: '15px', borderRadius: '6px', background: msg.type === 'ok' ? '#dcfce7' : '#fee2e2', color: msg.type === 'ok' ? '#166534' : '#991b1b' }}>{msg.text}</div>}
@@ -1842,11 +1817,11 @@ const loadProfitLossReport = async () => {
           </div>
         )}
 
-      {currentView === 'profit-loss-report' && (
-  <div style={{ flex: 1, padding: '20px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
-      <h2 style={{ margin: 0, color: '#1e293b' }}>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {currentView === 'profit-loss-report' && (
+  <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <h2>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
         <span>Từ ngày:</span>
         <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
         <span>Đến ngày:</span>
@@ -1855,7 +1830,7 @@ const loadProfitLossReport = async () => {
       </div>
     </div>
 
-    <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '900px', margin: '0 auto' }}>
+    <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '800px', margin: '0 auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
         <thead>
           <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
