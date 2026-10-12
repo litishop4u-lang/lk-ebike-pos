@@ -511,6 +511,64 @@ export default {
         return json({ success: true, code: oldInv.code, total }, 200, origin);
       }
 
+
+      // ===== 1. LẤY DANH SÁCH PHIẾU TRẢ HÀNG & THỐNG KÊ =====
+      if (pathname === '/api/return-orders' && method === 'GET') {
+        const returnsRes = await db.prepare('SELECT * FROM return_orders ORDER BY created_at DESC').all();
+        const returns = returnsRes.results || [];
+
+        let totalReturns = returns.length;
+        let pendingReturns = returns.filter(r => r.status === 'Đang xử lý').length;
+        let completedReturns = returns.filter(r => r.status === 'Hoàn Thành' || r.status === 'Đã hoàn thành').length;
+        let totalRefundAmount = returns.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
+
+        return json({
+          success: true,
+          data: {
+            list: returns,
+            stats: {
+              total: totalReturns,
+              pending: pendingReturns,
+              completed: completedReturns,
+              totalRefund: totalRefundAmount
+            }
+          }
+        }, 200, origin);
+      }
+
+      // ===== 2. TẠO PHIẾU TRẢ HÀNG MỚI =====
+      if (pathname === '/api/return-orders' && method === 'POST') {
+        const body = await request.json();
+        const { code, invoice_code, customer_name, return_date, reason, refund_amount, status, items } = body;
+
+        // Lưu phiếu trả hàng
+        const insertRes = await db.prepare(`
+          INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).bind(
+          code || ('PTB-' + Date.now()),
+          invoice_code || '',
+          customer_name || 'Khách lẻ',
+          return_date || new Date().toISOString().slice(0, 10),
+          reason || 'Sản phẩm lỗi',
+          Number(refund_amount) || 0,
+          status || 'Hoàn Thành'
+        ).run();
+
+        // Nếu trạng thái là Hoàn Thành, tiến hành cộng lại số lượng vào kho sản phẩm
+        if (status.includes('Hoàn Thành') && items && items.length > 0) {
+          for (const item of items) {
+            if (item.product_id && item.quantity) {
+              await db.prepare(`
+                UPDATE products SET stock = stock + ? WHERE id = ?
+              `).bind(Number(item.quantity), item.product_id).run();
+            }
+          }
+        }
+
+        return json({ success: true, message: 'Tạo phiếu trả hàng thành công' }, 200, origin);
+      }
+
       // ===== 7. QUẢN LÝ THU CHI =====
       if (pathname === '/api/cash-book' && method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
