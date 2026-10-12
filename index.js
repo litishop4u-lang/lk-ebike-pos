@@ -973,90 +973,63 @@ export default {
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
 
-        // 1. Lấy tất cả hóa đơn trong khoảng thời gian
+        // Lấy hóa đơn theo ngày
         const invRes = await db.prepare('SELECT * FROM invoices WHERE date(created_at) >= ? AND date(created_at) <= ?').bind(cleanStart, cleanEnd).all();
         const invoices = invRes.results || [];
         const invoiceIds = invoices.map(i => i.id);
 
-        let grossRevenue = 0; // Doanh thu tổng
-        let totalDiscount = 0; // Giảm giá / Trả lại (nếu có lưu chi tiết)
-
+        let grossRevenue = 0;
         invoices.forEach(inv => {
           grossRevenue += Number(inv.total) || 0;
         });
 
-        // 2. Lấy chi tiết sản phẩm bán ra để tính giá vốn hàng bán
-        let cogs = 0; // Giá vốn hàng bán
+        // Tính giá vốn hàng bán (COGS)
+        let cogs = 0;
         if (invoiceIds.length > 0) {
-          // Lấy chi tiết items kết hợp bảng products để lấy cost_price (giá vốn)
           const placeholders = invoiceIds.map(() => '?').join(',');
           const itemsRes = await db.prepare(`
-            SELECT ii.quantity, p.cost_price, p.price as default_price
+            SELECT ii.quantity, p.cost_price 
             FROM invoice_items ii
             LEFT JOIN products p ON ii.product_id = p.id
             WHERE ii.invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
-          const items = itemsRes.results || [];
-          items.forEach(item => {
-            const qty = Number(item.quantity) || 0;
-            const cost = Number(item.cost_price) || 0;
-            cogs += qty * cost;
+          (itemsRes.results || []).forEach(item => {
+            cogs += (Number(item.quantity) || 0) * (Number(item.cost_price) || 0);
           });
         }
 
-        // 3. Lấy các khoản chi phí từ Sổ Quỹ (Loại 'OUT') trong khoảng thời gian
+        // Lấy chi phí từ Sổ Quỹ Thu Chi (loại 'OUT') theo ngày
         const cashRes = await db.prepare(`
           SELECT category, amount 
           FROM cash_books 
           WHERE type = 'OUT' AND date(created_at) >= ? AND date(created_at) <= ?
         `).bind(cleanStart, cleanEnd).all();
 
-        const expenses = cashRes.results || [];
-        let costShipping = 0; // Chi phí vận chuyển
-        let costTax = 0;      // Chi phí thuế
-        let costSalary = 0;   // Chi lương
-        let costOther = 0;    // Chi phí khác
-
-        expenses.forEach(e => {
+        let costShipping = 0, costTax = 0, costSalary = 0, costOther = 0;
+        (cashRes.results || []).forEach(e => {
           const amt = Number(e.amount) || 0;
           const cat = (e.category || '').toLowerCase();
-          if (cat.includes('vận chuyển') || cat.includes('ship')) {
-            costShipping += amt;
-          } else if (cat.includes('thuế')) {
-            costTax += amt;
-          } else if (cat.includes('lương') || cat.includes('nhân viên')) {
-            costSalary += amt;
-          } else {
-            costOther += amt;
-          }
+          if (cat.includes('vận chuyển') || cat.includes('ship')) costShipping += amt;
+          else if (cat.includes('thuế')) costTax += amt;
+          else if (cat.includes('lương') || cat.includes('nhân viên')) costSalary += amt;
+          else costOther += amt;
         });
 
         const totalExpenses = costShipping + costTax + costSalary + costOther;
-
-        // 4. Tính toán kết quả theo công thức:
-        // Doanh thu thuần = Doanh thu bán hàng - (Giảm giá + Trả lại)
-        const netRevenue = grossRevenue - totalDiscount;
-        // Lợi nhuận gộp = Doanh thu thuần - Giá vốn hàng bán
+        const netRevenue = grossRevenue;
         const grossProfit = netRevenue - cogs;
-        // Lợi nhuận thuần từ HĐKD = Lợi nhuận gộp - Tổng chi phí
         const netProfit = grossProfit - totalExpenses;
 
         return json({
           success: true,
           data: {
             grossRevenue,
-            totalDiscount,
+            totalDiscount: 0,
             netRevenue,
             cogs,
             grossProfit,
-            expenses: {
-              shipping: costShipping,
-              tax: costTax,
-              salary: costSalary,
-              other: costOther,
-              total: totalExpenses
-            },
+            expenses: { shipping: costShipping, tax: costTax, salary: costSalary, other: costOther, total: totalExpenses },
             netProfit
           }
         }, 200, origin);
