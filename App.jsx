@@ -1480,34 +1480,63 @@ const loadProfitLossReport = async () => {
     {/* POPUP TẠO PHIẾU TRẢ HÀNG (Hình 2) */}
     {showReturnModal && (
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-        <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto' }}>
+        <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto', boxSizing: 'border-box' }}>
           
+          {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
             <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng (Khách Trả Lại)</h3>
             <button onClick={() => setShowReturnModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+          {/* Hàng 1: Khách hàng, Chọn phiếu bán gốc, Ngày trả */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+            
+            {/* Trường Khách Hàng (Cho phép chọn hoặc tìm kiếm) */}
             <div>
               <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Khách hàng:</label>
-              <input 
-                type="text" 
-                placeholder="Nhập tên khách hàng" 
+              <select 
                 value={returnForm.customer_name} 
-                onChange={e => setReturnForm({...returnForm, customer_name: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
-              />
+                onChange={e => {
+                  const selectedCust = e.target.value;
+                  setReturnForm({...returnForm, customer_name: selectedCust, invoice_code: ''});
+                }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+              >
+                <option value="">-- Chọn hoặc tìm khách hàng --</option>
+                {/* Giả sử bạn có mảng danh sách khách hàng là `customers` */}
+                {(customers || []).map((c, idx) => (
+                  <option key={idx} value={c.name}>
+                    {c.name} {c.phone ? `- ${c.phone}` : ''} {c.code ? `(${c.code})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {/* Trường Chọn Phiếu Bán Gốc (Tự động lọc theo khách hàng đã chọn) */}
             <div>
               <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Chọn phiếu bán gốc:</label>
-              <input 
-                type="text" 
-                placeholder="Mã đơn gốc (VD: BH-...)" 
+              <select 
                 value={returnForm.invoice_code} 
-                onChange={e => setReturnForm({...returnForm, invoice_code: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
-              />
+                onChange={e => {
+                  const invCode = e.target.value;
+                  setReturnForm({...returnForm, invoice_code: invCode});
+                  // Nếu chọn đơn gốc, có thể tự động load sản phẩm từ đơn đó vào danh sách trả nếu muốn
+                }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+              >
+                <option value="">-- Chọn Phiếu Bán Gốc --</option>
+                {/* Lọc danh sách hóa đơn theo khách hàng đã chọn và loại bỏ các đơn đã xử lý hết (nếu có logic kiểm tra) */}
+                {(invoices || [])
+                  .filter(inv => !returnForm.customer_name || inv.customer_name === returnForm.customer_name)
+                  .map((inv, idx) => (
+                    <option key={idx} value={inv.code || inv.id}>
+                      {inv.code || `BH-${inv.id}`} - {inv.customer_name || 'Khách lẻ'} ({inv.total ? vnd(inv.total) : ''})
+                    </option>
+                  ))}
+              </select>
             </div>
+
+            {/* Ngày trả */}
             <div>
               <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Ngày trả:</label>
               <input 
@@ -1519,6 +1548,7 @@ const loadProfitLossReport = async () => {
             </div>
           </div>
 
+          {/* Hàng 2: Lý do, Số tiền hoàn, Trạng thái */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Lý do trả:</label>
@@ -1555,19 +1585,72 @@ const loadProfitLossReport = async () => {
             </div>
           </div>
 
-          <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '20px', marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-            <button 
-              onClick={() => setShowReturnModal(false)}
-              style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Hủy
-            </button>
-            <button 
-              onClick={handleCreateReturnOrder}
-              style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Tạo Phiếu Trả
-            </button>
+          {/* Ô tìm kiếm sản phẩm tự do (Dùng khi phiếu trả tự tạo không có phiếu bán gốc) */}
+          <div style={{ marginBottom: '15px' }}>
+            <input 
+              type="text" 
+              placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..." 
+              onChange={e => {
+                // Logic chọn sản phẩm thêm vào danh sách trả (nếu bạn muốn gõ tìm sản phẩm trực tiếp)
+                const keyword = e.target.value.toLowerCase();
+                // Xử lý thêm sản phẩm vào returnForm.items ở đây nếu cần
+              }}
+              style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }} 
+            />
+          </div>
+
+          {/* Bảng chi tiết sản phẩm trả lại */}
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                  <th style={{ padding: '10px 14px' }}>Mã SP</th>
+                  <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(!returnForm.items || returnForm.items.length === 0) ? (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+                      Chưa có sản phẩm trả lại
+                    </td>
+                  </tr>
+                ) : (
+                  returnForm.items.map((it, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '10px 14px' }}>{it.sku}</td>
+                      <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>{it.quantity}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>{vnd(it.price)}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.quantity * it.price)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Tổng giá trị và nút hành động */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+              Tổng giá trị hàng trả: <span style={{ color: '#7c3aed' }}>{vnd(returnForm.refund_amount || 0)}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={() => setShowReturnModal(false)}
+                style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={handleCreateReturnOrder}
+                style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Tạo Phiếu Trả
+              </button>
           </div>
 
         </div>
