@@ -73,6 +73,7 @@ function AppMain() {
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
+  const [invoiceForm, setInvoiceForm] = useState({ customer_name: '', items: [] });
 
   // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
