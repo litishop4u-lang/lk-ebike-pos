@@ -2507,6 +2507,7 @@ const loadProfitLossReport = async () => {
           </div>
           )}
         </div> 
+        )}
 
         {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
         {showViewPurchaseModal && selectedPurchaseOrder && (
