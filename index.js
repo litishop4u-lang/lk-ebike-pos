@@ -985,19 +985,51 @@ export default {
 
         // 2. Tính chính xác Giá vốn hàng bán (COGS) từ bảng invoice_items
         let cogs = 0;
+        
+        // Lấy toàn bộ phiếu nhập kho / mua hàng từ trước đến hết ngày kết thúc để tính giá vốn bình quân
+        const importsRes = await db.prepare(`
+          select p.id as product_id, poi.quantity, poi.price 
+          from purchase_order_items poi
+          join purchase_orders po on poi.purchase_order_id = po.id
+          join products p on poi.product_id = p.id
+          where date(po.created_at) <= ?
+        `).bind(cleanEnd).all();
+
+        // Tính giá vốn bình quân cho từng sản phẩm tính đến thời điểm báo cáo
+        const productAvgCost = {};
+        const stockLedger = {}; // Lưu tổng nhập để tính bình quân
+
+        (importsRes.results || []).forEach(item => {
+          const pid = item.product_id;
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.price) || 0;
+          
+          if (!stockLedger[pid]) {
+            stockLedger[pid] = { totalQty: 0, totalAmount: 0 };
+          }
+          stockLedger[pid].totalQty += qty;
+          stockLedger[pid].totalAmount += qty * price;
+        });
+
+        Object.keys(stockLedger).forEach(pid => {
+          const ledger = stockLedger[pid];
+          productAvgCost[pid] = ledger.totalQty > 0 ? (ledger.totalAmount / ledger.totalQty) : 0;
+        });
+
+        // Lấy các sản phẩm xuất bán trong kỳ báo cáo để nhân với giá vốn bình quân gia quyền
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
           const itemsRes = await db.prepare(`
-            SELECT quantity, unit_price, price 
-            FROM invoice_items 
-            WHERE invoice_id IN (${placeholders})
+            select product_id, quantity 
+            from invoice_items 
+            where invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
           (itemsRes.results || []).forEach(item => {
+            const pid = item.product_id;
             const qty = Number(item.quantity) || 0;
-            // Sử dụng unit_price hoặc price có sẵn trong invoice_items
-            const cost = Number(item.unit_price) || Number(item.price) || 0;
-            cogs += qty * cost;
+            const avgCost = productAvgCost[pid] || 0;
+            cogs += qty * avgCost;
           });
         }
 
