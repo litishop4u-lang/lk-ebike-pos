@@ -1030,6 +1030,31 @@ const loadProfitLossReport = async () => {
         </ul>
       </aside>
 
+          {/* Nút bấm trên menu sidebar */}
+<button 
+  onClick={() => {
+    setCurrentView('profit-loss-report');
+    loadProfitLossReport(); // Gọi hàm tải dữ liệu báo cáo KQKD
+  }}
+  style={{
+    width: '100%',
+    padding: '12px 15px',
+    textAlign: 'left',
+    background: currentView === 'profit-loss-report' ? '#7c3aed' : 'transparent',
+    color: currentView === 'profit-loss-report' ? '#fff' : '#334155',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '500',
+    marginBottom: '5px',
+    display: 'flex',
+    alignItem: 'center',
+    gap: '10px'
+  }}
+>
+  📊 Báo Cáo KQ Kinh Doanh
+</button>
+
       {/* Nội dung chính bên phải */}
       <main className="main-content" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
         {msg && <div style={{ padding: '10px', marginBottom: '15px', borderRadius: '6px', background: msg.type === 'ok' ? '#dcfce7' : '#fee2e2', color: msg.type === 'ok' ? '#166534' : '#991b1b' }}>{msg.text}</div>}
