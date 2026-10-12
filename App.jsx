@@ -18,11 +18,30 @@ async function api(path, options) {
   return data;
 }
 
-// SỬA: trước đây là "_price: 0", đúng phải là "import_price: 0"
 const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 };
 const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'active' };
 const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
-const EMPTY_CASH_FORM = { type: 'OUT', amount: '', category: 'Mua hàng / Trả nợ NCC', payment_method: 'Chuyển khoản', reference_code: '', note: '' };
+// Dùng hàm để ngày luôn là ngày hiện tại tại thời điểm mở form
+const newCashForm = () => ({
+  type: 'OUT',
+  amount: '',
+  category: 'Mua hàng / Trả nợ NCC',
+  payment_method: 'Chuyển khoản',
+  reference_code: '',
+  note: '',
+  created_at: todayLocal(),
+});
+
+const EMPTY_PL_REPORT = {
+  grossRevenue: 0,
+  totalDiscount: 0,
+  netRevenue: 0,
+  cogs: 0,
+  grossProfit: 0,
+  expenses: { shipping: 0, tax: 0, salary: 0, other: 0, total: 0 },
+  netProfit: 0,
+};
+const EMPTY_RETURN_DATA = { list: [], stats: { total: 0, pending: 0, completed: 0, totalRefund: 0 } };
 
 // Hiện lỗi ngay trên màn hình thay vì trắng trơn, để biết chính xác lỗi ở đâu
 class ErrorBoundary extends Component {
@@ -54,7 +73,7 @@ export default function App() {
 }
 
 function AppMain() {
-  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book'
+  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'return-orders' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
 
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
   const [products, setProducts] = useState([]);
@@ -77,12 +96,12 @@ function AppMain() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
 
-  const [returnOrdersData, setReturnOrdersData] = useState({ list: [], stats: { total: 0, pending: 0, completed: 0, totalRefund: 0 } });
+  const [returnOrdersData, setReturnOrdersData] = useState(EMPTY_RETURN_DATA);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnForm, setReturnForm] = useState({
     customer_name: '',
     invoice_code: '',
-    return_date: new Date().toISOString().slice(0, 10),
+    return_date: todayLocal(),
     reason: 'Sản phẩm lỗi',
     refund_amount: 0,
     status: 'Hoàn Thành (Cộng kho & trừ nợ)',
@@ -93,7 +112,11 @@ function AppMain() {
     try {
       const res = await api('/api/return-orders');
       if (res && res.success) {
-        setReturnOrdersData(res.data);
+        const d = res.data || {};
+        setReturnOrdersData({
+          list: Array.isArray(d.list) ? d.list : [],
+          stats: { ...EMPTY_RETURN_DATA.stats, ...(d.stats || {}) },
+        });
       }
     } catch (err) {
       console.error('Lỗi tải danh sách trả hàng:', err);
@@ -183,18 +206,11 @@ function AppMain() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // ===== States cho Thu chi (Sổ quỹ) — SỬA: trước đây thiếu hoàn toàn nên gây trắng màn hình =====
+  // ===== States cho Thu chi (Sổ quỹ) =====
   const [showCashModal, setShowCashModal] = useState(false);
   const [cashItems, setCashItems] = useState([]);
   const [cashSummary, setCashSummary] = useState({ totalIn: 0, totalOut: 0, netProfit: 0, balance: 0 });
-  const [cashForm, setCashForm] = useState({
-  type: 'IN',
-  category: '',
-  amount: '',
-  payment_method: 'Chuyển khoản',
-  note: '',
-  created_at: new Date().toISOString().slice(0, 10) // 👉 Đặt nằm ở trong này đúng cú pháp
-});
+  const [cashForm, setCashForm] = useState(newCashForm);
   const [editingCashId, setEditingCashId] = useState(null);
   const [selectedCashItem, setSelectedCashItem] = useState(null);
 
@@ -245,7 +261,7 @@ function AppMain() {
         start = reportStartDate || '2025-01-01';
         end = reportEndDate || '2030-12-31';
       }
-  
+
       // Gọi API với ngày tháng chuẩn dạng YYYY-MM-DD
       const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
 
@@ -284,36 +300,38 @@ function AppMain() {
     }
   }, [currentView]);
 
-    const [plReport, setPlReport] = useState({
-  grossRevenue: 0,
-  totalDiscount: 0,
-  netRevenue: 0,
-  cogs: 0,
-  grossProfit: 0,
-  expenses: { shipping: 0, tax: 0, salary: 0, other: 0, total: 0 },
-  netProfit: 0
-});
-const [plStartDate, setPlStartDate] = useState('2025-01-01');
-const [plEndDate, setPlEndDate] = useState(new Date().toISOString().slice(0, 10));
-  
-const loadProfitLossReport = async () => {
-  try {
-    const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
-    if (res && res.success) {
-      setPlReport(res.data);
-    } else {
-      console.error("API trả về lỗi:", res);
-    }
-  } catch (err) {
-    console.error('Lỗi kết nối API báo cáo:', err);
-  }
-};
+  // ===== States cho Báo cáo Kết quả kinh doanh (Lãi / Lỗ) =====
+  const [plReport, setPlReport] = useState(EMPTY_PL_REPORT);
+  const [plStartDate, setPlStartDate] = useState('2025-01-01');
+  const [plEndDate, setPlEndDate] = useState(todayLocal());
 
+  const loadProfitLossReport = async () => {
+    try {
+      const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
+      if (res && res.success) {
+        const d = res.data || {};
+        setPlReport({
+          ...EMPTY_PL_REPORT,
+          ...d,
+          expenses: { ...EMPTY_PL_REPORT.expenses, ...(d.expenses || {}) },
+        });
+      } else {
+        console.error('API trả về lỗi:', res);
+      }
+    } catch (err) {
+      console.error('Lỗi kết nối API báo cáo:', err);
+    }
+  };
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
-    const saved = localStorage.getItem('company_info');
-    return saved ? JSON.parse(saved) : {
+    try {
+      const saved = localStorage.getItem('company_info');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Không đọc được company_info:', e);
+    }
+    return {
       name: 'XE ĐIỆN LINH KHANG (LK EBIKE)',
       brand: 'LK EBIKE',
       subtitle: 'By BabyBikeStore',
@@ -485,39 +503,39 @@ const loadProfitLossReport = async () => {
     }
   }
 
-      const handleSaveInvoice = async () => {
-  try {
-    const url = editingInvoiceId ? `/api/invoices/${editingInvoiceId}` : '/api/invoices';
-    const method = editingInvoiceId ? 'PUT' : 'POST';
+  const handleSaveInvoice = async () => {
+    try {
+      const url = editingInvoiceId ? `/api/invoices/${editingInvoiceId}` : '/api/invoices';
+      const method = editingInvoiceId ? 'PUT' : 'POST';
 
-    await api(url, {
-      method,
-      body: JSON.stringify(invoiceForm)
-    });
+      await api(url, {
+        method,
+        body: JSON.stringify(invoiceForm)
+      });
 
-    setShowInvoiceModal(false);
-    setEditingInvoiceId(null);
-    loadInvoices(); // Tải lại danh sách
-    alert(editingInvoiceId ? 'Cập nhật phiếu bán hàng thành công!' : 'Tạo phiếu bán hàng thành công!');
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  }
-};
+      setShowInvoiceModal(false);
+      setEditingInvoiceId(null);
+      loadData(); // Tải lại danh sách (SỬA: trước đây gọi loadInvoices không tồn tại)
+      alert(editingInvoiceId ? 'Cập nhật phiếu bán hàng thành công!' : 'Tạo phiếu bán hàng thành công!');
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
 
   const handleOpenProductModal = async (product) => {
-  setSelectedProduct(product);
-  setActiveProductTab('info');
-  setStockCardList([]);
-  
-  try {
-    const res = await api(`/api/products/stock-card?productId=${product.id}`);
-    if (res && res.success) {
-      setStockCardList(res.data);
+    setSelectedProduct(product);
+    setActiveProductTab('info');
+    setStockCardList([]);
+
+    try {
+      const res = await api(`/api/products/stock-card?productId=${product.id}`);
+      if (res && res.success) {
+        setStockCardList(res.data);
+      }
+    } catch (err) {
+      console.error('Lỗi tải thẻ kho:', err);
     }
-  } catch (err) {
-    console.error('Lỗi tải thẻ kho:', err);
-  }
-};
+  };
 
   // === Hàm in phiếu / đơn ===
   const handlePrintOrder = async (item, isOrder = false) => {
@@ -541,7 +559,7 @@ const loadProfitLossReport = async () => {
     const titleText = isOrder ? 'ĐƠN ĐẶT HÀNG' : 'HÓA ĐƠN BÁN HÀNG';
     const codeText = printData.code || '---';
     const dateText = printData.created_at ? new Date(printData.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
-    const paymentMethod = printData.payment_method || 'Tiền mặt';
+    const printPaymentMethod = printData.payment_method || 'Tiền mặt';
 
     const items = printData.items || [];
     let grossTotal = 0;
@@ -570,8 +588,8 @@ const loadProfitLossReport = async () => {
     }).join('');
 
     const finalTotal = grossTotal - totalDiscount;
-    const paidAmount = Number(printData.paid_amount) || 0;
-    const debtAmount = finalTotal - paidAmount;
+    const printPaidAmount = Number(printData.paid_amount) || 0;
+    const debtAmount = finalTotal - printPaidAmount;
 
     // Logo chiếm 1/3 (33%), Thông tin công ty chiếm 2/3 (65%)
     const logoHtml = companyInfo.logoUrl
@@ -634,7 +652,7 @@ const loadProfitLossReport = async () => {
               <p><b>SĐT:</b> ${printData.customer_phone || '—'}</p>
             </div>
             <div>
-              <p><b>Hình thức TT:</b> ${paymentMethod}</p>
+              <p><b>Hình thức TT:</b> ${printPaymentMethod}</p>
             </div>
           </div>
 
@@ -657,7 +675,7 @@ const loadProfitLossReport = async () => {
           <div class="totals">
             <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
             <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
-            <div><span>Đã thanh toán / Tạm ứng:</span> <b>${paidAmount.toLocaleString('vi-VN')} ₫</b></div>
+            <div><span>Đã thanh toán / Tạm ứng:</span> <b>${printPaidAmount.toLocaleString('vi-VN')} ₫</b></div>
             <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
           </div>
 
@@ -678,7 +696,7 @@ const loadProfitLossReport = async () => {
 
           <script>
             window.onload = function() { window.print(); window.close(); };
-          </script>
+          <\/script>
         </body>
       </html>
     `);
@@ -940,7 +958,7 @@ const loadProfitLossReport = async () => {
         supplier_id: details.supplier_id,
         payment_method: details.payment_method || 'Tiền mặt',
         paid_amount: details.paid_amount || 0,
-        // SỬA: nạp ngày nhập cũ vào form để khi lưu không bị ghi đè thành ngày hiện tại
+        // Nạp ngày nhập cũ vào form để khi lưu không bị ghi đè thành ngày hiện tại
         created_at: details.created_at ? details.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16),
       });
       setPurchaseItems((details.items || []).map((i) => ({
@@ -1050,29 +1068,31 @@ const loadProfitLossReport = async () => {
         <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
         <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>📦 Tạo đơn hàng</button></li>
-          <li><button 
-  onClick={() => {
-    setCurrentView('return-orders');
-    loadReturnOrders();
-  }}
-  style={{
-    width: '100%',
-    padding: '12px 15px',
-    textAlign: 'left',
-    background: currentView === 'return-orders' ? '#7c3aed' : 'transparent',
-    color: currentView === 'return-orders' ? '#fff' : '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: '500',
-    marginBottom: '5px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px'
-  }}
->
-  📦 Trả Hàng Bán
-</button></li>
+          <li>
+            <button
+              onClick={() => {
+                setCurrentView('return-orders');
+                loadReturnOrders();
+              }}
+              style={{
+                width: '100%',
+                padding: '12px 15px',
+                textAlign: 'left',
+                background: currentView === 'return-orders' ? '#7c3aed' : 'transparent',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                marginBottom: '5px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}
+            >
+              📦 Trả Hàng Bán
+            </button>
+          </li>
           <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>Sản phẩm</button></li>
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
@@ -1090,29 +1110,31 @@ const loadProfitLossReport = async () => {
             </button>
           </li>
 
-          <li><button 
-            onClick={() => {
-              setCurrentView('profit-loss-report');
-              loadProfitLossReport(); // Gọi hàm tải dữ liệu khi bấm vào
-            }}
-            style={{
-              width: '100vw', // Hoặc để full chiều rộng sidebar tùy theo layout hiện tại của bạn
-              padding: '12px 15px',
-              textAlign: 'left',
-              background: currentView === 'profit-loss-report' ? '#7c3aed' : 'transparent',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '500',
-              marginBottom: '5px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}
-          >
-            📊 Báo Cáo KQ Kinh Doanh
-          </button> </li>
+          <li>
+            <button
+              onClick={() => {
+                setCurrentView('profit-loss-report');
+                loadProfitLossReport(); // Gọi hàm tải dữ liệu khi bấm vào
+              }}
+              style={{
+                width: '100%', // SỬA: trước đây là 100vw làm tràn sidebar
+                padding: '12px 15px',
+                textAlign: 'left',
+                background: currentView === 'profit-loss-report' ? '#7c3aed' : 'transparent',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                marginBottom: '5px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}
+            >
+              📊 Báo Cáo KQ Kinh Doanh
+            </button>
+          </li>
           <li>
             <button
               onClick={() => setCurrentView('settings')}
@@ -1206,85 +1228,6 @@ const loadProfitLossReport = async () => {
                 </tbody>
               </table>
             </div>
-
-            {currentView === 'profit-loss-report' && (
-  <div style={{ padding: '20px', width: '100%', boxSizing: 'border-box' }}>
-    {/* Tiêu đề và bộ lọc ngày tháng */}
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
-      <h2 style={{ margin: 0, color: '#1e293b' }}>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span>Từ ngày:</span>
-        <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-        <span>Đến ngày:</span>
-        <input type="date" value={plEndDate} onChange={e => setPlEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-        <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
-      </div>
-    </div>
-
-    {/* Bảng báo cáo chi tiết */}
-    <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-            <th style={{ textAlign: 'left', padding: '12px' }}>Chỉ tiêu</th>
-            <th style={{ textAlign: 'right', padding: '12px' }}>Thành tiền (VNĐ)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
-            <td style={{ padding: '12px' }}>1. Doanh thu bán hàng</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#2563eb' }}>{vnd(plReport.grossRevenue)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '12px', paddingLeft: '25px' }}>- Các khoản giảm trừ (Giảm giá / Trả lại)</td>
-            <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(plReport.totalDiscount)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold', background: '#f8fafc' }}>
-            <td style={{ padding: '12px' }}>2. Doanh thu thuần (Net Revenue)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#0284c7' }}>{vnd(plReport.netRevenue)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
-            <td style={{ padding: '12px' }}>3. Giá vốn hàng bán (COGS)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.cogs)}</td>
-          </tr>
-          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f0fdf4' }}>
-            <td style={{ padding: '12px' }}>4. Lợi nhuận gộp (Gross Profit)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#16a34a', fontSize: '16px' }}>{vnd(plReport.grossProfit)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-            <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="2">5. Tổng chi phí hoạt động:</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí vận chuyển (Ship)</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.shipping)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí thuế</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.tax)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí lương nhân viên</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.salary)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí quản lý / khác</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.other)}</td>
-          </tr>
-          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f8fafc' }}>
-            <td style={{ padding: '12px', paddingLeft: '25px' }}>Tổng chi phí</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.expenses.total)}</td>
-          </tr>
-          <tr style={{ borderTop: '3px double #0f172a', fontWeight: 'bold', background: '#eff6ff' }}>
-            <td style={{ padding: '15px', fontSize: '16px' }}>6. LỢI NHUẬN THUẦN (NET PROFIT)</td>
-            <td style={{ textAlign: 'right', padding: '15px', fontSize: '18px', color: plReport.netProfit >= 0 ? '#16a34a' : '#dc2626' }}>
-              {vnd(plReport.netProfit)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-)}
 
             {/* Bảng Danh sách Đơn Đặt Hàng */}
             <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -1387,279 +1330,278 @@ const loadProfitLossReport = async () => {
           </div>
         )}
 
+        {/* MÀN HÌNH QUẢN LÝ TRẢ HÀNG */}
         {currentView === 'return-orders' && (
-  <div style={{ flex: 1, padding: '24px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto', boxSizing: 'border-box' }}>
-    
-    {/* Header & Nút Tạo Phiếu */}
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-      <h2 style={{ margin: 0, color: '#1e293b', fontSize: '24px' }}>Quản Lý Trả Hàng</h2>
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button onClick={loadReturnOrders} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          🔄 Làm mới
-        </button>
-        <button 
-          onClick={() => {
-            setReturnForm({ customer_name: '', invoice_code: '', return_date: new Date().toISOString().slice(0, 10), reason: 'Sản phẩm lỗi', refund_amount: 0, status: 'Hoàn Thành (Cộng kho & trừ nợ)', items: [] });
-            setShowReturnModal(true);
-          }} 
-          style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          + Tạo Phiếu Trả Hàng
-        </button>
-      </div>
-    </div>
+          <div style={{ flex: 1, padding: '24px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto', boxSizing: 'border-box' }}>
 
-    {/* Các thẻ Thống kê tổng quan */}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{returnOrdersData.stats.total}</div>
-      </div>
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đang chờ xử lý</div>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#d97706' }}>{returnOrdersData.stats.pending}</div>
-      </div>
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đã hoàn thành</div>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{returnOrdersData.stats.completed}</div>
-      </div>
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền hoàn</div>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(returnOrdersData.stats.totalRefund)}</div>
-      </div>
-    </div>
-
-    {/* Bảng Danh Sách Phiếu Trả Hàng */}
-    <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-        <thead>
-          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
-            <th style={{ padding: '14px' }}>MÃ PHIẾU</th>
-            <th style={{ padding: '14px' }}>MÃ ĐƠN GỐC</th>
-            <th style={{ padding: '14px' }}>KHÁCH HÀNG</th>
-            <th style={{ padding: '14px' }}>NGÀY TRẢ</th>
-            <th style={{ padding: '14px', textAlign: 'right' }}>TỔNG TIỀN</th>
-            <th style={{ padding: '14px', textAlign: 'right' }}>TIỀN HOÀN</th>
-            <th style={{ padding: '14px' }}>LÝ DO</th>
-            <th style={{ padding: '14px' }}>TRẠNG THÁI</th>
-            <th style={{ padding: '14px', textAlign: 'center' }}>THAO TÁC</th>
-          </tr>
-        </thead>
-        <tbody>
-          {returnOrdersData.list.length === 0 ? (
-            <tr>
-              <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nào.</td>
-            </tr>
-          ) : (
-            returnOrdersData.list.map((item, index) => (
-              <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '14px', fontWeight: 'bold', color: '#0284c7' }}>{item.code}</td>
-                <td style={{ padding: '14px', color: '#475569' }}>{item.invoice_code || '-'}</td>
-                <td style={{ padding: '14px', fontWeight: '500' }}>{item.customer_name}</td>
-                <td style={{ padding: '14px' }}>{item.return_date ? item.return_date.slice(0, 10) : ''}</td>
-                <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.refund_amount)}</td>
-                <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
-                <td style={{ padding: '14px' }}>{item.reason}</td>
-                <td style={{ padding: '14px' }}>
-                  <span style={{ padding: '4px 10px', borderRadius: '20px', background: '#dcfce7', color: '#16a34a', fontWeight: '500', fontSize: '12px' }}>
-                    {item.status}
-                  </span>
-                </td>
-                <td style={{ padding: '14px', textAlign: 'center' }}>
-                  <button title="Xem" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
-                  <button title="Sửa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
-                  <button title="Xóa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-
-    {/* POPUP TẠO PHIẾU TRẢ HÀNG (Hình 2) */}
-    {showReturnModal && (
-      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-        <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto', boxSizing: 'border-box' }}>
-          
-          {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
-            <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng (Khách Trả Lại)</h3>
-            <button onClick={() => setShowReturnModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-          </div>
-
-          {/* Hàng 1: Khách hàng, Chọn phiếu bán gốc, Ngày trả */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-            
-            {/* Trường Khách Hàng (Cho phép chọn hoặc tìm kiếm) */}
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Khách hàng:</label>
-              <select 
-                value={returnForm.customer_name} 
-                onChange={e => {
-                  const selectedCust = e.target.value;
-                  setReturnForm({...returnForm, customer_name: selectedCust, invoice_code: ''});
-                }}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
-              >
-                <option value="">-- Chọn hoặc tìm khách hàng --</option>
-                {/* Giả sử bạn có mảng danh sách khách hàng là `customers` */}
-                {(customers || []).map((c, idx) => (
-                  <option key={idx} value={c.name}>
-                    {c.name} {c.phone ? `- ${c.phone}` : ''} {c.code ? `(${c.code})` : ''}
-                  </option>
-                ))}
-              </select>
+            {/* Header & Nút Tạo Phiếu */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, color: '#1e293b', fontSize: '24px' }}>Quản Lý Trả Hàng</h2>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={loadReturnOrders} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  🔄 Làm mới
+                </button>
+                <button
+                  onClick={() => {
+                    setReturnForm({ customer_name: '', invoice_code: '', return_date: todayLocal(), reason: 'Sản phẩm lỗi', refund_amount: 0, status: 'Hoàn Thành (Cộng kho & trừ nợ)', items: [] });
+                    setShowReturnModal(true);
+                  }}
+                  style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  + Tạo Phiếu Trả Hàng
+                </button>
+              </div>
             </div>
 
-            {/* Trường Chọn Phiếu Bán Gốc (Tự động lọc theo khách hàng đã chọn) */}
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Chọn phiếu bán gốc:</label>
-              <select 
-                value={returnForm.invoice_code} 
-                onChange={e => {
-                  const invCode = e.target.value;
-                  setReturnForm({...returnForm, invoice_code: invCode});
-                  // Nếu chọn đơn gốc, có thể tự động load sản phẩm từ đơn đó vào danh sách trả nếu muốn
-                }}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
-              >
-                <option value="">-- Chọn Phiếu Bán Gốc --</option>
-                {/* Lọc danh sách hóa đơn theo khách hàng đã chọn và loại bỏ các đơn đã xử lý hết (nếu có logic kiểm tra) */}
-                {(invoices || [])
-                  .filter(inv => !returnForm.customer_name || inv.customer_name === returnForm.customer_name)
-                  .map((inv, idx) => (
-                    <option key={idx} value={inv.code || inv.id}>
-                      {inv.code || `BH-${inv.id}`} - {inv.customer_name || 'Khách lẻ'} ({inv.total ? vnd(inv.total) : ''})
-                    </option>
-                  ))}
-              </select>
+            {/* Các thẻ Thống kê tổng quan */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{returnOrdersData.stats.total}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đang chờ xử lý</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#d97706' }}>{returnOrdersData.stats.pending}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đã hoàn thành</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{returnOrdersData.stats.completed}</div>
+              </div>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền hoàn</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(returnOrdersData.stats.totalRefund)}</div>
+              </div>
             </div>
 
-            {/* Ngày trả */}
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Ngày trả:</label>
-              <input 
-                type="date" 
-                value={returnForm.return_date} 
-                onChange={e => setReturnForm({...returnForm, return_date: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
-              />
-            </div>
-          </div>
-
-          {/* Hàng 2: Lý do, Số tiền hoàn, Trạng thái */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Lý do trả:</label>
-              <select 
-                value={returnForm.reason} 
-                onChange={e => setReturnForm({...returnForm, reason: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
-              >
-                <option value="Sản phẩm lỗi">Sản phẩm lỗi</option>
-                <option value="Đổi ý">Đổi ý</option>
-                <option value="Lý do khác">Lý do khác</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Số tiền hoàn trả khách:</label>
-              <input 
-                type="number" 
-                placeholder="0" 
-                value={returnForm.refund_amount} 
-                onChange={e => setReturnForm({...returnForm, refund_amount: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Trạng thái xử lý:</label>
-              <select 
-                value={returnForm.status} 
-                onChange={e => setReturnForm({...returnForm, status: e.target.value})}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
-              >
-                <option value="Hoàn Thành (Cộng kho & trừ nợ)">Hoàn Thành (Cộng kho & trừ nợ)</option>
-                <option value="Đang xử lý">Đang xử lý</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Ô tìm kiếm sản phẩm tự do (Dùng khi phiếu trả tự tạo không có phiếu bán gốc) */}
-          <div style={{ marginBottom: '15px' }}>
-            <input 
-              type="text" 
-              placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..." 
-              onChange={e => {
-                // Logic chọn sản phẩm thêm vào danh sách trả (nếu bạn muốn gõ tìm sản phẩm trực tiếp)
-                const keyword = e.target.value.toLowerCase();
-                // Xử lý thêm sản phẩm vào returnForm.items ở đây nếu cần
-              }}
-              style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }} 
-            />
-          </div>
-
-          {/* Bảng chi tiết sản phẩm trả lại */}
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
-                  <th style={{ padding: '10px 14px' }}>Mã SP</th>
-                  <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
-                  <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
-                  <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
-                  <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(!returnForm.items || returnForm.items.length === 0) ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
-                      Chưa có sản phẩm trả lại
-                    </td>
+            {/* Bảng Danh Sách Phiếu Trả Hàng */}
+            <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                    <th style={{ padding: '14px' }}>MÃ PHIẾU</th>
+                    <th style={{ padding: '14px' }}>MÃ ĐƠN GỐC</th>
+                    <th style={{ padding: '14px' }}>KHÁCH HÀNG</th>
+                    <th style={{ padding: '14px' }}>NGÀY TRẢ</th>
+                    <th style={{ padding: '14px', textAlign: 'right' }}>TỔNG TIỀN</th>
+                    <th style={{ padding: '14px', textAlign: 'right' }}>TIỀN HOÀN</th>
+                    <th style={{ padding: '14px' }}>LÝ DO</th>
+                    <th style={{ padding: '14px' }}>TRẠNG THÁI</th>
+                    <th style={{ padding: '14px', textAlign: 'center' }}>THAO TÁC</th>
                   </tr>
-                ) : (
-                  returnForm.items.map((it, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '10px 14px' }}>{it.sku}</td>
-                      <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>{it.quantity}</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>{vnd(it.price)}</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.quantity * it.price)}</td>
+                </thead>
+                <tbody>
+                  {returnOrdersData.list.length === 0 ? (
+                    <tr>
+                      <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nào.</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Tổng giá trị và nút hành động */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
-              Tổng giá trị hàng trả: <span style={{ color: '#7c3aed' }}>{vnd(returnForm.refund_amount || 0)}</span>
+                  ) : (
+                    returnOrdersData.list.map((item, index) => (
+                      <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '14px', fontWeight: 'bold', color: '#0284c7' }}>{item.code}</td>
+                        <td style={{ padding: '14px', color: '#475569' }}>{item.invoice_code || '-'}</td>
+                        <td style={{ padding: '14px', fontWeight: '500' }}>{item.customer_name}</td>
+                        <td style={{ padding: '14px' }}>{item.return_date ? item.return_date.slice(0, 10) : ''}</td>
+                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.refund_amount)}</td>
+                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
+                        <td style={{ padding: '14px' }}>{item.reason}</td>
+                        <td style={{ padding: '14px' }}>
+                          <span style={{ padding: '4px 10px', borderRadius: '20px', background: '#dcfce7', color: '#16a34a', fontWeight: '500', fontSize: '12px' }}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px', textAlign: 'center' }}>
+                          <button title="Xem" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
+                          <button title="Sửa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
+                          <button title="Xóa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button 
-                onClick={() => setShowReturnModal(false)}
-                style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Hủy
-              </button>
-              <button 
-                onClick={handleCreateReturnOrder}
-                style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Tạo Phiếu Trả
-              </button>
+
+            {/* POPUP TẠO PHIẾU TRẢ HÀNG */}
+            {showReturnModal && (
+              <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+                <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto', boxSizing: 'border-box' }}>
+
+                  {/* Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
+                    <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng (Khách Trả Lại)</h3>
+                    <button onClick={() => setShowReturnModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+                  </div>
+
+                  {/* Hàng 1: Khách hàng, Chọn phiếu bán gốc, Ngày trả */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+
+                    {/* Trường Khách Hàng */}
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Khách hàng:</label>
+                      <select
+                        value={returnForm.customer_name}
+                        onChange={e => {
+                          const selectedCust = e.target.value;
+                          setReturnForm({ ...returnForm, customer_name: selectedCust, invoice_code: '' });
+                        }}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+                      >
+                        <option value="">-- Chọn hoặc tìm khách hàng --</option>
+                        {(customers || []).map((c, idx) => (
+                          <option key={idx} value={c.name}>
+                            {c.name} {c.phone ? `- ${c.phone}` : ''} {c.code ? `(${c.code})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Trường Chọn Phiếu Bán Gốc (Tự động lọc theo khách hàng đã chọn) */}
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Chọn phiếu bán gốc:</label>
+                      <select
+                        value={returnForm.invoice_code}
+                        onChange={e => {
+                          const invCode = e.target.value;
+                          setReturnForm({ ...returnForm, invoice_code: invCode });
+                        }}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+                      >
+                        <option value="">-- Chọn Phiếu Bán Gốc --</option>
+                        {/* SỬA: trước đây dùng biến `invoices` không tồn tại, đúng phải là `invoicesList` */}
+                        {(invoicesList || [])
+                          .filter(inv => !returnForm.customer_name || inv.customer_name === returnForm.customer_name)
+                          .map((inv, idx) => (
+                            <option key={idx} value={inv.code || inv.id}>
+                              {inv.code || `BH-${inv.id}`} - {inv.customer_name || 'Khách lẻ'} ({inv.total ? vnd(inv.total) : ''})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Ngày trả */}
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Ngày trả:</label>
+                      <input
+                        type="date"
+                        value={returnForm.return_date}
+                        onChange={e => setReturnForm({ ...returnForm, return_date: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Hàng 2: Lý do, Số tiền hoàn, Trạng thái */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Lý do trả:</label>
+                      <select
+                        value={returnForm.reason}
+                        onChange={e => setReturnForm({ ...returnForm, reason: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+                      >
+                        <option value="Sản phẩm lỗi">Sản phẩm lỗi</option>
+                        <option value="Đổi ý">Đổi ý</option>
+                        <option value="Lý do khác">Lý do khác</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Số tiền hoàn trả khách:</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={returnForm.refund_amount}
+                        onChange={e => setReturnForm({ ...returnForm, refund_amount: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Trạng thái xử lý:</label>
+                      <select
+                        value={returnForm.status}
+                        onChange={e => setReturnForm({ ...returnForm, status: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+                      >
+                        <option value="Hoàn Thành (Cộng kho & trừ nợ)">Hoàn Thành (Cộng kho & trừ nợ)</option>
+                        <option value="Đang xử lý">Đang xử lý</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Ô tìm kiếm sản phẩm tự do (Dùng khi phiếu trả tự tạo không có phiếu bán gốc) */}
+                  <div style={{ marginBottom: '15px' }}>
+                    <input
+                      type="text"
+                      placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..."
+                      onChange={e => {
+                        // Logic chọn sản phẩm thêm vào danh sách trả (nếu bạn muốn gõ tìm sản phẩm trực tiếp)
+                        // const keyword = e.target.value.toLowerCase();
+                      }}
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }}
+                    />
+                  </div>
+
+                  {/* Bảng chi tiết sản phẩm trả lại */}
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                          <th style={{ padding: '10px 14px' }}>Mã SP</th>
+                          <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(!returnForm.items || returnForm.items.length === 0) ? (
+                          <tr>
+                            <td colSpan="5" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+                              Chưa có sản phẩm trả lại
+                            </td>
+                          </tr>
+                        ) : (
+                          returnForm.items.map((it, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '10px 14px' }}>{it.sku}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>{it.quantity}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>{vnd(it.price)}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.quantity * it.price)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Tổng giá trị và nút hành động */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+                      Tổng giá trị hàng trả: <span style={{ color: '#7c3aed' }}>{vnd(returnForm.refund_amount || 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        onClick={() => setShowReturnModal(false)}
+                        style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        onClick={handleCreateReturnOrder}
+                        style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                      >
+                        Tạo Phiếu Trả
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
           </div>
+        )}
 
-        </div>
-      </div>
-    )}
-
-  </div>
-)}
-        
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
           <div style={cardStyle}>
@@ -1696,44 +1638,44 @@ const loadProfitLossReport = async () => {
                   </tr>
                 </thead>
                 <tbody>
-                 {(products || []).map((p) => (
-  <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-    {/* Bấm vào SKU cũng mở popup chi tiết */}
-    <td 
-      style={{ ...cellStyle, cursor: 'pointer', color: '#0284c7', fontWeight: '500' }} 
-      onClick={() => handleOpenProductModal(p)}
-      title="Bấm để xem chi tiết & thẻ kho"
-    >
-      {p.sku}
-    </td>
+                  {(products || []).map((p) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      {/* Bấm vào SKU cũng mở popup chi tiết */}
+                      <td
+                        style={{ ...cellStyle, cursor: 'pointer', color: '#0284c7', fontWeight: '500' }}
+                        onClick={() => handleOpenProductModal(p)}
+                        title="Bấm để xem chi tiết & thẻ kho"
+                      >
+                        {p.sku}
+                      </td>
 
-    {/* 👉 Bấm vào Tên sản phẩm sẽ mở popup chi tiết & thẻ kho */}
-    <td 
-      style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
-      onClick={() => handleOpenProductModal(p)}
-      title="Bấm để xem chi tiết & thẻ kho"
-    >
-      {p.name}
-    </td>
+                      {/* Bấm vào Tên sản phẩm sẽ mở popup chi tiết & thẻ kho */}
+                      <td
+                        style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
+                        onClick={() => handleOpenProductModal(p)}
+                        title="Bấm để xem chi tiết & thẻ kho"
+                      >
+                        {p.name}
+                      </td>
 
-    <td style={cellStyle}>{p.unit || 'Cái'}</td>
-    <td style={cellStyle}>{vnd(p.import_price)}</td>
-    <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
-    <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
-    <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
-    <td style={{ ...cellStyle, textAlign: 'center' }}>
-      <button
-        onClick={() => {
-          setEditingProduct(p);
-          setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
-          setShowProductModal(true);
-        }}
-        style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
-      >Sửa</button>
-      <button
-        onClick={() => handleDeleteProduct(p.id)}
-        style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
-      >Xóa</button>
+                      <td style={cellStyle}>{p.unit || 'Cái'}</td>
+                      <td style={cellStyle}>{vnd(p.import_price)}</td>
+                      <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
+                      <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
+                      <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
+                      <td style={{ ...cellStyle, textAlign: 'center' }}>
+                        <button
+                          onClick={() => {
+                            setEditingProduct(p);
+                            setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
+                            setShowProductModal(true);
+                          }}
+                          style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
+                        >Sửa</button>
+                        <button
+                          onClick={() => handleDeleteProduct(p.id)}
+                          style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
+                        >Xóa</button>
                       </td>
                     </tr>
                   ))}
@@ -1750,7 +1692,7 @@ const loadProfitLossReport = async () => {
               <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  onClick={() => { setEditingCashId(null); setCashForm(EMPTY_CASH_FORM); setShowCashModal(true); }}
+                  onClick={() => { setEditingCashId(null); setCashForm(newCashForm()); setShowCashModal(true); }}
                   style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm Thu Chi
@@ -1862,7 +1804,8 @@ const loadProfitLossReport = async () => {
                                   category: item.category,
                                   payment_method: item.payment_method || 'Chuyển khoản',
                                   reference_code: item.reference_code || '',
-                                  note: item.note || ''
+                                  note: item.note || '',
+                                  created_at: item.created_at ? item.created_at.slice(0, 10) : todayLocal()
                                 });
                                 setShowCashModal(true);
                               }}
@@ -1894,91 +1837,92 @@ const loadProfitLossReport = async () => {
           </div>
         )}
 
-          {selectedProduct && (
-  <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-    <div className="modal-content" style={{ background: '#fff', width: '900px', maxHeight: '85vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-      
-      {/* Header Modal & Nút đóng */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px' }}>
-        <h3 style={{ margin: 0, color: '#1e293b' }}>Chi tiết sản phẩm: {selectedProduct.name}</h3>
-        <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-      </div>
+        {/* POPUP CHI TIẾT SẢN PHẨM & THẺ KHO */}
+        {selectedProduct && (
+          <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div className="modal-content" style={{ background: '#fff', width: '900px', maxHeight: '85vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
 
-      {/* Thanh chuyển Tab */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px' }}>
-        <button 
-          onClick={() => setActiveProductTab('info')}
-          style={{ padding: '8px 20px', background: activeProductTab === 'info' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'info' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          1. Thông tin sản phẩm
-        </button>
-        <button 
-          onClick={() => setActiveProductTab('card')}
-          style={{ padding: '8px 20px', background: activeProductTab === 'card' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'card' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          2. Thẻ kho chi tiết
-        </button>
-      </div>
+              {/* Header Modal & Nút đóng */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#1e293b' }}>Chi tiết sản phẩm: {selectedProduct.name}</h3>
+                <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+              </div>
 
-      {/* Nội dung Tab 1: Thông tin sản phẩm */}
-      {activeProductTab === 'info' && (
-  <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '15px' }}>
-      <p><strong>Mã sản phẩm (SKU):</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{selectedProduct.sku || '-'}</span></p>
-      <p><strong>Tên sản phẩm:</strong> {selectedProduct.name}</p>
-      <p><strong>Danh mục / Loại:</strong> {selectedProduct.category || 'N/A'}</p>
-      <p><strong>Đơn vị tính:</strong> {selectedProduct.unit || 'Cái'}</p>
-      <p><strong>Giá mua vào:</strong> <span style={{ color: '#475569', fontWeight: 'bold' }}>{vnd(selectedProduct.import_price)}</span></p>
-      <p><strong>Giá bán lẻ:</strong> <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{vnd(selectedProduct.price)}</span></p>
-      <p><strong>Giá bán sỉ:</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{vnd(selectedProduct.wholesale_price)}</span></p>
-      <p><strong>Tồn kho hiện tại:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.stock}</span></p>
-    </div>
-  </div>
-)}
+              {/* Thanh chuyển Tab */}
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px' }}>
+                <button
+                  onClick={() => setActiveProductTab('info')}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'info' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'info' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  1. Thông tin sản phẩm
+                </button>
+                <button
+                  onClick={() => setActiveProductTab('card')}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'card' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'card' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  2. Thẻ kho chi tiết
+                </button>
+              </div>
 
-      {/* Nội dung Tab 2: Thẻ kho */}
-      {activeProductTab === 'card' && (
-        <div style={{ overflowY: 'auto', flex: 1 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
-                <th style={{ padding: '10px' }}>Mã phiếu</th>
-                <th style={{ padding: '10px' }}>Ngày</th>
-                <th style={{ padding: '10px' }}>Tên NCC / Khách hàng</th>
-                <th style={{ padding: '10px', textAlign: 'right' }}>Giá nhập</th>
-                <th style={{ padding: '10px', textAlign: 'right' }}>Giá bán</th>
-                <th style={{ padding: '10px', textAlign: 'center' }}>Số lượng</th>
-                <th style={{ padding: '10px', textAlign: 'right' }}>Tồn cuối</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stockCardList.length === 0 ? (
-                <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phát sinh giao dịch thẻ kho cho sản phẩm này.</td>
-                </tr>
-              ) : (
-                stockCardList.map((item, index) => (
-                  <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '10px', fontWeight: '500', color: '#0284c7' }}>{item.code}</td>
-                    <td style={{ padding: '10px' }}>{item.date ? item.date.slice(0, 10) : ''}</td>
-                    <td style={{ padding: '10px' }}>{item.partner}</td>
-                    <td style={{ padding: '10px', textAlign: 'right' }}>{item.import_price > 0 ? vnd(item.import_price) : '-'}</td>
-                    <td style={{ padding: '10px', textAlign: 'right' }}>{item.export_price > 0 ? vnd(item.export_price) : '-'}</td>
-                    <td style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold', color: item.qty > 0 ? '#16a34a' : '#dc2626' }}>
-                      {item.qty > 0 ? `+${item.qty}` : item.qty}
-                    </td>
-                    <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#0f172a' }}>{item.running_stock}</td>
-                  </tr>
-                ))
+              {/* Nội dung Tab 1: Thông tin sản phẩm */}
+              {activeProductTab === 'info' && (
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '15px' }}>
+                    <p><strong>Mã sản phẩm (SKU):</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{selectedProduct.sku || '-'}</span></p>
+                    <p><strong>Tên sản phẩm:</strong> {selectedProduct.name}</p>
+                    <p><strong>Danh mục / Loại:</strong> {selectedProduct.category || 'N/A'}</p>
+                    <p><strong>Đơn vị tính:</strong> {selectedProduct.unit || 'Cái'}</p>
+                    <p><strong>Giá mua vào:</strong> <span style={{ color: '#475569', fontWeight: 'bold' }}>{vnd(selectedProduct.import_price)}</span></p>
+                    <p><strong>Giá bán lẻ:</strong> <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{vnd(selectedProduct.price)}</span></p>
+                    <p><strong>Giá bán sỉ:</strong> <span style={{ color: '#0284c7', fontWeight: 'bold' }}>{vnd(selectedProduct.wholesale_price)}</span></p>
+                    <p><strong>Tồn kho hiện tại:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.stock}</span></p>
+                  </div>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
-      )}
 
-    </div>
-  </div>
-)}
+              {/* Nội dung Tab 2: Thẻ kho */}
+              {activeProductTab === 'card' && (
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>Mã phiếu</th>
+                        <th style={{ padding: '10px' }}>Ngày</th>
+                        <th style={{ padding: '10px' }}>Tên NCC / Khách hàng</th>
+                        <th style={{ padding: '10px', textAlign: 'right' }}>Giá nhập</th>
+                        <th style={{ padding: '10px', textAlign: 'right' }}>Giá bán</th>
+                        <th style={{ padding: '10px', textAlign: 'center' }}>Số lượng</th>
+                        <th style={{ padding: '10px', textAlign: 'right' }}>Tồn cuối</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockCardList.length === 0 ? (
+                        <tr>
+                          <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phát sinh giao dịch thẻ kho cho sản phẩm này.</td>
+                        </tr>
+                      ) : (
+                        stockCardList.map((item, index) => (
+                          <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '10px', fontWeight: '500', color: '#0284c7' }}>{item.code}</td>
+                            <td style={{ padding: '10px' }}>{item.date ? item.date.slice(0, 10) : ''}</td>
+                            <td style={{ padding: '10px' }}>{item.partner}</td>
+                            <td style={{ padding: '10px', textAlign: 'right' }}>{item.import_price > 0 ? vnd(item.import_price) : '-'}</td>
+                            <td style={{ padding: '10px', textAlign: 'right' }}>{item.export_price > 0 ? vnd(item.export_price) : '-'}</td>
+                            <td style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold', color: item.qty > 0 ? '#16a34a' : '#dc2626' }}>
+                              {item.qty > 0 ? `+${item.qty}` : item.qty}
+                            </td>
+                            <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#0f172a' }}>{item.running_stock}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+            </div>
+          </div>
+        )}
 
         {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
@@ -2381,82 +2325,83 @@ const loadProfitLossReport = async () => {
           </div>
         )}
 
-            {currentView === 'profit-loss-report' && (
-  <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-      <h2>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-        <span>Từ ngày:</span>
-        <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-        <span>Đến ngày:</span>
-        <input type="date" value={plEndDate} onChange={e => setPlEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-        <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
-      </div>
-    </div>
+        {/* 📊 MÀN HÌNH BÁO CÁO KẾT QUẢ KINH DOANH (LÃI / LỖ) */}
+        {currentView === 'profit-loss-report' && (
+          <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+              <h2 style={{ margin: 0, color: '#1e293b' }}>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span>Từ ngày:</span>
+                <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                <span>Đến ngày:</span>
+                <input type="date" value={plEndDate} onChange={e => setPlEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
+              </div>
+            </div>
 
-    <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '800px', margin: '0 auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-            <th style={{ textAlign: 'left', padding: '12px' }}>Chỉ tiêu</th>
-            <th style={{ textAlign: 'right', padding: '12px' }}>Thành tiền (VNĐ)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
-            <td style={{ padding: '12px' }}>1. Doanh thu bán hàng</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#2563eb' }}>{vnd(plReport.grossRevenue)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '12px', paddingLeft: '25px' }}>- Các khoản giảm trừ (Giảm giá / Trả lại)</td>
-            <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(plReport.totalDiscount)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold', background: '#f8fafc' }}>
-            <td style={{ padding: '12px' }}>2. Doanh thu thuần (Net Revenue)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#0284c7' }}>{vnd(plReport.netRevenue)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
-            <td style={{ padding: '12px' }}>3. Giá vốn hàng bán (COGS)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.cogs)}</td>
-          </tr>
-          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f0fdf4' }}>
-            <td style={{ padding: '12px' }}>4. Lợi nhuận gộp (Gross Profit)</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#16a34a', fontSize: '16px' }}>{vnd(plReport.grossProfit)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-            <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="2">5. Tổng chi phí hoạt động:</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí vận chuyển (Ship)</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.shipping)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí thuế</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.tax)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí lương nhân viên</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.salary)}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
-            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí quản lý / khác</td>
-            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.other)}</td>
-          </tr>
-          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f8fafc' }}>
-            <td style={{ padding: '12px', paddingLeft: '25px' }}>Tổng chi phí</td>
-            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.expenses.total)}</td>
-          </tr>
-          <tr style={{ borderTop: '3px double #0f172a', fontWeight: 'bold', background: '#eff6ff' }}>
-            <td style={{ padding: '15px', fontSize: '16px' }}>6. LỢI NHUẬN THUẦN (NET PROFIT)</td>
-            <td style={{ textAlign: 'right', padding: '15px', fontSize: '18px', color: plReport.netProfit >= 0 ? '#16a34a' : '#dc2626' }}>
-              {vnd(plReport.netProfit)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-)}
+            <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '800px', margin: '0 auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                    <th style={{ textAlign: 'left', padding: '12px' }}>Chỉ tiêu</th>
+                    <th style={{ textAlign: 'right', padding: '12px' }}>Thành tiền (VNĐ)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
+                    <td style={{ padding: '12px' }}>1. Doanh thu bán hàng</td>
+                    <td style={{ textAlign: 'right', padding: '12px', color: '#2563eb' }}>{vnd(plReport.grossRevenue)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    <td style={{ padding: '12px', paddingLeft: '25px' }}>- Các khoản giảm trừ (Giảm giá / Trả lại)</td>
+                    <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(plReport.totalDiscount)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold', background: '#f8fafc' }}>
+                    <td style={{ padding: '12px' }}>2. Doanh thu thuần (Net Revenue)</td>
+                    <td style={{ textAlign: 'right', padding: '12px', color: '#0284c7' }}>{vnd(plReport.netRevenue)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
+                    <td style={{ padding: '12px' }}>3. Giá vốn hàng bán (COGS)</td>
+                    <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.cogs)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f0fdf4' }}>
+                    <td style={{ padding: '12px' }}>4. Lợi nhuận gộp (Gross Profit)</td>
+                    <td style={{ textAlign: 'right', padding: '12px', color: '#16a34a', fontSize: '16px' }}>{vnd(plReport.grossProfit)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="2">5. Tổng chi phí hoạt động:</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí vận chuyển (Ship)</td>
+                    <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.shipping)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí thuế</td>
+                    <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.tax)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí lương nhân viên</td>
+                    <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.salary)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí quản lý / khác</td>
+                    <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.other)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f8fafc' }}>
+                    <td style={{ padding: '12px', paddingLeft: '25px' }}>Tổng chi phí</td>
+                    <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.expenses.total)}</td>
+                  </tr>
+                  <tr style={{ borderTop: '3px double #0f172a', fontWeight: 'bold', background: '#eff6ff' }}>
+                    <td style={{ padding: '15px', fontSize: '16px' }}>6. LỢI NHUẬN THUẦN (NET PROFIT)</td>
+                    <td style={{ textAlign: 'right', padding: '15px', fontSize: '18px', color: plReport.netProfit >= 0 ? '#16a34a' : '#dc2626' }}>
+                      {vnd(plReport.netProfit)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
         {currentView === 'customers' && (
@@ -2505,1083 +2450,1083 @@ const loadProfitLossReport = async () => {
               </tbody>
             </table>
           </div>
-          )}
-    
+        )}
 
         {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
         {showViewPurchaseModal && selectedPurchaseOrder && (
           <div style={overlayStyle}>
-          <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
-              <button onClick={() => setShowViewPurchaseModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-              <div><b>Nhà cung cấp:</b> {selectedPurchaseOrder.supplier_name || '---'}</div>
-              <div><b>Ngày tạo:</b> {selectedPurchaseOrder.created_at ? new Date(selectedPurchaseOrder.created_at).toLocaleString('vi-VN') : '---'}</div>
-              <div><b>Phương thức thanh toán:</b> {selectedPurchaseOrder.payment_method || 'Tiền mặt'}</div>
-            </div>
-
-            <h4 style={{ margin: '10px 0' }}>Danh sách sản phẩm nhập</h4>
-            <div style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                    <th style={{ padding: '8px' }}>SKU</th>
-                    <th style={{ padding: '8px' }}>Tên sản phẩm</th>
-                    <th style={{ padding: '8px' }}>Số lượng</th>
-                    <th style={{ padding: '8px' }}>Đơn giá</th>
-                    <th style={{ padding: '8px' }}>Giảm giá</th>
-                    <th style={{ padding: '8px' }}>Thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(selectedPurchaseOrder.items || []).map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '8px' }}>{item.sku}</td>
-                      <td style={{ padding: '8px', fontWeight: '500' }}>{item.product_name}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>{item.quantity}</td>
-                      <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
-                      <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
-                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((item.quantity * item.price) - (item.discount || 0))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Tổng tiền hàng:</span> <b>{vnd(selectedPurchaseOrder.total)}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Đã thanh toán:</span> <span>{vnd(selectedPurchaseOrder.paid_amount)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Còn nợ:</span> <b style={{ color: selectedPurchaseOrder.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedPurchaseOrder.debt)}</b></div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowViewPurchaseModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP THÊM NHANH NHÀ CUNG CẤP (đặt ở cấp ngoài cùng để không bị lồng trong popup phiếu nhập) */}
-      {showQuickAddSupplierModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
-          <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#7c3aed' }}>Thêm Nhanh Nhà Cung Cấp</h3>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
-              <input
-                placeholder="Nhập tên công ty / cửa hàng..."
-                value={newSupplierForm.name}
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, name: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Số điện thoại:</label>
-              <input
-                placeholder="Nhập số điện thoại..."
-                value={newSupplierForm.phone}
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phone: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Địa chỉ:</label>
-              <input
-                placeholder="Nhập địa chỉ..."
-                value={newSupplierForm.address}
-                onChange={(e) => setNewSupplierForm({ ...newSupplierForm, address: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
-                onClick={() => setShowQuickAddSupplierModal(false)}
-                style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleQuickSaveSupplier}
-                style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Lưu nhà cung cấp
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP TẠO / SỬA PHIẾU NHẬP HÀNG */}
-      {showCreatePurchaseModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ padding: '20px', background: '#7c3aed', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>{editingPurchaseId ? 'Chỉnh sửa Phiếu Nhập Hàng' : 'Tạo Phiếu Nhập Hàng'}</h3>
-              <button onClick={() => setShowCreatePurchaseModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <div style={{ position: 'relative' }}>
-                  <label style={labelStyle}>Nhà cung cấp *:</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      placeholder="Nhập tên, SĐT hoặc mã NCC..."
-                      value={supplierSearchKeyword}
-                      onChange={(e) => {
-                        setSupplierSearchKeyword(e.target.value);
-                        setPurchaseForm((f) => ({ ...f, supplier_id: '' })); // gõ lại thì bỏ NCC đã chọn trước đó
-                        setShowSupplierDropdown(true);
-                      }}
-                      onFocus={() => setShowSupplierDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 150)}
-                      style={{ ...inputStyle, flex: 1 }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickAddSupplierModal(true)}
-                      title="Thêm nhà cung cấp mới"
-                      style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '0 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-                    >
-                      + Thêm
-                    </button>
-                  </div>
-
-                  {showSupplierDropdown && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                      {(suppliers || []).filter((s) =>
-                        s.name.toLowerCase().includes(supplierSearchKeyword.toLowerCase()) ||
-                        (s.phone && s.phone.includes(supplierSearchKeyword)) ||
-                        (s.code || '').toLowerCase().includes(supplierSearchKeyword.toLowerCase())
-                      ).map((s) => (
-                        <div
-                          key={s.id}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setPurchaseForm((f) => ({ ...f, supplier_id: s.id }));
-                            setSupplierSearchKeyword(`${s.name} (${s.code})`);
-                            setShowSupplierDropdown(false);
-                          }}
-                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
-                        >
-                          <b>{s.name}</b> <span style={{ color: '#64748b' }}>({s.code})</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label style={labelStyle}>Phương thức thanh toán:</label>
-                  <select
-                    value={purchaseForm.payment_method}
-                    onChange={(e) => setPurchaseForm({ ...purchaseForm, payment_method: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option value="Tiền mặt">Tiền mặt</option>
-                    <option value="Chuyển khoản">Chuyển khoản</option>
-                    <option value="Công nợ">Công nợ</option>
-                  </select>
-                </div>
-
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
-                  <input
-                    type="datetime-local"
-                    value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
-                    onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
-                    style={{ ...inputStyle, width: '100%' }}
-                  />
-                </div>
+            <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
+                <button onClick={() => setShowViewPurchaseModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={labelStyle}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
-                <input
-                  placeholder="Nhập tên sản phẩm hoặc mã SKU..."
-                  value={productSearchKeyword}
-                  onChange={(e) => setProductSearchKeyword(e.target.value)}
-                  style={inputStyle}
-                />
-                {productSearchKeyword.trim() && (
-                  <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', marginTop: '5px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                    {(products || []).filter((p) =>
-                      p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) ||
-                      (p.sku && p.sku.toLowerCase().includes(productSearchKeyword.toLowerCase()))
-                    ).map((p) => (
-                      <div
-                        key={p.id}
-                        onClick={() => {
-                          const exist = purchaseItems.find((item) => item.product_id === p.id);
-                          if (exist) {
-                            setPurchaseItems(purchaseItems.map((item) => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
-                          } else {
-                            setPurchaseItems([...purchaseItems, { product_id: p.id, name: p.name, sku: p.sku, unit: p.unit || 'Cái', quantity: 1, price: p.import_price || p.price || 0, discount: 0 }]);
-                          }
-                          setProductSearchKeyword('');
-                        }}
-                        style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}
-                      >
-                        <span><b>{p.name}</b> (SKU: {p.sku})</span>
-                        <span style={{ color: '#0284c7', fontWeight: 'bold' }}>+ Thêm</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+                <div><b>Nhà cung cấp:</b> {selectedPurchaseOrder.supplier_name || '---'}</div>
+                <div><b>Ngày tạo:</b> {selectedPurchaseOrder.created_at ? new Date(selectedPurchaseOrder.created_at).toLocaleString('vi-VN') : '---'}</div>
+                <div><b>Phương thức thanh toán:</b> {selectedPurchaseOrder.payment_method || 'Tiền mặt'}</div>
               </div>
 
-              <div style={{ marginBottom: '20px', overflowX: 'auto' }}>
+              <h4 style={{ margin: '10px 0' }}>Danh sách sản phẩm nhập</h4>
+              <div style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                      <th style={{ padding: '10px' }}>SKU</th>
-                      <th style={{ padding: '10px' }}>Tên sản phẩm</th>
-                      <th style={{ padding: '10px' }}>ĐVT</th>
-                      <th style={{ padding: '10px', width: '80px' }}>SL</th>
-                      <th style={{ padding: '10px', width: '130px' }}>Đơn giá</th>
-                      <th style={{ padding: '10px', width: '100px' }}>Giảm</th>
-                      <th style={{ padding: '10px' }}>Thành tiền</th>
-                      <th style={{ padding: '10px', width: '50px' }}>Xóa</th>
+                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>SKU</th>
+                      <th style={{ padding: '8px' }}>Tên sản phẩm</th>
+                      <th style={{ padding: '8px' }}>Số lượng</th>
+                      <th style={{ padding: '8px' }}>Đơn giá</th>
+                      <th style={{ padding: '8px' }}>Giảm giá</th>
+                      <th style={{ padding: '8px' }}>Thành tiền</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {purchaseItems.length === 0 ? (
-                      <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có sản phẩm nào trong phiếu nhập.</td></tr>
-                    ) : (
-                      purchaseItems.map((item, index) => {
-                        const lineTotal = (item.quantity * item.price) - item.discount;
-                        return (
-                          <tr key={item.product_id ?? index} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '10px' }}>{item.sku}</td>
-                            <td style={{ padding: '10px', fontWeight: '500' }}>{item.name}</td>
-                            <td style={{ padding: '10px' }}>{item.unit}</td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" min="1" value={item.quantity} onChange={(e) => updatePurchaseItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
-                            </td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" value={item.price} onChange={(e) => updatePurchaseItem(index, { price: Number(e.target.value) || 0 })} style={{ width: '110px', padding: '6px' }} />
-                            </td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" value={item.discount} onChange={(e) => updatePurchaseItem(index, { discount: Number(e.target.value) || 0 })} style={{ width: '90px', padding: '6px' }} />
-                            </td>
-                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(lineTotal)}</td>
-                            <td style={{ padding: '10px' }}>
-                              <button onClick={() => setPurchaseItems(purchaseItems.filter((_, idx) => idx !== index))} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
+                    {(selectedPurchaseOrder.items || []).map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '8px' }}>{item.sku}</td>
+                        <td style={{ padding: '8px', fontWeight: '500' }}>{item.product_name}</td>
+                        <td style={{ padding: '8px', textAlign: 'center' }}>{item.quantity}</td>
+                        <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
+                        <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
+                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((item.quantity * item.price) - (item.discount || 0))}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
-              {(() => {
-                const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
-                const debtAmount = totalAmount - (Number(purchaseForm.paid_amount) || 0);
-
-                return (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '15px 20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                      <div><span style={{ color: '#64748b' }}>Tổng: </span><b>{vnd(totalAmount)}</b></div>
-                      <div>
-                        <span style={{ color: '#64748b' }}>Đã trả: </span>
-                        <input type="number" value={purchaseForm.paid_amount} onChange={(e) => setPurchaseForm({ ...purchaseForm, paid_amount: e.target.value })} style={{ width: '110px', padding: '6px', fontWeight: 'bold' }} />
-                      </div>
-                      <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debtAmount))}</b></div>
-                    </div>
-
-                    <button
-                      onClick={handleSavePurchase}
-                      style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                    >
-                      💾 Hoàn tất
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP TẠO PHIẾU THU / CHI */}
-      {showCashModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px' }}>
-            <h3 style={{ marginTop: 0, color: '#0f172a' }}>{editingCashId ? 'Chỉnh Sửa Phiếu Thu / Chi' : 'Tạo Phiếu Thu / Chi Mới'}</h3>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Loại giao dịch:</label>
-              <select
-                value={cashForm.type}
-                onChange={(e) => {
-                  const t = e.target.value;
-                  // Đổi loại thì đặt lại danh mục mặc định cho đúng loại
-                  setCashForm({ ...cashForm, type: t, category: t === 'OUT' ? 'Mua hàng / Trả nợ NCC' : 'Bán hàng / Thu nợ KH' });
-                }}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              >
-                <option value="OUT">Phiếu Chi (Trả NCC, Lương, Vận chuyển, Thuế...)</option>
-                <option value="IN">Phiếu Thu (Thu tiền khách, Khác...)</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Danh mục:</label>
-              <select
-                value={cashForm.category}
-                onChange={(e) => setCashForm({ ...cashForm, category: e.target.value })}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              >
-                {cashForm.type === 'OUT' ? (
-                  <>
-                    <option value="Mua hàng / Trả nợ NCC">Mua hàng / Trả nợ NCC</option>
-                    <option value="Chi hoàn trả khách hàng">Chi hoàn trả khách hàng</option>
-                    <option value="Chi phí vận chuyển">Chi phí vận chuyển</option>
-                    <option value="Chi thuế">Chi thuế</option>
-                    <option value="Chi lương nhân viên">Chi lương nhân viên</option>
-                    <option value="Chi phí khác">Chi phí khác</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="Bán hàng / Thu nợ KH">Bán hàng / Thu nợ KH</option>
-                    <option value="Thu hoàn trả từ NCC">Thu hoàn trả từ NCC</option>
-                    <option value="Thu nhập khác">Thu nhập khác</option>
-                  </>
-                )}
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
-              <input
-                type="number"
-                placeholder="Nhập số tiền..."
-                value={cashForm.amount}
-                onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phương thức thanh toán:</label>
-              <select
-                value={cashForm.payment_method}
-                onChange={(e) => setCashForm({ ...cashForm, payment_method: e.target.value })}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              >
-                <option value="Chuyển khoản">Chuyển khoản</option>
-                <option value="Tiền mặt">Tiền mặt</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500', color: '#334155', fontSize: '13px' }}>
-          Ngày giao dịch:
-        </label>
-        <input 
-          type="date" 
-          value={cashForm.created_at ? cashForm.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10)} 
-          onChange={(e) => setCashForm({ ...cashForm, created_at: e.target.value })}
-          style={{ 
-            width: '100%', 
-            padding: '10px', 
-            borderRadius: '8px', 
-            border: '1px solid #cbd5e1', 
-            fontSize: '14px', 
-            boxSizing: 'border-box',
-            outline: 'none',
-            background: '#fff'
-          }}
-        />
-      </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ghi chú / Chứng từ liên quan:</label>
-              <textarea
-                rows="3"
-                placeholder="Nhập nội dung giải trình..."
-                value={cashForm.note}
-                onChange={(e) => setCashForm({ ...cashForm, note: e.target.value })}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setShowCashModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button
-                onClick={async () => {
-                  if (!cashForm.amount || Number(cashForm.amount) <= 0) {
-                    alert('Vui lòng nhập số tiền hợp lệ!');
-                    return;
-                  }
-                  try {
-                    await api(editingCashId ? `/api/cash-book/${editingCashId}` : '/api/cash-book', {
-                      method: editingCashId ? 'PUT' : 'POST',
-                      body: JSON.stringify(cashForm)
-                    });
-                    setShowCashModal(false);
-                    setEditingCashId(null);
-                    setCashForm(EMPTY_CASH_FORM);
-                    loadCashBook();
-                  } catch (err) {
-                    alert('Lỗi: ' + err.message);
-                  }
-                }}
-                style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                {editingCashId ? 'Cập nhật giao dịch' : 'Lưu giao dịch'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP TẠO / SỬA PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
-      {showOrderModal && (
-        <div style={{ ...overlayStyle, zIndex: 900 }}>
-          <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed' }}>
-                {modalOrderType === 'invoices'
-                  ? (editingInvoiceId ? '✏️ Sửa Phiếu Bán Hàng' : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
-                  : (editingOrderId ? '✏️ Sửa Đơn Đặt Hàng' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)')}
-              </h3>
-              <button onClick={() => { setShowOrderModal(false); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); }} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', flex: 1, overflowY: 'auto' }}>
-              {/* ===== Cột trái: chọn sản phẩm ===== */}
-              <div>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                  <input
-                    placeholder="Gõ mã hoặc tên sản phẩm..."
-                    value={posProductKeyword}
-                    onChange={(e) => setPosProductKeyword(e.target.value)}
-                    style={{ ...inputStyle, margin: 0 }}
-                  />
-                  <button
-                    onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
-                    title="Thêm sản phẩm mới"
-                    style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                  >+</button>
-                </div>
-                <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-                  {filteredPosProducts.map((p) => {
-                    const isOutOfStock = p.stock <= 0;
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => add(p)}
-                        style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isOutOfStock ? '#fffbeb' : '#fff' }}
-                      >
-                        <div>
-                          <strong style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</strong><br />
-                          <small style={{ color: isOutOfStock ? '#dc2626' : '#64748b' }}>
-                            {isOutOfStock ? (modalOrderType === 'invoices' ? 'Hết hàng' : 'Hết (Cho phép đặt)') : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
-                          </small>
-                        </div>
-                        <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(p.price)}</div>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Tổng tiền hàng:</span> <b>{vnd(selectedPurchaseOrder.total)}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span>Đã thanh toán:</span> <span>{vnd(selectedPurchaseOrder.paid_amount)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Còn nợ:</span> <b style={{ color: selectedPurchaseOrder.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedPurchaseOrder.debt)}</b></div>
               </div>
 
-              {/* ===== Cột phải: thông tin đơn + giỏ hàng ===== */}
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowViewPurchaseModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+              </div>
+            </div>
+          </div>
+        )}
 
-                {modalOrderType === 'invoices' && (
-                  <div style={{ marginBottom: '10px', background: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
+        {/* POPUP THÊM NHANH NHÀ CUNG CẤP (đặt ở cấp ngoài cùng để không bị lồng trong popup phiếu nhập) */}
+        {showQuickAddSupplierModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
+            <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <h3 style={{ margin: '0 0 15px 0', color: '#7c3aed' }}>Thêm Nhanh Nhà Cung Cấp</h3>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
+                <input
+                  placeholder="Nhập tên công ty / cửa hàng..."
+                  value={newSupplierForm.name}
+                  onChange={(e) => setNewSupplierForm({ ...newSupplierForm, name: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Số điện thoại:</label>
+                <input
+                  placeholder="Nhập số điện thoại..."
+                  value={newSupplierForm.phone}
+                  onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phone: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Địa chỉ:</label>
+                <input
+                  placeholder="Nhập địa chỉ..."
+                  value={newSupplierForm.address}
+                  onChange={(e) => setNewSupplierForm({ ...newSupplierForm, address: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  onClick={() => setShowQuickAddSupplierModal(false)}
+                  style={{ padding: '8px 16px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={handleQuickSaveSupplier}
+                  style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Lưu nhà cung cấp
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP TẠO / SỬA PHIẾU NHẬP HÀNG */}
+        {showCreatePurchaseModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: '20px', background: '#7c3aed', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0 }}>{editingPurchaseId ? 'Chỉnh sửa Phiếu Nhập Hàng' : 'Tạo Phiếu Nhập Hàng'}</h3>
+                <button onClick={() => setShowCreatePurchaseModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ position: 'relative' }}>
+                    <label style={labelStyle}>Nhà cung cấp *:</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        placeholder="Nhập tên, SĐT hoặc mã NCC..."
+                        value={supplierSearchKeyword}
+                        onChange={(e) => {
+                          setSupplierSearchKeyword(e.target.value);
+                          setPurchaseForm((f) => ({ ...f, supplier_id: '' })); // gõ lại thì bỏ NCC đã chọn trước đó
+                          setShowSupplierDropdown(true);
+                        }}
+                        onFocus={() => setShowSupplierDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 150)}
+                        style={{ ...inputStyle, flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickAddSupplierModal(true)}
+                        title="Thêm nhà cung cấp mới"
+                        style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '0 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                      >
+                        + Thêm
+                      </button>
+                    </div>
+
+                    {showSupplierDropdown && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                        {(suppliers || []).filter((s) =>
+                          s.name.toLowerCase().includes(supplierSearchKeyword.toLowerCase()) ||
+                          (s.phone && s.phone.includes(supplierSearchKeyword)) ||
+                          (s.code || '').toLowerCase().includes(supplierSearchKeyword.toLowerCase())
+                        ).map((s) => (
+                          <div
+                            key={s.id}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setPurchaseForm((f) => ({ ...f, supplier_id: s.id }));
+                              setSupplierSearchKeyword(`${s.name} (${s.code})`);
+                              setShowSupplierDropdown(false);
+                            }}
+                            style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                          >
+                            <b>{s.name}</b> <span style={{ color: '#64748b' }}>({s.code})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Phương thức thanh toán:</label>
                     <select
-                      onChange={(e) => handleSelectOrderToInvoice(e.target.value)}
-                      style={{ ...inputStyle, margin: '4px 0 0 0' }}
+                      value={purchaseForm.payment_method}
+                      onChange={(e) => setPurchaseForm({ ...purchaseForm, payment_method: e.target.value })}
+                      style={inputStyle}
                     >
-                      <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
-                      {ordersList.map(o => (
-                        <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
-                      ))}
+                      <option value="Tiền mặt">Tiền mặt</option>
+                      <option value="Chuyển khoản">Chuyển khoản</option>
+                      <option value="Công nợ">Công nợ</option>
                     </select>
                   </div>
-                )}
 
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={labelStyle}>Ngày tạo:</label>
-                  <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
+                    <input
+                      type="datetime-local"
+                      value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
+                      onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
+                      style={{ ...inputStyle, width: '100%' }}
+                    />
+                  </div>
                 </div>
 
-                <div style={{ marginBottom: '15px', position: 'relative' }}>
-                  <label style={labelStyle}>Khách hàng:</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      placeholder="Gõ tên, SĐT hoặc mã khách hàng..."
-                      value={customerSearch}
-                      onChange={(e) => {
-                        setCustomerSearch(e.target.value);
-                        setPosCustomer((c) => ({ ...c, name: e.target.value }));
-                        setShowCustomerDropdown(true);
-                      }}
-                      onFocus={() => setShowCustomerDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 150)}
-                      style={{ ...inputStyle, margin: 0, flex: 1 }}
-                    />
-                    <button
-                      onClick={() => { setEditingCustomer(null); setCustomerForm({ ...EMPTY_CUSTOMER, name: customerSearch }); setShowCustomerModal(true); }}
-                      title="Thêm khách hàng mới"
-                      style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }}
-                    >+</button>
-                  </div>
-                  {showCustomerDropdown && filteredPosCustomers.length > 0 && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 45, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '160px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                      {filteredPosCustomers.map((c) => (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={labelStyle}>Tìm kiếm sản phẩm để thêm vào phiếu nhập:</label>
+                  <input
+                    placeholder="Nhập tên sản phẩm hoặc mã SKU..."
+                    value={productSearchKeyword}
+                    onChange={(e) => setProductSearchKeyword(e.target.value)}
+                    style={inputStyle}
+                  />
+                  {productSearchKeyword.trim() && (
+                    <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', marginTop: '5px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                      {(products || []).filter((p) =>
+                        p.name.toLowerCase().includes(productSearchKeyword.toLowerCase()) ||
+                        (p.sku && p.sku.toLowerCase().includes(productSearchKeyword.toLowerCase()))
+                      ).map((p) => (
                         <div
-                          key={c.id}
-                          onMouseDown={(e) => e.preventDefault()}
+                          key={p.id}
                           onClick={() => {
-                            setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '' });
-                            setCustomerSearch(c.name);
-                            setShowCustomerDropdown(false);
+                            const exist = purchaseItems.find((item) => item.product_id === p.id);
+                            if (exist) {
+                              setPurchaseItems(purchaseItems.map((item) => item.product_id === p.id ? { ...item, quantity: item.quantity + 1 } : item));
+                            } else {
+                              setPurchaseItems([...purchaseItems, { product_id: p.id, name: p.name, sku: p.sku, unit: p.unit || 'Cái', quantity: 1, price: p.import_price || p.price || 0, discount: 0 }]);
+                            }
+                            setProductSearchKeyword('');
                           }}
-                          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                          style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}
                         >
-                          <b>{c.name}</b> - <span style={{ color: '#64748b' }}>{c.phone || 'Chưa có SĐT'} ({c.code})</span>
+                          <span><b>{p.name}</b> (SKU: {p.sku})</span>
+                          <span style={{ color: '#0284c7', fontWeight: 'bold' }}>+ Thêm</span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                  <div>
-                    <label style={labelStyle}>Số điện thoại:</label>
-                    <input value={posCustomer.phone} onChange={(e) => setPosCustomer({ ...posCustomer, phone: e.target.value })} placeholder="SĐT khách hàng..." style={{ ...inputStyle, margin: 0 }} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Địa chỉ:</label>
-                    <input value={posCustomer.address} onChange={(e) => setPosCustomer({ ...posCustomer, address: e.target.value })} placeholder="Địa chỉ khách hàng..." style={{ ...inputStyle, margin: 0 }} />
-                  </div>
-                </div>
-
-                <h4 style={{ margin: '10px 0 5px 0' }}>Chi tiết đơn hàng</h4>
-                <div style={{ flex: 1, minHeight: '140px', maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '15px' }}>
+                <div style={{ marginBottom: '20px', overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: '#f8fafc', textAlign: 'left', fontSize: '13px' }}>
-                        <th style={{ padding: '10px' }}>Sản phẩm</th>
-                        <th style={{ padding: '10px', width: '70px' }}>SL</th>
-                        <th style={{ padding: '10px' }}>Đơn giá</th>
-                        <th style={{ padding: '10px', width: '90px' }}>Giảm giá</th>
+                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>SKU</th>
+                        <th style={{ padding: '10px' }}>Tên sản phẩm</th>
+                        <th style={{ padding: '10px' }}>ĐVT</th>
+                        <th style={{ padding: '10px', width: '80px' }}>SL</th>
+                        <th style={{ padding: '10px', width: '130px' }}>Đơn giá</th>
+                        <th style={{ padding: '10px', width: '100px' }}>Giảm</th>
                         <th style={{ padding: '10px' }}>Thành tiền</th>
-                        <th style={{ padding: '10px', width: '40px' }}>Xóa</th>
+                        <th style={{ padding: '10px', width: '50px' }}>Xóa</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {cartLines.length === 0 ? (
-                        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có sản phẩm nào</td></tr>
+                      {purchaseItems.length === 0 ? (
+                        <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có sản phẩm nào trong phiếu nhập.</td></tr>
                       ) : (
-                        cartLines.map((l) => (
-                          <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
-                            <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
-                            </td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ width: '90px', padding: '4px', fontWeight: 'bold', color: '#7c3aed' }} />
-                            </td>
-                            <td style={{ padding: '10px' }}>
-                              <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
-                            </td>
-                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((l.price * l.quantity) - l.discount)}</td>
-                            <td style={{ padding: '10px' }}>
-                              <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-                            </td>
+                        purchaseItems.map((item, index) => {
+                          const lineTotal = (item.quantity * item.price) - item.discount;
+                          return (
+                            <tr key={item.product_id ?? index} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td style={{ padding: '10px' }}>{item.sku}</td>
+                              <td style={{ padding: '10px', fontWeight: '500' }}>{item.name}</td>
+                              <td style={{ padding: '10px' }}>{item.unit}</td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" min="1" value={item.quantity} onChange={(e) => updatePurchaseItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" value={item.price} onChange={(e) => updatePurchaseItem(index, { price: Number(e.target.value) || 0 })} style={{ width: '110px', padding: '6px' }} />
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" value={item.discount} onChange={(e) => updatePurchaseItem(index, { discount: Number(e.target.value) || 0 })} style={{ width: '90px', padding: '6px' }} />
+                              </td>
+                              <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(lineTotal)}</td>
+                              <td style={{ padding: '10px' }}>
+                                <button onClick={() => setPurchaseItems(purchaseItems.filter((_, idx) => idx !== index))} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {(() => {
+                  const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
+                  const debtAmount = totalAmount - (Number(purchaseForm.paid_amount) || 0);
+
+                  return (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '15px 20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                        <div><span style={{ color: '#64748b' }}>Tổng: </span><b>{vnd(totalAmount)}</b></div>
+                        <div>
+                          <span style={{ color: '#64748b' }}>Đã trả: </span>
+                          <input type="number" value={purchaseForm.paid_amount} onChange={(e) => setPurchaseForm({ ...purchaseForm, paid_amount: e.target.value })} style={{ width: '110px', padding: '6px', fontWeight: 'bold' }} />
+                        </div>
+                        <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debtAmount))}</b></div>
+                      </div>
+
+                      <button
+                        onClick={handleSavePurchase}
+                        style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                      >
+                        💾 Hoàn tất
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP TẠO PHIẾU THU / CHI */}
+        {showCashModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px' }}>
+              <h3 style={{ marginTop: 0, color: '#0f172a' }}>{editingCashId ? 'Chỉnh Sửa Phiếu Thu / Chi' : 'Tạo Phiếu Thu / Chi Mới'}</h3>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Loại giao dịch:</label>
+                <select
+                  value={cashForm.type}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    // Đổi loại thì đặt lại danh mục mặc định cho đúng loại
+                    setCashForm({ ...cashForm, type: t, category: t === 'OUT' ? 'Mua hàng / Trả nợ NCC' : 'Bán hàng / Thu nợ KH' });
+                  }}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="OUT">Phiếu Chi (Trả NCC, Lương, Vận chuyển, Thuế...)</option>
+                  <option value="IN">Phiếu Thu (Thu tiền khách, Khác...)</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Danh mục:</label>
+                <select
+                  value={cashForm.category}
+                  onChange={(e) => setCashForm({ ...cashForm, category: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  {cashForm.type === 'OUT' ? (
+                    <>
+                      <option value="Mua hàng / Trả nợ NCC">Mua hàng / Trả nợ NCC</option>
+                      <option value="Chi hoàn trả khách hàng">Chi hoàn trả khách hàng</option>
+                      <option value="Chi phí vận chuyển">Chi phí vận chuyển</option>
+                      <option value="Chi thuế">Chi thuế</option>
+                      <option value="Chi lương nhân viên">Chi lương nhân viên</option>
+                      <option value="Chi phí khác">Chi phí khác</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Bán hàng / Thu nợ KH">Bán hàng / Thu nợ KH</option>
+                      <option value="Thu hoàn trả từ NCC">Thu hoàn trả từ NCC</option>
+                      <option value="Thu nhập khác">Thu nhập khác</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
+                <input
+                  type="number"
+                  placeholder="Nhập số tiền..."
+                  value={cashForm.amount}
+                  onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Phương thức thanh toán:</label>
+                <select
+                  value={cashForm.payment_method}
+                  onChange={(e) => setCashForm({ ...cashForm, payment_method: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="Chuyển khoản">Chuyển khoản</option>
+                  <option value="Tiền mặt">Tiền mặt</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500', color: '#334155', fontSize: '13px' }}>
+                  Ngày giao dịch:
+                </label>
+                <input
+                  type="date"
+                  value={cashForm.created_at ? cashForm.created_at.slice(0, 10) : todayLocal()}
+                  onChange={(e) => setCashForm({ ...cashForm, created_at: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                    background: '#fff'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ghi chú / Chứng từ liên quan:</label>
+                <textarea
+                  rows="3"
+                  placeholder="Nhập nội dung giải trình..."
+                  value={cashForm.note}
+                  onChange={(e) => setCashForm({ ...cashForm, note: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button onClick={() => setShowCashModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+                <button
+                  onClick={async () => {
+                    if (!cashForm.amount || Number(cashForm.amount) <= 0) {
+                      alert('Vui lòng nhập số tiền hợp lệ!');
+                      return;
+                    }
+                    try {
+                      await api(editingCashId ? `/api/cash-book/${editingCashId}` : '/api/cash-book', {
+                        method: editingCashId ? 'PUT' : 'POST',
+                        body: JSON.stringify(cashForm)
+                      });
+                      setShowCashModal(false);
+                      setEditingCashId(null);
+                      setCashForm(newCashForm());
+                      loadCashBook();
+                    } catch (err) {
+                      alert('Lỗi: ' + err.message);
+                    }
+                  }}
+                  style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  {editingCashId ? 'Cập nhật giao dịch' : 'Lưu giao dịch'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP TẠO / SỬA PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
+        {showOrderModal && (
+          <div style={{ ...overlayStyle, zIndex: 900 }}>
+            <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed' }}>
+                  {modalOrderType === 'invoices'
+                    ? (editingInvoiceId ? '✏️ Sửa Phiếu Bán Hàng' : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
+                    : (editingOrderId ? '✏️ Sửa Đơn Đặt Hàng' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)')}
+                </h3>
+                <button onClick={() => { setShowOrderModal(false); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); }} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', flex: 1, overflowY: 'auto' }}>
+                {/* ===== Cột trái: chọn sản phẩm ===== */}
+                <div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                    <input
+                      placeholder="Gõ mã hoặc tên sản phẩm..."
+                      value={posProductKeyword}
+                      onChange={(e) => setPosProductKeyword(e.target.value)}
+                      style={{ ...inputStyle, margin: 0 }}
+                    />
+                    <button
+                      onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
+                      title="Thêm sản phẩm mới"
+                      style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >+</button>
+                  </div>
+                  <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                    {filteredPosProducts.map((p) => {
+                      const isOutOfStock = p.stock <= 0;
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => add(p)}
+                          style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isOutOfStock ? '#fffbeb' : '#fff' }}
+                        >
+                          <div>
+                            <strong style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</strong><br />
+                            <small style={{ color: isOutOfStock ? '#dc2626' : '#64748b' }}>
+                              {isOutOfStock ? (modalOrderType === 'invoices' ? 'Hết hàng' : 'Hết (Cho phép đặt)') : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
+                            </small>
+                          </div>
+                          <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(p.price)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ===== Cột phải: thông tin đơn + giỏ hàng ===== */}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+
+                  {modalOrderType === 'invoices' && (
+                    <div style={{ marginBottom: '10px', background: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
+                      <select
+                        onChange={(e) => handleSelectOrderToInvoice(e.target.value)}
+                        style={{ ...inputStyle, margin: '4px 0 0 0' }}
+                      >
+                        <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
+                        {ordersList.map(o => (
+                          <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={labelStyle}>Ngày tạo:</label>
+                    <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} style={inputStyle} />
+                  </div>
+
+                  <div style={{ marginBottom: '15px', position: 'relative' }}>
+                    <label style={labelStyle}>Khách hàng:</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        placeholder="Gõ tên, SĐT hoặc mã khách hàng..."
+                        value={customerSearch}
+                        onChange={(e) => {
+                          setCustomerSearch(e.target.value);
+                          setPosCustomer((c) => ({ ...c, name: e.target.value }));
+                          setShowCustomerDropdown(true);
+                        }}
+                        onFocus={() => setShowCustomerDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 150)}
+                        style={{ ...inputStyle, margin: 0, flex: 1 }}
+                      />
+                      <button
+                        onClick={() => { setEditingCustomer(null); setCustomerForm({ ...EMPTY_CUSTOMER, name: customerSearch }); setShowCustomerModal(true); }}
+                        title="Thêm khách hàng mới"
+                        style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }}
+                      >+</button>
+                    </div>
+                    {showCustomerDropdown && filteredPosCustomers.length > 0 && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 45, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '160px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                        {filteredPosCustomers.map((c) => (
+                          <div
+                            key={c.id}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '' });
+                              setCustomerSearch(c.name);
+                              setShowCustomerDropdown(false);
+                            }}
+                            style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                          >
+                            <b>{c.name}</b> - <span style={{ color: '#64748b' }}>{c.phone || 'Chưa có SĐT'} ({c.code})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                    <div>
+                      <label style={labelStyle}>Số điện thoại:</label>
+                      <input value={posCustomer.phone} onChange={(e) => setPosCustomer({ ...posCustomer, phone: e.target.value })} placeholder="SĐT khách hàng..." style={{ ...inputStyle, margin: 0 }} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Địa chỉ:</label>
+                      <input value={posCustomer.address} onChange={(e) => setPosCustomer({ ...posCustomer, address: e.target.value })} placeholder="Địa chỉ khách hàng..." style={{ ...inputStyle, margin: 0 }} />
+                    </div>
+                  </div>
+
+                  <h4 style={{ margin: '10px 0 5px 0' }}>Chi tiết đơn hàng</h4>
+                  <div style={{ flex: 1, minHeight: '140px', maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '15px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', textAlign: 'left', fontSize: '13px' }}>
+                          <th style={{ padding: '10px' }}>Sản phẩm</th>
+                          <th style={{ padding: '10px', width: '70px' }}>SL</th>
+                          <th style={{ padding: '10px' }}>Đơn giá</th>
+                          <th style={{ padding: '10px', width: '90px' }}>Giảm giá</th>
+                          <th style={{ padding: '10px' }}>Thành tiền</th>
+                          <th style={{ padding: '10px', width: '40px' }}>Xóa</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cartLines.length === 0 ? (
+                          <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có sản phẩm nào</td></tr>
+                        ) : (
+                          cartLines.map((l) => (
+                            <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
+                              <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ width: '90px', padding: '4px', fontWeight: 'bold', color: '#7c3aed' }} />
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ width: '70px', padding: '4px' }} />
+                              </td>
+                              <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd((l.price * l.quantity) - l.discount)}</td>
+                              <td style={{ padding: '10px' }}>
+                                <button onClick={() => setQty(l.id, 0)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
+                      <span>TỔNG CỘNG:</span>
+                      <span style={{ color: '#7c3aed' }}>{vnd(cartTotal)}</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'start' }}>
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#64748b' }}>Khách đã thanh toán:</label>
+                        <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ đơn này:</label>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: cartDebt > 0 ? '#dc2626' : '#16a34a', marginTop: '10px' }}>{vnd(cartDebt)}</div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#64748b' }}>Phương thức TT:</label>
+                        <select
+                          value={paymentMethod}
+                          onChange={(e) => { setPaymentMethod(e.target.value); if (e.target.value === 'Công nợ') setPaidAmount(0); }}
+                          style={{ ...inputStyle, margin: '2px 0 0 0' }}
+                        >
+                          <option value="Tiền mặt">💵 Tiền mặt</option>
+                          <option value="Chuyển khoản">🏦 Chuyển khoản</option>
+                          <option value="Công nợ">📒 Công nợ</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    disabled={busy || cartLines.length === 0}
+                    onClick={handlePosSubmit}
+                    style={{ width: '100%', padding: '14px', background: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '16px' }}
+                  >
+                    {modalOrderType === 'invoices'
+                      ? (editingInvoiceId ? 'CẬP NHẬT PHIẾU BÁN HÀNG' : 'XÁC NHẬN TẠO PHIẾU BÁN HÀNG')
+                      : (editingOrderId ? 'CẬP NHẬT ĐƠN ĐẶT HÀNG' : 'XÁC NHẬN TẠO ĐƠN ĐẶT HÀNG')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL THÊM / SỬA SẢN PHẨM */}
+        {showProductModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</h3>
+              <form onSubmit={handleSaveProduct}>
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={labelStyle}>Mã sản phẩm (SKU):</label>
+                  <input placeholder="VD: SKU001" value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} style={inputStyle} />
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={labelStyle}>Tên sản phẩm *:</label>
+                  <input placeholder="Nhập tên sản phẩm" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} style={inputStyle} required />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                  <div>
+                    <label style={labelStyle}>Đơn vị tính:</label>
+                    <input placeholder="Cái, Bộ, Chiếc..." value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Tồn kho:</label>
+                    <input type="number" value={productForm.stock} onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })} style={inputStyle} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '20px' }}>
+                  <div>
+                    <label style={labelStyle}>Giá nhập:</label>
+                    <input type="number" value={productForm.import_price} onChange={(e) => setProductForm({ ...productForm, import_price: e.target.value })} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Giá bán lẻ:</label>
+                    <input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Giá bán sỉ:</label>
+                    <input type="number" value={productForm.wholesale_price} onChange={(e) => setProductForm({ ...productForm, wholesale_price: e.target.value })} style={inputStyle} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button type="button" onClick={() => setShowProductModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
+                  <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu sản phẩm</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL IMPORT SẢN PHẨM */}
+        {showProductImportModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Sản phẩm</h3>
+              <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>SKU | Tên | ĐVT | Giá nhập | Giá lẻ | Giá sỉ | Tồn kho</code></p>
+              <textarea rows="8" placeholder={'SKU001\tẮc quy 48V\tBộ\t1500000\t1800000\t1700000\t10'} value={productImportText} onChange={(e) => setProductImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
+                <button onClick={() => setShowProductImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+                <button
+                  onClick={() => runImport({
+                    text: productImportText,
+                    endpoint: '/api/products/import',
+                    label: 'sản phẩm',
+                    close: setShowProductImportModal,
+                    mapRow: (c) => c.length >= 2 ? { sku: c[0], name: c[1], unit: c[2] || 'Cái', import_price: num(c[3]), price: num(c[4]), wholesale_price: num(c[5]), stock: num(c[6]) } : null,
+                  })}
+                  style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >Xác nhận</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL NHÀ CUNG CẤP */}
+        {showSupplierModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '20px', background: '#1e293b', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0 }}>{editingSupplier ? `Chi tiết: ${selectedSupplier?.name}` : 'Thêm nhà cung cấp mới'}</h3>
+                <button onClick={() => setShowSupplierModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              {editingSupplier ? (
+                <>
+                  <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                    <button onClick={() => setSupplierTab('info')} style={tabBtnStyle(supplierTab === 'info')}>1. Thông tin NCC</button>
+                    <button onClick={() => setSupplierTab('purchases')} style={tabBtnStyle(supplierTab === 'purchases')}>2. Lịch sử nhập hàng</button>
+                    <button onClick={() => setSupplierTab('payments')} style={tabBtnStyle(supplierTab === 'payments')}>3. Lịch sử thanh toán</button>
+                    <button onClick={() => setSupplierTab('returns')} style={tabBtnStyle(supplierTab === 'returns')}>4. Lịch sử trả hàng</button>
+                  </div>
+
+                  <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+                    {supplierTab === 'info' && (
+                      <form onSubmit={handleSaveSupplier}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                          <div><label>Mã NCC</label><input value={supplierForm.code || ''} onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} style={inputStyle} /></div>
+                          <div><label>Tên nhà cung cấp *</label><input value={supplierForm.name || ''} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required /></div>
+                          <div><label>Số điện thoại</label><input value={supplierForm.phone || ''} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} /></div>
+                          <div>
+                            <label>Trạng thái</label>
+                            <select value={supplierForm.status || 'active'} onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} style={inputStyle}>
+                              <option value="active">Hoạt động</option>
+                              <option value="inactive">Ngừng</option>
+                            </select>
+                          </div>
+                          <div style={{ gridColumn: 'span 2' }}><label>Địa chỉ</label><input value={supplierForm.address || ''} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} /></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                          <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Cập nhật</button>
+                          <button type="button" onClick={() => handleDeleteSupplier(selectedSupplier.id)} style={{ padding: '10px 20px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Xóa NCC</button>
+                        </div>
+                      </form>
+                    )}
+
+                    {supplierTab === 'purchases' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Mã phiếu</th><th style={{ padding: '8px' }}>Tổng tiền</th><th style={{ padding: '8px' }}>Ngày tạo</th></tr></thead>
+                        <tbody>{(supplierHistory.purchases || []).map((p) => (<tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>))}</tbody>
+                      </table>
+                    )}
+
+                    {supplierTab === 'payments' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Số tiền</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
+                        <tbody>{(supplierHistory.payments || []).map((pay) => (<tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>))}</tbody>
+                      </table>
+                    )}
+
+                    {supplierTab === 'returns' && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Tổng trả</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
+                        <tbody>{(supplierHistory.returns || []).map((ret) => (<tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>))}</tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <form onSubmit={handleSaveSupplier} style={{ padding: '20px' }}>
+                  <div style={{ marginBottom: '12px' }}><label>Mã NCC (tự sinh nếu trống):</label><input value={supplierForm.code} onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} style={inputStyle} /></div>
+                  <div style={{ marginBottom: '12px' }}><label>Tên nhà cung cấp *:</label><input value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required /></div>
+                  <div style={{ marginBottom: '12px' }}><label>Số điện thoại:</label><input value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} /></div>
+                  <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} /></div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button type="button" onClick={() => setShowSupplierModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
+                    <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu nhà cung cấp</button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* MODAL IMPORT NCC */}
+        {showImportModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
+              <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Nhà cung cấp</h3>
+              <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã NCC | Tên NCC | SĐT | Địa chỉ</code></p>
+              <textarea rows="8" placeholder={'NCC01\tCông ty A\t0901234567\tQuận 1'} value={importText} onChange={(e) => setImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
+                <button onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+                <button
+                  onClick={async () => {
+                    if (!importText.trim()) {
+                      alert('Vui lòng dán dữ liệu vào ô trống!');
+                      return;
+                    }
+                    const rows = importText.split(/\r?\n/).filter(r => r.trim() !== '');
+                    const items = rows.map(row => {
+                      const cols = row.split(/\t|,/).map(c => c.trim());
+                      return {
+                        code: cols[0] || '',
+                        name: cols[1] || '',
+                        phone: cols[2] || '',
+                        address: cols.slice(3).join(', ') || '',
+                        status: 'active'
+                      };
+                    }).filter(i => i.name !== '');
+
+                    if (items.length === 0) {
+                      alert('Không có dữ liệu hợp lệ!');
+                      return;
+                    }
+
+                    try {
+                      const res = await api('/api/suppliers/import', {
+                        method: 'POST',
+                        body: JSON.stringify({ items })
+                      });
+
+                      if (res && res.success) {
+                        alert(`Nhập thành công ${res.successCount || items.length} nhà cung cấp! (Lỗi: ${res.errorCount || 0})`);
+                        setShowImportModal(false);
+                        setImportText('');
+                        loadData();
+                      } else {
+                        alert('Nhập khẩu không thành công.');
+                      }
+                    } catch (err) {
+                      alert('Lỗi: ' + err.message);
+                    }
+                  }}
+                  style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >Xác nhận</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL THÊM / SỬA KHÁCH HÀNG */}
+        {showCustomerModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px' }}>
+              <h3 style={{ marginTop: 0 }}>{editingCustomer ? 'Chỉnh sửa khách hàng' : 'Thêm khách hàng mới'}</h3>
+              <form onSubmit={handleSaveCustomer}>
+                <div style={{ marginBottom: '10px' }}><label>Mã KH (tự sinh nếu trống):</label><input value={customerForm.code} onChange={(e) => setCustomerForm({ ...customerForm, code: e.target.value })} style={inputStyle} /></div>
+                <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} style={inputStyle} required /></div>
+                <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} style={inputStyle} /></div>
+                <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} style={inputStyle} /></div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button type="button" onClick={() => setShowCustomerModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
+                  <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL IMPORT KHÁCH HÀNG */}
+        {showCustomerImportModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
+              <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Khách hàng</h3>
+              <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã KH | Tên KH | SĐT | Địa chỉ</code></p>
+              <textarea rows="8" placeholder={'KH01\tNguyễn Văn A\t0901234567\tQuận 1'} value={customerImportText} onChange={(e) => setCustomerImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
+                <button onClick={() => setShowCustomerImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
+                <button
+                  onClick={() => runImport({
+                    text: customerImportText,
+                    endpoint: '/api/customers/import',
+                    label: 'khách hàng',
+                    close: setShowCustomerImportModal,
+                    mapRow: (c) => c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null,
+                  })}
+                  style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >Xác nhận</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP THỐNG KÊ CHI TIẾT KHÁCH HÀNG (2 TAB) */}
+        {showCustomerDetailModal && selectedCustomerDetail && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#7c3aed' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
+                <button onClick={() => setShowCustomerDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '20px' }}>
+                <button onClick={() => setCustomerDetailTab('orders')} style={tabBtnStyle(customerDetailTab === 'orders')}>📦 Đơn Hàng</button>
+                <button onClick={() => setCustomerDetailTab('payments')} style={tabBtnStyle(customerDetailTab === 'payments')}>💰 Lịch Sử Thanh Toán</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{customerDetailData.invoices.length}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#16a34a' }}>{vnd(selectedCustomerDetail.total_purchased)}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Tổng chi tiêu</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(selectedCustomerDetail.total_paid)}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Đã thanh toán</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: selectedCustomerDetail.total_debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedCustomerDetail.total_debt)}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ</div>
+                </div>
+              </div>
+
+              {customerDetailTab === 'orders' && (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <h4>Danh sách đơn hàng</h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>Mã ĐH</th>
+                        <th style={{ padding: '10px' }}>Ngày</th>
+                        <th style={{ padding: '10px' }}>Tổng tiền</th>
+                        <th style={{ padding: '10px' }}>Đã TT</th>
+                        <th style={{ padding: '10px' }}>Còn nợ</th>
+                        <th style={{ padding: '10px' }}>Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerDetailData.invoices.length === 0 ? (
+                        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
+                      ) : (
+                        customerDetailData.invoices.map((inv) => (
+                          <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
+                            <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                            <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
+                            <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount ?? 0)}</td>
+                            <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt ?? 0)}</td>
+                            <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span></td>
                           </tr>
                         ))
                       )}
                     </tbody>
                   </table>
                 </div>
+              )}
 
-                <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '10px' }}>
-                    <span>TỔNG CỘNG:</span>
-                    <span style={{ color: '#7c3aed' }}>{vnd(cartTotal)}</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'start' }}>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Khách đã thanh toán:</label>
-                      <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ đơn này:</label>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: cartDebt > 0 ? '#dc2626' : '#16a34a', marginTop: '10px' }}>{vnd(cartDebt)}</div>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '12px', color: '#64748b' }}>Phương thức TT:</label>
-                      <select
-                        value={paymentMethod}
-                        onChange={(e) => { setPaymentMethod(e.target.value); if (e.target.value === 'Công nợ') setPaidAmount(0); }}
-                        style={{ ...inputStyle, margin: '2px 0 0 0' }}
-                      >
-                        <option value="Tiền mặt">💵 Tiền mặt</option>
-                        <option value="Chuyển khoản">🏦 Chuyển khoản</option>
-                        <option value="Công nợ">📒 Công nợ</option>
-                      </select>
-                    </div>
-                  </div>
+              {customerDetailTab === 'payments' && (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <h4>Lịch sử giao dịch thanh toán</h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>Mã GD</th>
+                        <th style={{ padding: '10px' }}>Ngày</th>
+                        <th style={{ padding: '10px' }}>Số tiền</th>
+                        <th style={{ padding: '10px' }}>Phương thức</th>
+                        <th style={{ padding: '10px' }}>Nội dung</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerDetailData.payments.length === 0 ? (
+                        <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
+                      ) : (
+                        customerDetailData.payments.map((pay) => (
+                          <tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                            <td style={{ padding: '10px', fontWeight: 'bold' }}>{pay.code || `GD-${pay.id}`}</td>
+                            <td style={{ padding: '10px' }}>{pay.created_at ? new Date(pay.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(pay.amount)}</td>
+                            <td style={{ padding: '10px' }}>{pay.method || 'Tiền mặt'}</td>
+                            <td style={{ padding: '10px' }}>{pay.note || 'Thanh toán đơn hàng'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
+              )}
 
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                <button onClick={() => setShowCustomerDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP XEM CHI TIẾT GIAO DỊCH THU CHI */}
+        {selectedCashItem && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+                <h3 style={{ margin: 0, color: '#0f172a' }}>Chi Tiết Giao Dịch</h3>
                 <button
-                  disabled={busy || cartLines.length === 0}
-                  onClick={handlePosSubmit}
-                  style={{ width: '100%', padding: '14px', background: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '16px' }}
+                  onClick={() => setSelectedCashItem(null)}
+                  style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#64748b' }}
                 >
-                  {modalOrderType === 'invoices'
-                    ? (editingInvoiceId ? 'CẬP NHẬT PHIẾU BÁN HÀNG' : 'XÁC NHẬN TẠO PHIẾU BÁN HÀNG')
-                    : (editingOrderId ? 'CẬP NHẬT ĐƠN ĐẶT HÀNG' : 'XÁC NHẬN TẠO ĐƠN ĐẶT HÀNG')}
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px', color: '#334155' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Mã Giao Dịch:</span>
+                  <strong style={{ color: '#7c3aed' }}>{selectedCashItem.code}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Loại Giao Dịch:</span>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold',
+                    background: selectedCashItem.type === 'IN' ? '#dcfce7' : '#fee2e2',
+                    color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626'
+                  }}>
+                    {selectedCashItem.type === 'IN' ? 'Phiếu Thu' : 'Phiếu Chi'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Số Tiền:</span>
+                  <strong style={{ fontSize: '16px', color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                    {selectedCashItem.type === 'IN' ? '+' : '-'}{vnd(selectedCashItem.amount)}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Danh Mục:</span>
+                  <strong>{selectedCashItem.category}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Phương Thức Thanh Toán:</span>
+                  <span>{selectedCashItem.payment_method}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Chứng Từ Liên Quan:</span>
+                  <span style={{ color: '#2563eb', fontWeight: '500' }}>{selectedCashItem.reference_code || 'Không có'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Ngày Tạo:</span>
+                  <span>{selectedCashItem.created_at}</span>
+                </div>
+                <div style={{ marginTop: '5px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <span style={{ color: '#64748b', display: 'block', marginBottom: '4px', fontSize: '12px' }}>Ghi chú:</span>
+                  <span style={{ fontStyle: 'italic', color: '#475569' }}>{selectedCashItem.note || 'Không có ghi chú'}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                <button
+                  onClick={() => setSelectedCashItem(null)}
+                  style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Đóng
                 </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* MODAL THÊM / SỬA SẢN PHẨM */}
-      {showProductModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</h3>
-            <form onSubmit={handleSaveProduct}>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={labelStyle}>Mã sản phẩm (SKU):</label>
-                <input placeholder="VD: SKU001" value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} style={inputStyle} />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={labelStyle}>Tên sản phẩm *:</label>
-                <input placeholder="Nhập tên sản phẩm" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} style={inputStyle} required />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                <div>
-                  <label style={labelStyle}>Đơn vị tính:</label>
-                  <input placeholder="Cái, Bộ, Chiếc..." value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Tồn kho:</label>
-                  <input type="number" value={productForm.stock} onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })} style={inputStyle} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '20px' }}>
-                <div>
-                  <label style={labelStyle}>Giá nhập:</label>
-                  <input type="number" value={productForm.import_price} onChange={(e) => setProductForm({ ...productForm, import_price: e.target.value })} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Giá bán lẻ:</label>
-                  <input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Giá bán sỉ:</label>
-                  <input type="number" value={productForm.wholesale_price} onChange={(e) => setProductForm({ ...productForm, wholesale_price: e.target.value })} style={inputStyle} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button type="button" onClick={() => setShowProductModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
-                <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu sản phẩm</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL IMPORT SẢN PHẨM */}
-      {showProductImportModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Nhập khẩu danh sách Sản phẩm</h3>
-            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>SKU | Tên | ĐVT | Giá nhập | Giá lẻ | Giá sỉ | Tồn kho</code></p>
-            <textarea rows="8" placeholder={'SKU001\tẮc quy 48V\tBộ\t1500000\t1800000\t1700000\t10'} value={productImportText} onChange={(e) => setProductImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
-              <button onClick={() => setShowProductImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button
-                onClick={() => runImport({
-                  text: productImportText,
-                  endpoint: '/api/products/import',
-                  label: 'sản phẩm',
-                  close: setShowProductImportModal,
-                  mapRow: (c) => c.length >= 2 ? { sku: c[0], name: c[1], unit: c[2] || 'Cái', import_price: num(c[3]), price: num(c[4]), wholesale_price: num(c[5]), stock: num(c[6]) } : null,
-                })}
-                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >Xác nhận</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL NHÀ CUNG CẤP */}
-      {showSupplierModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '20px', background: '#1e293b', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>{editingSupplier ? `Chi tiết: ${selectedSupplier?.name}` : 'Thêm nhà cung cấp mới'}</h3>
-              <button onClick={() => setShowSupplierModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            {editingSupplier ? (
-              <>
-                <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
-                  <button onClick={() => setSupplierTab('info')} style={tabBtnStyle(supplierTab === 'info')}>1. Thông tin NCC</button>
-                  <button onClick={() => setSupplierTab('purchases')} style={tabBtnStyle(supplierTab === 'purchases')}>2. Lịch sử nhập hàng</button>
-                  <button onClick={() => setSupplierTab('payments')} style={tabBtnStyle(supplierTab === 'payments')}>3. Lịch sử thanh toán</button>
-                  <button onClick={() => setSupplierTab('returns')} style={tabBtnStyle(supplierTab === 'returns')}>4. Lịch sử trả hàng</button>
-                </div>
-
-                <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
-                  {supplierTab === 'info' && (
-                    <form onSubmit={handleSaveSupplier}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                        <div><label>Mã NCC</label><input value={supplierForm.code || ''} onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} style={inputStyle} /></div>
-                        <div><label>Tên nhà cung cấp *</label><input value={supplierForm.name || ''} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required /></div>
-                        <div><label>Số điện thoại</label><input value={supplierForm.phone || ''} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} /></div>
-                        <div>
-                          <label>Trạng thái</label>
-                          <select value={supplierForm.status || 'active'} onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })} style={inputStyle}>
-                            <option value="active">Hoạt động</option>
-                            <option value="inactive">Ngừng</option>
-                          </select>
-                        </div>
-                        <div style={{ gridColumn: 'span 2' }}><label>Địa chỉ</label><input value={supplierForm.address || ''} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} /></div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                        <button type="submit" style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Cập nhật</button>
-                        <button type="button" onClick={() => handleDeleteSupplier(selectedSupplier.id)} style={{ padding: '10px 20px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Xóa NCC</button>
-                      </div>
-                    </form>
-                  )}
-
-                  {supplierTab === 'purchases' && (
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Mã phiếu</th><th style={{ padding: '8px' }}>Tổng tiền</th><th style={{ padding: '8px' }}>Ngày tạo</th></tr></thead>
-                      <tbody>{(supplierHistory.purchases || []).map((p) => (<tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>))}</tbody>
-                    </table>
-                  )}
-
-                  {supplierTab === 'payments' && (
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Số tiền</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                      <tbody>{(supplierHistory.payments || []).map((pay) => (<tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>))}</tbody>
-                    </table>
-                  )}
-
-                  {supplierTab === 'returns' && (
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Tổng trả</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                      <tbody>{(supplierHistory.returns || []).map((ret) => (<tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>))}</tbody>
-                    </table>
-                  )}
-                </div>
-              </>
-            ) : (
-              <form onSubmit={handleSaveSupplier} style={{ padding: '20px' }}>
-                <div style={{ marginBottom: '12px' }}><label>Mã NCC (tự sinh nếu trống):</label><input value={supplierForm.code} onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} style={inputStyle} /></div>
-                <div style={{ marginBottom: '12px' }}><label>Tên nhà cung cấp *:</label><input value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} style={inputStyle} required /></div>
-                <div style={{ marginBottom: '12px' }}><label>Số điện thoại:</label><input value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} style={inputStyle} /></div>
-                <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} style={inputStyle} /></div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button type="button" onClick={() => setShowSupplierModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
-                  <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu nhà cung cấp</button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODAL IMPORT NCC */}
-      {showImportModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
-            <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Nhà cung cấp</h3>
-            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã NCC | Tên NCC | SĐT | Địa chỉ</code></p>
-            <textarea rows="8" placeholder={'NCC01\tCông ty A\t0901234567\tQuận 1'} value={importText} onChange={(e) => setImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
-              <button onClick={() => setShowImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button
-                onClick={async () => {
-                  if (!importText.trim()) {
-                    alert('Vui lòng dán dữ liệu vào ô trống!');
-                    return;
-                  }
-                  const rows = importText.split(/\r?\n/).filter(r => r.trim() !== '');
-                  const items = rows.map(row => {
-                    const cols = row.split(/\t|,/).map(c => c.trim());
-                    return {
-                      code: cols[0] || '',
-                      name: cols[1] || '',
-                      phone: cols[2] || '',
-                      address: cols.slice(3).join(', ') || '',
-                      status: 'active'
-                    };
-                  }).filter(i => i.name !== '');
-
-                  if (items.length === 0) {
-                    alert('Không có dữ liệu hợp lệ!');
-                    return;
-                  }
-
-                  try {
-                    const res = await api('/api/suppliers/import', {
-                      method: 'POST',
-                      body: JSON.stringify({ items })
-                    });
-
-                    if (res && res.success) {
-                      alert(`Nhập thành công ${res.successCount || items.length} nhà cung cấp! (Lỗi: ${res.errorCount || 0})`);
-                      setShowImportModal(false);
-                      setImportText('');
-                      loadData();
-                    } else {
-                      alert('Nhập khẩu không thành công.');
-                    }
-                  } catch (err) {
-                    alert('Lỗi: ' + err.message);
-                  }
-                }}
-                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >Xác nhận</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL THÊM / SỬA KHÁCH HÀNG */}
-      {showCustomerModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '10px', width: '500px' }}>
-            <h3 style={{ marginTop: 0 }}>{editingCustomer ? 'Chỉnh sửa khách hàng' : 'Thêm khách hàng mới'}</h3>
-            <form onSubmit={handleSaveCustomer}>
-              <div style={{ marginBottom: '10px' }}><label>Mã KH (tự sinh nếu trống):</label><input value={customerForm.code} onChange={(e) => setCustomerForm({ ...customerForm, code: e.target.value })} style={inputStyle} /></div>
-              <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} style={inputStyle} required /></div>
-              <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} style={inputStyle} /></div>
-              <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} style={inputStyle} /></div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button type="button" onClick={() => setShowCustomerModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
-                <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL IMPORT KHÁCH HÀNG */}
-      {showCustomerImportModal && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '600px' }}>
-            <h3 style={{ marginTop: 0 }}>Nhập khẩu danh sách Khách hàng</h3>
-            <p style={{ fontSize: '13px', color: '#64748b' }}>Copy từ Excel dán vào theo thứ tự: <code style={{ background: '#f1f5f9', padding: '2px 4px' }}>Mã KH | Tên KH | SĐT | Địa chỉ</code></p>
-            <textarea rows="8" placeholder={'KH01\tNguyễn Văn A\t0901234567\tQuận 1'} value={customerImportText} onChange={(e) => setCustomerImportText(e.target.value)} style={{ width: '100%', padding: '10px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '15px' }}>
-              <button onClick={() => setShowCustomerImportModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
-              <button
-                onClick={() => runImport({
-                  text: customerImportText,
-                  endpoint: '/api/customers/import',
-                  label: 'khách hàng',
-                  close: setShowCustomerImportModal,
-                  mapRow: (c) => c.length >= 2 ? { code: c[0], name: c[1], phone: c[2] || '', address: c.slice(3).join(', ') } : null,
-                })}
-                style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >Xác nhận</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP THỐNG KÊ CHI TIẾT KHÁCH HÀNG (2 TAB) */}
-      {showCustomerDetailModal && selectedCustomerDetail && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#7c3aed' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
-              <button onClick={() => setShowCustomerDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '20px' }}>
-              <button onClick={() => setCustomerDetailTab('orders')} style={tabBtnStyle(customerDetailTab === 'orders')}>📦 Đơn Hàng</button>
-              <button onClick={() => setCustomerDetailTab('payments')} style={tabBtnStyle(customerDetailTab === 'payments')}>💰 Lịch Sử Thanh Toán</button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
-              <div style={statBoxStyle}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{customerDetailData.invoices.length}</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
-              </div>
-              <div style={statBoxStyle}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#16a34a' }}>{vnd(selectedCustomerDetail.total_purchased)}</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Tổng chi tiêu</div>
-              </div>
-              <div style={statBoxStyle}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(selectedCustomerDetail.total_paid)}</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Đã thanh toán</div>
-              </div>
-              <div style={statBoxStyle}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: selectedCustomerDetail.total_debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(selectedCustomerDetail.total_debt)}</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ</div>
-              </div>
-            </div>
-
-            {customerDetailTab === 'orders' && (
-              <div style={{ flex: 1, overflowY: 'auto' }}>
-                <h4>Danh sách đơn hàng</h4>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                      <th style={{ padding: '10px' }}>Mã ĐH</th>
-                      <th style={{ padding: '10px' }}>Ngày</th>
-                      <th style={{ padding: '10px' }}>Tổng tiền</th>
-                      <th style={{ padding: '10px' }}>Đã TT</th>
-                      <th style={{ padding: '10px' }}>Còn nợ</th>
-                      <th style={{ padding: '10px' }}>Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customerDetailData.invoices.length === 0 ? (
-                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
-                    ) : (
-                      customerDetailData.invoices.map((inv) => (
-                        <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
-                          <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
-                          <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
-                          <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount ?? 0)}</td>
-                          <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt ?? 0)}</td>
-                          <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span></td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {customerDetailTab === 'payments' && (
-              <div style={{ flex: 1, overflowY: 'auto' }}>
-                <h4>Lịch sử giao dịch thanh toán</h4>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                      <th style={{ padding: '10px' }}>Mã GD</th>
-                      <th style={{ padding: '10px' }}>Ngày</th>
-                      <th style={{ padding: '10px' }}>Số tiền</th>
-                      <th style={{ padding: '10px' }}>Phương thức</th>
-                      <th style={{ padding: '10px' }}>Nội dung</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customerDetailData.payments.length === 0 ? (
-                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
-                    ) : (
-                      customerDetailData.payments.map((pay) => (
-                        <tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                          <td style={{ padding: '10px', fontWeight: 'bold' }}>{pay.code || `GD-${pay.id}`}</td>
-                          <td style={{ padding: '10px' }}>{pay.created_at ? new Date(pay.created_at).toLocaleDateString('vi-VN') : '---'}</td>
-                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(pay.amount)}</td>
-                          <td style={{ padding: '10px' }}>{pay.method || 'Tiền mặt'}</td>
-                          <td style={{ padding: '10px' }}>{pay.note || 'Thanh toán đơn hàng'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button onClick={() => setShowCustomerDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POPUP XEM CHI TIẾT GIAO DỊCH THU CHI */}
-      {selectedCashItem && (
-        <div style={overlayStyle}>
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-              <h3 style={{ margin: 0, color: '#0f172a' }}>Chi Tiết Giao Dịch</h3>
-              <button
-                onClick={() => setSelectedCashItem(null)}
-                style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px', color: '#334155' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Mã Giao Dịch:</span>
-                <strong style={{ color: '#7c3aed' }}>{selectedCashItem.code}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Loại Giao Dịch:</span>
-                <span style={{
-                  padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold',
-                  background: selectedCashItem.type === 'IN' ? '#dcfce7' : '#fee2e2',
-                  color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626'
-                }}>
-                  {selectedCashItem.type === 'IN' ? 'Phiếu Thu' : 'Phiếu Chi'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Số Tiền:</span>
-                <strong style={{ fontSize: '16px', color: selectedCashItem.type === 'IN' ? '#16a34a' : '#dc2626' }}>
-                  {selectedCashItem.type === 'IN' ? '+' : '-'}{vnd(selectedCashItem.amount)}
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Danh Mục:</span>
-                <strong>{selectedCashItem.category}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Phương Thức Thanh Toán:</span>
-                <span>{selectedCashItem.payment_method}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Chứng Từ Liên Quan:</span>
-                <span style={{ color: '#2563eb', fontWeight: '500' }}>{selectedCashItem.reference_code || 'Không có'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b' }}>Ngày Tạo:</span>
-                <span>{selectedCashItem.created_at}</span>
-              </div>
-              <div style={{ marginTop: '5px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '4px', fontSize: '12px' }}>Ghi chú:</span>
-                <span style={{ fontStyle: 'italic', color: '#475569' }}>{selectedCashItem.note || 'Không có ghi chú'}</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button
-                onClick={() => setSelectedCashItem(null)}
-                style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      </main>
     </div>
-  )
+  );
 }
 
 // ===== Styles dùng chung =====
