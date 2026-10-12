@@ -988,7 +988,7 @@ export default {
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
           const itemsRes = await db.prepare(`
-            SELECT ii.quantity, p.cost_price 
+            SELECT ii.quantity, p.cost as cost_price 
             FROM invoice_items ii
             LEFT JOIN products p ON ii.product_id = p.id
             WHERE ii.invoice_id IN (${placeholders})
