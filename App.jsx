@@ -77,6 +77,48 @@ function AppMain() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
 
+  const [returnOrdersData, setReturnOrdersData] = useState({ list: [], stats: { total: 0, pending: 0, completed: 0, totalRefund: 0 } });
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnForm, setReturnForm] = useState({
+    customer_name: '',
+    invoice_code: '',
+    return_date: new Date().toISOString().slice(0, 10),
+    reason: 'Sản phẩm lỗi',
+    refund_amount: 0,
+    status: 'Hoàn Thành (Cộng kho & trừ nợ)',
+    items: []
+  });
+
+  const loadReturnOrders = async () => {
+    try {
+      const res = await api('/api/return-orders');
+      if (res && res.success) {
+        setReturnOrdersData(res.data);
+      }
+    } catch (err) {
+      console.error('Lỗi tải danh sách trả hàng:', err);
+    }
+  };
+
+  const handleCreateReturnOrder = async () => {
+    try {
+      const res = await api('/api/return-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(returnForm)
+      });
+      if (res && res.success) {
+        alert('Tạo phiếu trả hàng thành công!');
+        setShowReturnModal(false);
+        loadReturnOrders();
+      } else {
+        alert('Có lỗi xảy ra khi tạo phiếu trả.');
+      }
+    } catch (err) {
+      console.error('Lỗi tạo phiếu trả:', err);
+    }
+  };
+
   // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
   const [showProductImportModal, setShowProductImportModal] = useState(false);
@@ -1008,6 +1050,29 @@ const loadProfitLossReport = async () => {
         <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
         <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>Tạo đơn hàng</button></li>
+          <li><button 
+  onClick={() => {
+    setCurrentView('return-orders');
+    loadReturnOrders();
+  }}
+  style={{
+    width: '100%',
+    padding: '12px 15px',
+    textAlign: 'left',
+    background: currentView === 'return-orders' ? '#7c3aed' : 'transparent',
+    color: currentView === 'return-orders' ? '#fff' : '#334155',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '500',
+    marginBottom: '5px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px'
+  }}
+>
+  📦 Trả Hàng Bán
+</button></li>
           <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>Sản phẩm</button></li>
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
@@ -1322,6 +1387,196 @@ const loadProfitLossReport = async () => {
           </div>
         )}
 
+        {currentView === 'return-orders' && (
+  <div style={{ flex: 1, padding: '24px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+    
+    {/* Header & Nút Tạo Phiếu */}
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <h2 style={{ margin: 0, color: '#1e293b', fontSize: '24px' }}>Quản Lý Trả Hàng</h2>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={loadReturnOrders} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          🔄 Làm mới
+        </button>
+        <button 
+          onClick={() => {
+            setReturnForm({ customer_name: '', invoice_code: '', return_date: new Date().toISOString().slice(0, 10), reason: 'Sản phẩm lỗi', refund_amount: 0, status: 'Hoàn Thành (Cộng kho & trừ nợ)', items: [] });
+            setShowReturnModal(true);
+          }} 
+          style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          + Tạo Phiếu Trả Hàng
+        </button>
+      </div>
+    </div>
+
+    {/* Các thẻ Thống kê tổng quan */}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div>
+        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{returnOrdersData.stats.total}</div>
+      </div>
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đang chờ xử lý</div>
+        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#d97706' }}>{returnOrdersData.stats.pending}</div>
+      </div>
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đã hoàn thành</div>
+        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{returnOrdersData.stats.completed}</div>
+      </div>
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền hoàn</div>
+        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(returnOrdersData.stats.totalRefund)}</div>
+      </div>
+    </div>
+
+    {/* Bảng Danh Sách Phiếu Trả Hàng */}
+    <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+        <thead>
+          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+            <th style={{ padding: '14px' }}>MÃ PHIẾU</th>
+            <th style={{ padding: '14px' }}>MÃ ĐƠN GỐC</th>
+            <th style={{ padding: '14px' }}>KHÁCH HÀNG</th>
+            <th style={{ padding: '14px' }}>NGÀY TRẢ</th>
+            <th style={{ padding: '14px', textAlign: 'right' }}>TỔNG TIỀN</th>
+            <th style={{ padding: '14px', textAlign: 'right' }}>TIỀN HOÀN</th>
+            <th style={{ padding: '14px' }}>LÝ DO</th>
+            <th style={{ padding: '14px' }}>TRẠNG THÁI</th>
+            <th style={{ padding: '14px', textAlign: 'center' }}>THAO TÁC</th>
+          </tr>
+        </thead>
+        <tbody>
+          {returnOrdersData.list.length === 0 ? (
+            <tr>
+              <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nào.</td>
+            </tr>
+          ) : (
+            returnOrdersData.list.map((item, index) => (
+              <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '14px', fontWeight: 'bold', color: '#0284c7' }}>{item.code}</td>
+                <td style={{ padding: '14px', color: '#475569' }}>{item.invoice_code || '-'}</td>
+                <td style={{ padding: '14px', fontWeight: '500' }}>{item.customer_name}</td>
+                <td style={{ padding: '14px' }}>{item.return_date ? item.return_date.slice(0, 10) : ''}</td>
+                <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.refund_amount)}</td>
+                <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
+                <td style={{ padding: '14px' }}>{item.reason}</td>
+                <td style={{ padding: '14px' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '20px', background: '#dcfce7', color: '#16a34a', fontWeight: '500', fontSize: '12px' }}>
+                    {item.status}
+                  </span>
+                </td>
+                <td style={{ padding: '14px', textAlign: 'center' }}>
+                  <button title="Xem" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
+                  <button title="Sửa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
+                  <button title="Xóa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    {/* POPUP TẠO PHIẾU TRẢ HÀNG (Hình 2) */}
+    {showReturnModal && (
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
+            <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng (Khách Trả Lại)</h3>
+            <button onClick={() => setShowReturnModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Khách hàng:</label>
+              <input 
+                type="text" 
+                placeholder="Nhập tên khách hàng" 
+                value={returnForm.customer_name} 
+                onChange={e => setReturnForm({...returnForm, customer_name: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Chọn phiếu bán gốc:</label>
+              <input 
+                type="text" 
+                placeholder="Mã đơn gốc (VD: BH-...)" 
+                value={returnForm.invoice_code} 
+                onChange={e => setReturnForm({...returnForm, invoice_code: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Ngày trả:</label>
+              <input 
+                type="date" 
+                value={returnForm.return_date} 
+                onChange={e => setReturnForm({...returnForm, return_date: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Lý do trả:</label>
+              <select 
+                value={returnForm.reason} 
+                onChange={e => setReturnForm({...returnForm, reason: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+              >
+                <option value="Sản phẩm lỗi">Sản phẩm lỗi</option>
+                <option value="Đổi ý">Đổi ý</option>
+                <option value="Lý do khác">Lý do khác</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Số tiền hoàn trả khách:</label>
+              <input 
+                type="number" 
+                placeholder="0" 
+                value={returnForm.refund_amount} 
+                onChange={e => setReturnForm({...returnForm, refund_amount: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Trạng thái xử lý:</label>
+              <select 
+                value={returnForm.status} 
+                onChange={e => setReturnForm({...returnForm, status: e.target.value})}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
+              >
+                <option value="Hoàn Thành (Cộng kho & trừ nợ)">Hoàn Thành (Cộng kho & trừ nợ)</option>
+                <option value="Đang xử lý">Đang xử lý</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '20px', marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <button 
+              onClick={() => setShowReturnModal(false)}
+              style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Hủy
+            </button>
+            <button 
+              onClick={handleCreateReturnOrder}
+              style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Tạo Phiếu Trả
+            </button>
+          </div>
+
+        </div>
+      </div>
+    )}
+
+  </div>
+)}
+        
         {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
         {currentView === 'products' && (
           <div style={cardStyle}>
