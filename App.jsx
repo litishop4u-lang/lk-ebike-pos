@@ -200,7 +200,7 @@ function AppMain() {
         start = reportStartDate || '2025-01-01';
         end = reportEndDate || '2030-12-31';
       }
-
+  
       // Gọi API với ngày tháng chuẩn dạng YYYY-MM-DD
       const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
 
@@ -238,6 +238,29 @@ function AppMain() {
       loadInventoryReport();
     }
   }, [currentView]);
+
+    const [plReport, setPlReport] = useState({
+  grossRevenue: 0,
+  totalDiscount: 0,
+  netRevenue: 0,
+  cogs: 0,
+  grossProfit: 0,
+  expenses: { shipping: 0, tax: 0, salary: 0, other: 0, total: 0 },
+  netProfit: 0
+});
+const [plStartDate, setPlStartDate] = useState(new Date().toISOString().slice(0, 8) + '01'); // Đầu tháng
+const [plEndDate, setPlEndDate] = useState(new Date().toISOString().slice(0, 10)); // Hôm nay
+
+const loadProfitLossReport = async () => {
+  try {
+    const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
+    if (res && res.success) {
+      setPlReport(res.data);
+    }
+  } catch (err) {
+    console.error('Lỗi tải báo cáo KQKD:', err);
+  }
+};
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
@@ -1793,6 +1816,83 @@ function AppMain() {
             </button>
           </div>
         )}
+
+            {currentView === 'profit-loss-report' && (
+  <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <h2>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <span>Từ ngày:</span>
+        <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+        <span>Đến ngày:</span>
+        <input type="date" value={plEndDate} onChange={e => setPlEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+        <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
+      </div>
+    </div>
+
+    <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '800px', margin: '0 auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+            <th style={{ textAlign: 'left', padding: '12px' }}>Chỉ tiêu</th>
+            <th style={{ textAlign: 'right', padding: '12px' }}>Thành tiền (VNĐ)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
+            <td style={{ padding: '12px' }}>1. Doanh thu bán hàng</td>
+            <td style={{ textAlign: 'right', padding: '12px', color: '#2563eb' }}>{vnd(plReport.grossRevenue)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+            <td style={{ padding: '12px', paddingLeft: '25px' }}>- Các khoản giảm trừ (Giảm giá / Trả lại)</td>
+            <td style={{ textAlign: 'right', padding: '12px' }}>{vnd(plReport.totalDiscount)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold', background: '#f8fafc' }}>
+            <td style={{ padding: '12px' }}>2. Doanh thu thuần (Net Revenue)</td>
+            <td style={{ textAlign: 'right', padding: '12px', color: '#0284c7' }}>{vnd(plReport.netRevenue)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', fontWeight: 'bold' }}>
+            <td style={{ padding: '12px' }}>3. Giá vốn hàng bán (COGS)</td>
+            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.cogs)}</td>
+          </tr>
+          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f0fdf4' }}>
+            <td style={{ padding: '12px' }}>4. Lợi nhuận gộp (Gross Profit)</td>
+            <td style={{ textAlign: 'right', padding: '12px', color: '#16a34a', fontSize: '16px' }}>{vnd(plReport.grossProfit)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+            <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="2">5. Tổng chi phí hoạt động:</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí vận chuyển (Ship)</td>
+            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.shipping)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí thuế</td>
+            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.tax)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí lương nhân viên</td>
+            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.salary)}</td>
+          </tr>
+          <tr style={{ borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+            <td style={{ padding: '10px', paddingLeft: '25px' }}>+ Chi phí quản lý / khác</td>
+            <td style={{ textAlign: 'right', padding: '10px' }}>-{vnd(plReport.expenses.other)}</td>
+          </tr>
+          <tr style={{ borderBottom: '2px solid #cbd5e1', fontWeight: 'bold', background: '#f8fafc' }}>
+            <td style={{ padding: '12px', paddingLeft: '25px' }}>Tổng chi phí</td>
+            <td style={{ textAlign: 'right', padding: '12px', color: '#dc2626' }}>-{vnd(plReport.expenses.total)}</td>
+          </tr>
+          <tr style={{ borderTop: '3px double #0f172a', fontWeight: 'bold', background: '#eff6ff' }}>
+            <td style={{ padding: '15px', fontSize: '16px' }}>6. LỢI NHUẬN THUẦN (NET PROFIT)</td>
+            <td style={{ textAlign: 'right', padding: '15px', fontSize: '18px', color: plReport.netProfit >= 0 ? '#16a34a' : '#dc2626' }}>
+              {vnd(plReport.netProfit)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
 
         {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
         {currentView === 'customers' && (
