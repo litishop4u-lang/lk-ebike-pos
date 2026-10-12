@@ -253,12 +253,14 @@ const [plEndDate, setPlEndDate] = useState(new Date().toISOString().slice(0, 10)
 
 const loadProfitLossReport = async () => {
   try {
+    // Chuyển đổi định dạng ngày nếu cần thiết để khớp với SQL (YYYY-MM-DD)
     const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
     if (res && res.success) {
       setPlReport(res.data);
     }
   } catch (err) {
-    console.error('Lỗi tải báo cáo KQKD:', err);
+    console.error('Lỗi tải báo cáo:', err);
+    alert('Không thể tải dữ liệu báo cáo kết quả kinh doanh');
   }
 };
 
