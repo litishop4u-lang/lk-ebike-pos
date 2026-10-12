@@ -248,19 +248,19 @@ function AppMain() {
   expenses: { shipping: 0, tax: 0, salary: 0, other: 0, total: 0 },
   netProfit: 0
 });
-const [plStartDate, setPlStartDate] = useState(new Date().toISOString().slice(0, 8) + '01'); // Đầu tháng
-const [plEndDate, setPlEndDate] = useState(new Date().toISOString().slice(0, 10)); // Hôm nay
-
+const [plStartDate, setPlStartDate] = useState('2025-01-01');
+const [plEndDate, setPlEndDate] = useState(new Date().toISOString().slice(0, 10));
+  
 const loadProfitLossReport = async () => {
   try {
-    // Chuyển đổi định dạng ngày nếu cần thiết để khớp với SQL (YYYY-MM-DD)
     const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
     if (res && res.success) {
       setPlReport(res.data);
+    } else {
+      console.error("API trả về lỗi:", res);
     }
   } catch (err) {
-    console.error('Lỗi tải báo cáo:', err);
-    alert('Không thể tải dữ liệu báo cáo kết quả kinh doanh');
+    console.error('Lỗi kết nối API báo cáo:', err);
   }
 };
 
