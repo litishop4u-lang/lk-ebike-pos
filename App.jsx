@@ -123,22 +123,99 @@ function AppMain() {
     }
   };
 
+  // ----- Popup tạo phiếu trả: tìm khách, chọn phiếu gốc, thêm sản phẩm -----
+  const [returnCustomerSearch, setReturnCustomerSearch] = useState('');
+  const [showReturnCustomerDropdown, setShowReturnCustomerDropdown] = useState(false);
+  const [returnProductKeyword, setReturnProductKeyword] = useState('');
+  const [returnLoading, setReturnLoading] = useState(false);
+
+  const calcReturnTotal = (items) =>
+    (items || []).reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.price) || 0), 0);
+
+  // Cập nhật danh sách hàng trả và tự tính lại số tiền hoàn
+  const setReturnItems = (items) =>
+    setReturnForm((f) => ({ ...f, items, refund_amount: calcReturnTotal(items) }));
+
+  const updateReturnItem = (index, patch) =>
+    setReturnItems((returnForm.items || []).map((it, i) => (i === index ? { ...it, ...patch } : it)));
+
+  const removeReturnItem = (index) =>
+    setReturnItems((returnForm.items || []).filter((_, i) => i !== index));
+
+  const addReturnProduct = (p) => {
+    const items = returnForm.items || [];
+    const exist = items.find((it) => it.product_id === p.id);
+    const next = exist
+      ? items.map((it) => {
+          if (it.product_id !== p.id) return it;
+          const q = it.quantity + 1;
+          return { ...it, quantity: it.max_qty ? Math.min(q, it.max_qty) : q };
+        })
+      : [...items, { product_id: p.id, sku: p.sku || '', name: p.name, quantity: 1, max_qty: null, price: Number(p.price) || 0 }];
+    setReturnItems(next);
+    setReturnProductKeyword('');
+  };
+
+  // Chọn phiếu bán gốc -> tự nạp các sản phẩm của phiếu đó vào danh sách trả
+  const handleSelectReturnInvoice = async (invCode) => {
+    if (!invCode) {
+      setReturnForm((f) => ({ ...f, invoice_code: '' }));
+      return;
+    }
+    const inv = (invoicesList || []).find((i) => String(i.code || i.id) === String(invCode));
+    setReturnForm((f) => ({ ...f, invoice_code: invCode, customer_name: inv?.customer_name || f.customer_name }));
+    if (inv?.customer_name) setReturnCustomerSearch(inv.customer_name);
+    if (!inv) return;
+
+    setReturnLoading(true);
+    try {
+      const details = await api(`/api/invoices/${inv.id}`);
+      const items = (details.items || []).map((it) => {
+        const qty = Number(it.quantity) || 0;
+        const net = (Number(it.price) || 0) * qty - (Number(it.discount) || 0); // đã trừ giảm giá dòng
+        const prod = (products || []).find((p) => p.id === it.product_id);
+        return {
+          product_id: it.product_id,
+          sku: it.sku || prod?.sku || '',
+          name: it.product_name || it.name || prod?.name || '',
+          quantity: qty,
+          max_qty: qty,
+          price: qty > 0 ? Math.round(net / qty) : (Number(it.price) || 0),
+        };
+      });
+      setReturnItems(items);
+    } catch (e) {
+      alert('Lỗi tải chi tiết phiếu bán: ' + e.message);
+    } finally {
+      setReturnLoading(false);
+    }
+  };
+
   const handleCreateReturnOrder = async () => {
+    const items = (returnForm.items || [])
+      .filter((it) => Number(it.quantity) > 0)
+      .map((it) => ({ product_id: it.product_id, sku: it.sku, name: it.name, quantity: Number(it.quantity), price: Number(it.price) || 0 }));
+
+    if (!returnForm.customer_name) { alert('Vui lòng chọn khách hàng!'); return; }
+    if (items.length === 0) { alert('Vui lòng chọn ít nhất 1 sản phẩm trả lại!'); return; }
+
     try {
       const res = await api('/api/return-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(returnForm)
+        body: JSON.stringify({ ...returnForm, refund_amount: Number(returnForm.refund_amount) || 0, items })
       });
       if (res && res.success) {
         alert('Tạo phiếu trả hàng thành công!');
         setShowReturnModal(false);
         loadReturnOrders();
+        loadData(); // cập nhật lại tồn kho / công nợ
       } else {
-        alert('Có lỗi xảy ra khi tạo phiếu trả.');
+        alert((res && res.error) || 'Có lỗi xảy ra khi tạo phiếu trả.');
       }
     } catch (err) {
       console.error('Lỗi tạo phiếu trả:', err);
+      alert('Lỗi: ' + err.message);
     }
   };
 
@@ -1344,6 +1421,9 @@ function AppMain() {
                 <button
                   onClick={() => {
                     setReturnForm({ customer_name: '', invoice_code: '', return_date: todayLocal(), reason: 'Sản phẩm lỗi', refund_amount: 0, status: 'Hoàn Thành (Cộng kho & trừ nợ)', items: [] });
+                    setReturnCustomerSearch('');
+                    setReturnProductKeyword('');
+                    setShowReturnCustomerDropdown(false);
                     setShowReturnModal(true);
                   }}
                   style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
@@ -1438,21 +1518,51 @@ function AppMain() {
                     {/* Trường Khách Hàng */}
                     <div>
                       <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Khách hàng:</label>
-                      <select
-                        value={returnForm.customer_name}
-                        onChange={e => {
-                          const selectedCust = e.target.value;
-                          setReturnForm({ ...returnForm, customer_name: selectedCust, invoice_code: '' });
-                        }}
-                        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
-                      >
-                        <option value="">-- Chọn hoặc tìm khách hàng --</option>
-                        {(customers || []).map((c, idx) => (
-                          <option key={idx} value={c.name}>
-                            {c.name} {c.phone ? `- ${c.phone}` : ''} {c.code ? `(${c.code})` : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          placeholder="Gõ tên, SĐT hoặc mã khách hàng..."
+                          value={returnCustomerSearch}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setReturnCustomerSearch(v);
+                            setReturnForm((f) => ({ ...f, customer_name: v, invoice_code: '' }));
+                            setShowReturnCustomerDropdown(true);
+                          }}
+                          onFocus={() => setShowReturnCustomerDropdown(true)}
+                          onBlur={() => setTimeout(() => setShowReturnCustomerDropdown(false), 150)}
+                          style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                        />
+                        {showReturnCustomerDropdown && (() => {
+                          const q = returnCustomerSearch.trim().toLowerCase();
+                          const list = (customers || []).filter((c) =>
+                            !q ||
+                            (c.name || '').toLowerCase().includes(q) ||
+                            (c.phone && c.phone.includes(q)) ||
+                            (c.code || '').toLowerCase().includes(q)
+                          ).slice(0, 50);
+                          if (list.length === 0) return null;
+                          return (
+                            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                              {list.map((c) => (
+                                <div
+                                  key={c.id}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    const changed = c.name !== returnForm.customer_name;
+                                    setReturnCustomerSearch(c.name);
+                                    setReturnForm((f) => ({ ...f, customer_name: c.name, invoice_code: changed ? '' : f.invoice_code }));
+                                    if (changed && returnForm.invoice_code) setReturnItems([]); // đổi khách thì bỏ hàng của phiếu cũ
+                                    setShowReturnCustomerDropdown(false);
+                                  }}
+                                  style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                                >
+                                  <b>{c.name}</b> - <span style={{ color: '#64748b' }}>{c.phone || 'Chưa có SĐT'} ({c.code})</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {/* Trường Chọn Phiếu Bán Gốc (Tự động lọc theo khách hàng đã chọn) */}
@@ -1460,16 +1570,13 @@ function AppMain() {
                       <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Chọn phiếu bán gốc:</label>
                       <select
                         value={returnForm.invoice_code}
-                        onChange={e => {
-                          const invCode = e.target.value;
-                          setReturnForm({ ...returnForm, invoice_code: invCode });
-                        }}
+                        onChange={e => handleSelectReturnInvoice(e.target.value)}
                         style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' }}
                       >
                         <option value="">-- Chọn Phiếu Bán Gốc --</option>
                         {/* SỬA: trước đây dùng biến `invoices` không tồn tại, đúng phải là `invoicesList` */}
                         {(invoicesList || [])
-                          .filter(inv => !returnForm.customer_name || inv.customer_name === returnForm.customer_name)
+                          .filter(inv => !returnForm.customer_name.trim() || (inv.customer_name || '').toLowerCase().includes(returnForm.customer_name.trim().toLowerCase()))
                           .map((inv, idx) => (
                             <option key={idx} value={inv.code || inv.id}>
                               {inv.code || `BH-${inv.id}`} - {inv.customer_name || 'Khách lẻ'} ({inv.total ? vnd(inv.total) : ''})
@@ -1529,15 +1636,37 @@ function AppMain() {
 
                   {/* Ô tìm kiếm sản phẩm tự do (Dùng khi phiếu trả tự tạo không có phiếu bán gốc) */}
                   <div style={{ marginBottom: '15px' }}>
-                    <input
-                      type="text"
-                      placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..."
-                      onChange={e => {
-                        // Logic chọn sản phẩm thêm vào danh sách trả (nếu bạn muốn gõ tìm sản phẩm trực tiếp)
-                        // const keyword = e.target.value.toLowerCase();
-                      }}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }}
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..."
+                        value={returnProductKeyword}
+                        onChange={(e) => setReturnProductKeyword(e.target.value)}
+                        style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }}
+                      />
+                      {returnProductKeyword.trim() && (() => {
+                        const q = returnProductKeyword.trim().toLowerCase();
+                        const list = (products || []).filter((p) =>
+                          (p.name || '').toLowerCase().includes(q) || (p.sku && p.sku.toLowerCase().includes(q))
+                        ).slice(0, 30);
+                        return (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '220px', overflowY: 'auto', zIndex: 20, marginTop: '4px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                            {list.length === 0 ? (
+                              <div style={{ padding: '12px', color: '#94a3b8', textAlign: 'center' }}>Không tìm thấy sản phẩm nào.</div>
+                            ) : list.map((p) => (
+                              <div
+                                key={p.id}
+                                onClick={() => addReturnProduct(p)}
+                                style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9' }}
+                              >
+                                <span><b>{p.sku ? `${p.sku} - ` : ''}{p.name}</b></span>
+                                <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>{vnd(p.price)} &nbsp;<span style={{ color: '#0284c7' }}>+ Thêm</span></span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* Bảng chi tiết sản phẩm trả lại */}
@@ -1550,12 +1679,17 @@ function AppMain() {
                           <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
                           <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
                           <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center', width: '50px' }}>Xóa</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(!returnForm.items || returnForm.items.length === 0) ? (
+                        {returnLoading ? (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Đang tải sản phẩm của phiếu bán...</td>
+                          </tr>
+                        ) : (!returnForm.items || returnForm.items.length === 0) ? (
+                          <tr>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
                               Chưa có sản phẩm trả lại
                             </td>
                           </tr>
@@ -1564,9 +1698,26 @@ function AppMain() {
                             <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                               <td style={{ padding: '10px 14px' }}>{it.sku}</td>
                               <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>{it.quantity}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={it.max_qty || undefined}
+                                  value={it.quantity}
+                                  onChange={(e) => {
+                                    let q = Math.max(0, Number(e.target.value) || 0);
+                                    if (it.max_qty) q = Math.min(q, it.max_qty);
+                                    updateReturnItem(idx, { quantity: q });
+                                  }}
+                                  style={{ width: '60px', padding: '6px', textAlign: 'center' }}
+                                />
+                                {it.max_qty ? <div style={{ fontSize: '11px', color: '#94a3b8' }}>tối đa {it.max_qty}</div> : null}
+                              </td>
                               <td style={{ padding: '10px 14px', textAlign: 'right' }}>{vnd(it.price)}</td>
                               <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.quantity * it.price)}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                <button onClick={() => removeReturnItem(idx)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                              </td>
                             </tr>
                           ))
                         )}
@@ -1577,7 +1728,7 @@ function AppMain() {
                   {/* Tổng giá trị và nút hành động */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
                     <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
-                      Tổng giá trị hàng trả: <span style={{ color: '#7c3aed' }}>{vnd(returnForm.refund_amount || 0)}</span>
+                      Tổng giá trị hàng trả: <span style={{ color: '#7c3aed' }}>{vnd(calcReturnTotal(returnForm.items))}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button
