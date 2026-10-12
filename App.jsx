@@ -2505,12 +2505,12 @@ const loadProfitLossReport = async () => {
               </tbody>
             </table>
           </div>
-        )}
-      </main>
+          )}
+        </div> 
 
-      {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
-      {showViewPurchaseModal && selectedPurchaseOrder && (
-        <div style={overlayStyle}>
+        {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
+        {showViewPurchaseModal && selectedPurchaseOrder && (
+          <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
