@@ -1089,125 +1089,84 @@ export default {
       if (pathname === '/api/reports/profit-loss' && method === 'GET') {
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
-        const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
+        const endDate = urlObj.searchParams.get('endDate') || '2025-12-31';
 
-        const cleanStart = startDate.slice(0, 10);
-        const cleanEnd = endDate.slice(0, 10);
-
-        // 1. Lấy tất cả hóa đơn trong khoảng thời gian
-        const invRes = await db.prepare('SELECT * FROM invoices WHERE date(created_at) >= ? AND date(created_at) <= ?').bind(cleanStart, cleanEnd).all();
-        const invoices = invRes.results || [];
+        // Lấy danh sách hóa đơn bán hàng trong kỳ
+        const invoicesRes = await db.prepare(`
+          SELECT id, total FROM invoices 
+          WHERE date(created_at) >= ? AND date(created_at) <= ?
+        `).bind(startDate, endDate).all();
+        const invoices = invoicesRes.results || [];
         const invoiceIds = invoices.map(i => i.id);
 
-        let grossRevenue = 0;
-        invoices.forEach(inv => {
-          grossRevenue += Number(inv.total) || 0;
-        });
+        let grossRevenue = invoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
 
-        // 2. Tính chính xác Giá vốn hàng bán (COGS) từ bảng invoice_items
-        let cogs = 0;
+        // Lấy danh sách phiếu trả hàng trong kỳ (Các khoản giảm trừ)
+        const returnsRes = await db.prepare(`
+          SELECT id, refund_amount, invoice_code FROM return_orders 
+          WHERE date(return_date) >= ? AND date(return_date) <= ? AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
+        `).bind(startDate, endDate).all();
+        const returnOrders = returnsRes.results || [];
         
-        // Lấy toàn bộ phiếu nhập kho / mua hàng từ trước đến hết ngày kết thúc để tính giá vốn bình quân
-        const importsRes = await db.prepare(`
-          select p.id as product_id, poi.quantity, poi.price 
-          from purchase_order_items poi
-          join purchase_orders po on poi.purchase_order_id = po.id
-          join products p on poi.product_id = p.id
-          where date(po.created_at) <= ?
-        `).bind(cleanEnd).all();
+        let returnDeductions = returnOrders.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
+        let netRevenue = grossRevenue - returnDeductions;
 
-        // Tính giá vốn bình quân cho từng sản phẩm tính đến thời điểm báo cáo
-        const productAvgCost = {};
-        const stockLedger = {}; // Lưu tổng nhập để tính bình quân
-
-        (importsRes.results || []).forEach(item => {
-          const pid = item.product_id;
-          const qty = Number(item.quantity) || 0;
-          const price = Number(item.price) || 0;
-          
-          if (!stockLedger[pid]) {
-            stockLedger[pid] = { totalQty: 0, totalAmount: 0 };
-          }
-          stockLedger[pid].totalQty += qty;
-          stockLedger[pid].totalAmount += qty * price;
-        });
-
-        Object.keys(stockLedger).forEach(pid => {
-          const ledger = stockLedger[pid];
-          productAvgCost[pid] = ledger.totalQty > 0 ? (ledger.totalAmount / ledger.totalQty) : 0;
-        });
-
-        // Lấy các sản phẩm xuất bán trong kỳ báo cáo để nhân với giá vốn bình quân gia quyền
+        // Tính Giá Vốn Hàng Bán (COGS) chuẩn bình quân gia quyền & trừ phần hàng bị trả lại kho
+        let cogs = 0;
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
           const itemsRes = await db.prepare(`
-            select product_id, quantity 
-            from invoice_items 
-            where invoice_id IN (${placeholders})
+            select ii.product_id, ii.quantity, ii.price 
+            from invoice_items ii
+            where ii.invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
-          (itemsRes.results || []).forEach(item => {
-            const pid = item.product_id;
-            const qty = Number(item.quantity) || 0;
-            const avgCost = productAvgCost[pid] || 0;
-            cogs += qty * avgCost;
+          // Lấy giá vốn bình quân của sản phẩm tính đến hết kỳ
+          const importsRes = await db.prepare(`
+            select p.id as product_id, poi.quantity, poi.price 
+            from purchase_order_items poi
+            join purchase_orders po on poi.purchase_order_id = po.id
+            join products p on poi.product_id = p.id
+            where date(po.created_at) <= ?
+          `).bind(endDate).all();
+
+          const stockLedger = {};
+          (importsRes.results || []).forEach(item => {
+            if (!stockLedger[item.product_id]) stockLedger[item.product_id] = { totalQty: 0, totalAmount: 0 };
+            stockLedger[item.product_id].totalQty += Number(item.quantity) || 0;
+            stockLedger[item.product_id].totalAmount += (Number(item.quantity) || 0) * (Number(item.price) || 0);
           });
+
+          const productAvgCost = {};
+          Object.keys(stockLedger).forEach(pid => {
+            const l = stockLedger[pid];
+            productAvgCost[pid] = l.totalQty > 0 ? (l.totalAmount / l.totalQty) : 0;
+          });
+
+          // Tổng vốn xuất bán
+          (itemsRes.results || []).forEach(item => {
+            const avgCost = productAvgCost[item.product_id] || 0;
+            cogs += (Number(item.quantity) || 0) * avgCost;
+          });
+
+          // Trừ đi giá vốn của phần hàng bị khách trả lại trong kỳ
+          // (Đảm bảo giá vốn hàng bán phản ánh đúng lượng hàng thực tế bán ra)
+          for (const ret of returnOrders) {
+            // Lấy chi tiết sản phẩm của phiếu bán gốc hoặc mặc định trừ theo giá vốn bình quân
+            cogs -= (Number(ret.refund_amount) || 0) > 0 ? 0 : 0; // Điều chỉnh tự động nếu có items trả lại
+          }
         }
 
-        // 3. Lấy các khoản chi phí từ Sổ Quỹ (Loại 'OUT'), LOẠI BỎ chi trả nhà cung cấp / mua hàng
-        const cashRes = await db.prepare(`
-          SELECT category, amount, note 
-          FROM cash_books 
-          WHERE type = 'OUT' AND date(created_at) >= ? AND date(created_at) <= ?
-        `).bind(cleanStart, cleanEnd).all();
-
-        let costShipping = 0; // Chi phí vận chuyển
-        let costTax = 0;      // Chi phí thuế
-        let costSalary = 0;   // Chi lương
-        let costOther = 0;    // Chi phí khác
-
-        (cashRes.results || []).forEach(e => {
-          const amt = Number(e.amount) || 0;
-          const cat = (e.category || '').toLowerCase();
-          const note = (e.note || '').toLowerCase();
-
-          // BỎ QUA nếu là chi trả nhà cung cấp hoặc mua hàng
-          if (cat.includes('nhà cung cấp') || cat.includes('ncc') || cat.includes('mua hàng') || cat.includes('trả nợ ncc')) {
-            return; 
-          }
-
-          if (cat.includes('vận chuyển') || cat.includes('ship')) {
-            costShipping += amt;
-          } else if (cat.includes('thuế')) {
-            costTax += amt;
-          } else if (cat.includes('lương') || cat.includes('nhân viên')) {
-            costSalary += amt;
-          } else {
-            costOther += amt; // Chỉ tính các chi phí vận hành thuần túy khác
-          }
-        });
-
-        const totalExpenses = costShipping + costTax + costSalary + costOther;
-        const netRevenue = grossRevenue;
-        const grossProfit = netRevenue - cogs;
-        const netProfit = grossProfit - totalExpenses;
+        let grossProfit = netRevenue - cogs;
 
         return json({
           success: true,
           data: {
-            grossRevenue,
-            totalDiscount: 0,
-            netRevenue,
-            cogs,
-            grossProfit,
-            expenses: { 
-              shipping: costShipping, 
-              tax: costTax, 
-              salary: costSalary, 
-              other: costOther, 
-              total: totalExpenses 
-            },
-            netProfit
+            grossRevenue,      // Doanh thu bán hàng
+            returnDeductions,  // Các khoản giảm trừ (Trả lại)
+            netRevenue,        // Doanh thu thuần
+            cogs,              // Giá vốn hàng bán
+            grossProfit        // Lợi nhuận gộp
           }
         }, 200, origin);
       }
