@@ -3581,7 +3581,7 @@ const loadProfitLossReport = async () => {
       )}
 
     </div>
-  );
+  )
 }
 
 // ===== Styles dùng chung =====
