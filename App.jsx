@@ -1049,7 +1049,7 @@ const loadProfitLossReport = async () => {
       <aside className="sidebar" style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
         <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
         <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>Tạo đơn hàng</button></li>
+          <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>📦 Tạo đơn hàng</button></li>
           <li><button 
   onClick={() => {
     setCurrentView('return-orders');
@@ -1060,7 +1060,7 @@ const loadProfitLossReport = async () => {
     padding: '12px 15px',
     textAlign: 'left',
     background: currentView === 'return-orders' ? '#7c3aed' : 'transparent',
-    color: currentView === 'return-orders' ? '#fff' : '#334155',
+    color: currentView === 'return-orders' ? '#fff' : '#fff',
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
