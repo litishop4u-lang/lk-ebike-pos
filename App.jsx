@@ -392,6 +392,25 @@ function AppMain() {
     }
   }
 
+      const handleSaveInvoice = async () => {
+  try {
+    const url = editingInvoiceId ? `/api/invoices/${editingInvoiceId}` : '/api/invoices';
+    const method = editingInvoiceId ? 'PUT' : 'POST';
+
+    await api(url, {
+      method,
+      body: JSON.stringify(invoiceForm)
+    });
+
+    setShowInvoiceModal(false);
+    setEditingInvoiceId(null);
+    loadInvoices(); // Tải lại danh sách
+    alert(editingInvoiceId ? 'Cập nhật phiếu bán hàng thành công!' : 'Tạo phiếu bán hàng thành công!');
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  }
+};
+
   // === Hàm in phiếu / đơn ===
   const handlePrintOrder = async (item, isOrder = false) => {
     let printData = item;
@@ -991,6 +1010,35 @@ function AppMain() {
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
+                          <button 
+                            onClick={async () => {
+                            const res = await api(`/api/invoices/${item.id}`);
+                            if (res) {
+                              setEditingInvoiceId(item.id);
+                              setInvoiceForm({
+                                customer_name: res.customer_name || '',
+                                customer_phone: res.customer_phone || '',
+                                address: res.address || '',
+                                paid_amount: res.paid_amount || res.total,
+                                payment_method: res.payment_method || 'Chuyển khoản',
+                                created_at: res.created_at ? res.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                                items: res.items.map(i => ({
+                                  product_id: i.product_id,
+                                  name: i.product_name || i.name,
+                                  sku: i.sku || '',
+                                  quantity: i.quantity,
+                                  price: i.price,
+                                  discount: i.discount || 0
+                                }))
+                              });
+                              setShowInvoiceModal(true);
+                            }
+                          }} 
+                          style={{ background: '#fef3c7', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#d97706' }} 
+                          title="Chỉnh sửa"
+                        >
+                          ✏️
+                        </button>
                           <button onClick={() => handleDeleteOrderOrInvoice('invoices', inv.id, inv.code)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                         </td>
                       </tr>
