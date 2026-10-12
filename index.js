@@ -117,8 +117,9 @@ async function createInvoice(db, b) {
 
   const stmts = [
     ensureCustomer(db, customer_name, customer_phone, address),
-    db.prepare('INSERT INTO invoices (code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method) VALUES (?,?,?,?,?,?,?,?)')
-      .bind(code, customer_name, customer_phone, total, paid_amount, debt, created_at, payment_method),
+    // Bảng invoices cần có cột address (đã thêm bằng ALTER TABLE) để lưu địa chỉ trên phiếu
+    db.prepare('INSERT INTO invoices (code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method),
     ...lines.map((l) =>
       // Bảng invoice_items của bạn có cột unit_price (NOT NULL) nên ghi thêm cả unit_price lẫn price
       db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?,?)')
@@ -382,6 +383,71 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+      // PUT /api/invoices/:id — Cập nhật phiếu bán hàng (SỬA LỖI: thêm unit_price, kiểm tra tồn kho, trả về code)
+      if (is(/^\/api\/invoices\/\d+$/, 'PUT')) {
+        const id = idOf(pathname);
+
+        // 1. Kiểm tra phiếu cũ có tồn tại không
+        const oldInv = await db.prepare('SELECT * FROM invoices WHERE id = ?').bind(id).first();
+        if (!oldInv) throw new HttpError(404, 'Không tìm thấy phiếu bán hàng');
+
+        const b = await request.json();
+        const customer_name = str(b.customer_name);
+        if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
+        const customer_phone = str(b.customer_phone) || null;
+        const address = str(b.address) || null;
+        const created_at = b.created_at ? isoDate(b.created_at) : oldInv.created_at;
+        const payment_method = str(b.payment_method) || 'Tiền mặt';
+
+        // 2. Kiểm tra dòng hàng mới, tính lại tổng tiền và công nợ
+        const lines = normalizeItems(b.items);
+        const newIds = await loadProducts(db, lines, { checkStock: false });
+        const total = sumTotal(lines);
+        const paid_amount = Math.min(money(b.paid_amount), total);
+        const debt = total - paid_amount;
+
+        // 3. Dòng hàng cũ: sẽ hoàn lại tồn kho
+        const oldItems = (await db.prepare('SELECT product_id, quantity FROM invoice_items WHERE invoice_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...newIds])];
+
+        const stmts = [
+          // Hoàn lại tồn kho theo phiếu cũ
+          ...oldItems.map((i) =>
+            db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(i.quantity, i.product_id)),
+          // Cập nhật thông tin phiếu
+          db.prepare('UPDATE invoices SET customer_name = ?, customer_phone = ?, address = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+            .bind(customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, id),
+          // Làm mới chi tiết sản phẩm
+          db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(id),
+          // Bảng invoice_items có cột unit_price (NOT NULL) nên ghi cả unit_price lẫn price
+          ...lines.map((l) =>
+            db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total) VALUES (?,?,?,?,?,?,?)')
+              .bind(id, l.product_id, l.quantity, l.price, l.price, l.discount, l.total)),
+          // Trừ tồn kho theo phiếu mới
+          ...lines.map((l) =>
+            db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
+          // Đồng bộ Sổ quỹ: xóa phiếu thu cũ của hóa đơn này
+          db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(oldInv.code),
+        ];
+
+        // Tạo lại phiếu thu nếu có thanh toán
+        if (paid_amount > 0) {
+          const noteText = `Thu tiền bán hàng từ khách ${customer_name} theo hóa đơn ${oldInv.code} (Đã cập nhật)`;
+          stmts.push(
+            db.prepare(`
+              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+              VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
+            `).bind(genCode('PT'), paid_amount, payment_method, oldInv.code, noteText, created_at)
+          );
+        }
+
+        // Chốt chặn: nếu tồn kho bị âm thì hủy toàn bộ (rollback)
+        stmts.push(stockGuard(db, ids));
+
+        await runBatch(db, stmts, 'Không đủ tồn kho để sửa phiếu. Vui lòng tải lại và kiểm tra số lượng');
+        return json({ success: true, code: oldInv.code, total }, 200, origin);
+      }
+
       // ===== 7. QUẢN LÝ THU CHI =====
       if (pathname === '/api/cash-book' && method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
@@ -458,77 +524,6 @@ export default {
         ).run();
 
         return json({ success: true }, 200, origin);
-      }
-
-          // PUT /api/invoices/:id — Cập nhật phiếu bán hàng trên dữ liệu cũ
-      if (pathname.match(/^\/api\/invoices\/\d+$/) && method === 'PUT') {
-        const id = pathname.split('/')[3];
-        
-        // 1. Kiểm tra hóa đơn cũ có tồn tại không
-        const oldInv = await db.prepare('SELECT * FROM invoices WHERE id = ?').bind(id).first();
-        if (!oldInv) throw new HttpError(404, 'Không tìm thấy phiếu bán hàng');
-
-        const b = await request.json();
-        const customer_name = String(b.customer_name || '').trim();
-        const customer_phone = String(b.customer_phone || '').trim() || null;
-        const address = String(b.address || '').trim() || null;
-        const created_at = b.created_at || oldInv.created_at;
-        const items = b.items || [];
-        const paid_amount = Number(b.paid_amount) || 0;
-        const payment_method = b.payment_method || 'Chuyển khoản';
-
-        if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
-        if (items.length === 0) throw new HttpError(400, 'Giỏ hàng trống');
-
-        // 2. Hoàn lại tồn kho của các sản phẩm trong hóa đơn cũ trước khi cập nhật
-        const oldItems = await db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').bind(id).all();
-        const refundStmts = (oldItems.results || []).map(item => 
-          db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(item.quantity, item.product_id)
-        );
-
-        // 3. Tính toán lại tổng tiền và công nợ
-        let total = 0;
-        for (const item of items) {
-          total += (item.quantity * item.price) - (item.discount || 0);
-        }
-        const debt = Math.max(0, total - paid_amount);
-
-        // 4. Xây dựng câu lệnh cập nhật hóa đơn và làm mới chi tiết sản phẩm
-        const stmts = [
-          ...refundStmts,
-          db.prepare('UPDATE invoices SET customer_name = ?, customer_phone = ?, address = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-            .bind(customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, id),
-          db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(id)
-        ];
-
-        // 5. Thêm chi tiết sản phẩm mới và trừ lại tồn kho
-        for (const item of items) {
-          const lineTotal = (item.quantity * item.price) - (item.discount || 0);
-          stmts.push(
-            db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, price, discount, total) VALUES (?, ?, ?, ?, ?, ?)')
-              .bind(id, item.product_id, item.quantity, item.price, item.discount || 0, lineTotal)
-          );
-          stmts.push(
-            db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(item.quantity, item.product_id)
-          );
-        }
-
-        // 6. Đồng bộ lại Sổ Quỹ Thu Chi (Xóa phiếu thu cũ liên quan đến hóa đơn này và tạo lại nếu có paid_amount > 0)
-        stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(oldInv.code));
-
-        if (paid_amount > 0) {
-          const cashCode = 'PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-          const noteText = `Thu tiền bán hàng từ khách ${customer_name} theo hóa đơn ${oldInv.code} (Đã cập nhật)`;
-          stmts.push(
-            db.prepare(`
-              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
-              VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
-            `).bind(cashCode, paid_amount, payment_method, oldInv.code, noteText, created_at)
-          );
-        }
-
-        await db.batch(stmts);
-        return json({ success: true, total }, 200, origin);
       }
 
       // ===== 3. NHÀ CUNG CẤP =====
