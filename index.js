@@ -973,7 +973,7 @@ export default {
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
 
-        // Lấy hóa đơn theo ngày
+        // 1. Lấy tất cả hóa đơn trong khoảng thời gian
         const invRes = await db.prepare('SELECT * FROM invoices WHERE date(created_at) >= ? AND date(created_at) <= ?').bind(cleanStart, cleanEnd).all();
         const invoices = invRes.results || [];
         const invoiceIds = invoices.map(i => i.id);
@@ -983,37 +983,54 @@ export default {
           grossRevenue += Number(inv.total) || 0;
         });
 
-        // Tính giá vốn hàng bán (COGS)
+        // 2. Tính chính xác Giá vốn hàng bán (COGS) từ bảng invoice_items
         let cogs = 0;
         if (invoiceIds.length > 0) {
           const placeholders = invoiceIds.map(() => '?').join(',');
+          // Lấy trực tiếp unit_price hoặc cost từ chi tiết hóa đơn
           const itemsRes = await db.prepare(`
-            SELECT quantity, price FROM invoice_items WHERE invoice_id IN (${placeholders})
+            SELECT quantity, unit_price, price FROM invoice_items WHERE invoice_id IN (${placeholders})
           `).bind(...invoiceIds).all();
 
           (itemsRes.results || []).forEach(item => {
-            // Nếu chưa có cột giá vốn riêng, tạm tính giá vốn bằng 70% giá bán hoặc lấy cột unit_price nếu có
             const qty = Number(item.quantity) || 0;
-            const unitPrice = Number(item.price) || 0;
-            cogs += qty * (unitPrice * 0.7); // Tạm tính tỷ lệ giá vốn, hoặc bạn có thể thay thế bằng cột giá vốn chuẩn của bạn
+            // Ưu tiên lấy unit_price làm giá vốn, nếu không có lấy price
+            const costPrice = Number(item.unit_price) || Number(item.price) || 0;
+            cogs += qty * costPrice;
           });
         }
 
-        // Lấy chi phí từ Sổ Quỹ Thu Chi (loại 'OUT') theo ngày
+        // 3. Lấy các khoản chi phí từ Sổ Quỹ (Loại 'OUT'), LOẠI BỎ chi trả nhà cung cấp / mua hàng
         const cashRes = await db.prepare(`
-          SELECT category, amount 
+          SELECT category, amount, note 
           FROM cash_books 
           WHERE type = 'OUT' AND date(created_at) >= ? AND date(created_at) <= ?
         `).bind(cleanStart, cleanEnd).all();
 
-        let costShipping = 0, costTax = 0, costSalary = 0, costOther = 0;
+        let costShipping = 0; // Chi phí vận chuyển
+        let costTax = 0;      // Chi phí thuế
+        let costSalary = 0;   // Chi lương
+        let costOther = 0;    // Chi phí khác
+
         (cashRes.results || []).forEach(e => {
           const amt = Number(e.amount) || 0;
           const cat = (e.category || '').toLowerCase();
-          if (cat.includes('vận chuyển') || cat.includes('ship')) costShipping += amt;
-          else if (cat.includes('thuế')) costTax += amt;
-          else if (cat.includes('lương') || cat.includes('nhân viên')) costSalary += amt;
-          else costOther += amt;
+          const note = (e.note || '').toLowerCase();
+
+          // BỎ QUA nếu là chi trả nhà cung cấp hoặc mua hàng
+          if (cat.includes('nhà cung cấp') || cat.includes('ncc') || cat.includes('mua hàng') || cat.includes('trả nợ ncc')) {
+            return; 
+          }
+
+          if (cat.includes('vận chuyển') || cat.includes('ship')) {
+            costShipping += amt;
+          } else if (cat.includes('thuế')) {
+            costTax += amt;
+          } else if (cat.includes('lương') || cat.includes('nhân viên')) {
+            costSalary += amt;
+          } else {
+            costOther += amt; // Chỉ tính các chi phí vận hành thuần túy khác
+          }
         });
 
         const totalExpenses = costShipping + costTax + costSalary + costOther;
@@ -1029,7 +1046,13 @@ export default {
             netRevenue,
             cogs,
             grossProfit,
-            expenses: { shipping: costShipping, tax: costTax, salary: costSalary, other: costOther, total: totalExpenses },
+            expenses: { 
+              shipping: costShipping, 
+              tax: costTax, 
+              salary: costSalary, 
+              other: costOther, 
+              total: totalExpenses 
+            },
             netProfit
           }
         }, 200, origin);
