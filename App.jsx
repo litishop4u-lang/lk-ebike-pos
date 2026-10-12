@@ -74,6 +74,8 @@ function AppMain() {
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
   const [invoiceForm, setInvoiceForm] = useState({ customer_name: '', items: [] });
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  
 
   // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
