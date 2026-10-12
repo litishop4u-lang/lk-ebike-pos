@@ -83,6 +83,9 @@ function AppMain() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [productImportText, setProductImportText] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [activeProductTab, setActiveProductTab] = useState('info'); // 'info' hoặc 'card'
+  const [stockCardList, setStockCardList] = useState([]);
 
   // ===== States cho Nhà cung cấp & Nhập hàng =====
   const [suppliers, setSuppliers] = useState([]);
@@ -263,6 +266,7 @@ const loadProfitLossReport = async () => {
     console.error('Lỗi kết nối API báo cáo:', err);
   }
 };
+
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
@@ -455,6 +459,21 @@ const loadProfitLossReport = async () => {
     alert(editingInvoiceId ? 'Cập nhật phiếu bán hàng thành công!' : 'Tạo phiếu bán hàng thành công!');
   } catch (err) {
     alert('Lỗi: ' + err.message);
+  }
+};
+
+  const handleOpenProductModal = async (product) => {
+  setSelectedProduct(product);
+  setActiveProductTab('info');
+  setStockCardList([]);
+  
+  try {
+    const res = await api(`/api/products/stock-card?productId=${product.id}`);
+    if (res && res.success) {
+      setStockCardList(res.data);
+    }
+  } catch (err) {
+    console.error('Lỗi tải thẻ kho:', err);
   }
 };
 
@@ -1339,28 +1358,44 @@ const loadProfitLossReport = async () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {(products || []).map((p) => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={cellStyle}>{p.sku}</td>
-                      <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{p.name}</td>
-                      <td style={cellStyle}>{p.unit || 'Cái'}</td>
-                      <td style={cellStyle}>{vnd(p.import_price)}</td>
-                      <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
-                      <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
-                      <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
-                      <td style={{ ...cellStyle, textAlign: 'center' }}>
-                        <button
-                          onClick={() => {
-                            setEditingProduct(p);
-                            setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
-                            setShowProductModal(true);
-                          }}
-                          style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
-                        >Sửa</button>
-                        <button
-                          onClick={() => handleDeleteProduct(p.id)}
-                          style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
-                        >Xóa</button>
+                 {(products || []).map((p) => (
+  <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+    {/* Bấm vào SKU cũng mở popup chi tiết */}
+    <td 
+      style={{ ...cellStyle, cursor: 'pointer', color: '#0284c7', fontWeight: '500' }} 
+      onClick={() => handleOpenProductModal(p)}
+      title="Bấm để xem chi tiết & thẻ kho"
+    >
+      {p.sku}
+    </td>
+
+    {/* 👉 Bấm vào Tên sản phẩm sẽ mở popup chi tiết & thẻ kho */}
+    <td 
+      style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
+      onClick={() => handleOpenProductModal(p)}
+      title="Bấm để xem chi tiết & thẻ kho"
+    >
+      {p.name}
+    </td>
+
+    <td style={cellStyle}>{p.unit || 'Cái'}</td>
+    <td style={cellStyle}>{vnd(p.import_price)}</td>
+    <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
+    <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
+    <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
+    <td style={{ ...cellStyle, textAlign: 'center' }}>
+      <button
+        onClick={() => {
+          setEditingProduct(p);
+          setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
+          setShowProductModal(true);
+        }}
+        style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
+      >Sửa</button>
+      <button
+        onClick={() => handleDeleteProduct(p.id)}
+        style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
+      >Xóa</button>
                       </td>
                     </tr>
                   ))}
@@ -1520,6 +1555,90 @@ const loadProfitLossReport = async () => {
             </div>
           </div>
         )}
+
+          {selectedProduct && (
+  <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+    <div className="modal-content" style={{ background: '#fff', width: '900px', maxHeight: '85vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+      
+      {/* Header Modal & Nút đóng */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px' }}>
+        <h3 style={{ margin: 0, color: '#1e293b' }}>Chi tiết sản phẩm: {selectedProduct.name}</h3>
+        <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+      </div>
+
+      {/* Thanh chuyển Tab */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px' }}>
+        <button 
+          onClick={() => setActiveProductTab('info')}
+          style={{ padding: '8px 20px', background: activeProductTab === 'info' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'info' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          1. Thông tin sản phẩm
+        </button>
+        <button 
+          onClick={() => setActiveProductTab('card')}
+          style={{ padding: '8px 20px', background: activeProductTab === 'card' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'card' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          2. Thẻ kho chi tiết
+        </button>
+      </div>
+
+      {/* Nội dung Tab 1: Thông tin sản phẩm */}
+      {activeProductTab === 'info' && (
+        <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', fontSize: '15px' }}>
+            <p><strong>Mã sản phẩm:</strong> {selectedProduct.code || selectedProduct.id}</p>
+            <p><strong>Tên sản phẩm:</strong> {selectedProduct.name}</p>
+            <p><strong>Danh mục / Loại:</strong> {selectedProduct.category || 'N/A'}</p>
+            <p><strong>Đơn vị tính:</strong> {selectedProduct.unit || 'Cái'}</p>
+            <p><strong>Giá bán:</strong> <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{vnd(selectedProduct.price)}</span></p>
+            <p><strong>Tồn kho hiện tại:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.stock}</span></p>
+          </div>
+        </div>
+      )}
+
+      {/* Nội dung Tab 2: Thẻ kho */}
+      {activeProductTab === 'card' && (
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
+                <th style={{ padding: '10px' }}>Mã phiếu</th>
+                <th style={{ padding: '10px' }}>Ngày</th>
+                <th style={{ padding: '10px' }}>Tên NCC / Khách hàng</th>
+                <th style={{ padding: '10px', textAlign: 'right' }}>Giá nhập</th>
+                <th style={{ padding: '10px', textAlign: 'right' }}>Giá bán</th>
+                <th style={{ padding: '10px', textAlign: 'center' }}>Số lượng</th>
+                <th style={{ padding: '10px', textAlign: 'right' }}>Tồn cuối</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockCardList.length === 0 ? (
+                <tr>
+                  <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phát sinh giao dịch thẻ kho cho sản phẩm này.</td>
+                </tr>
+              ) : (
+                stockCardList.map((item, index) => (
+                  <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '10px', fontWeight: '500', color: '#0284c7' }}>{item.code}</td>
+                    <td style={{ padding: '10px' }}>{item.date ? item.date.slice(0, 10) : ''}</td>
+                    <td style={{ padding: '10px' }}>{item.partner}</td>
+                    <td style={{ padding: '10px', textAlign: 'right' }}>{item.import_price > 0 ? vnd(item.import_price) : '-'}</td>
+                    <td style={{ padding: '10px', textAlign: 'right' }}>{item.export_price > 0 ? vnd(item.export_price) : '-'}</td>
+                    <td style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold', color: item.qty > 0 ? '#16a34a' : '#dc2626' }}>
+                      {item.qty > 0 ? `+${item.qty}` : item.qty}
+                    </td>
+                    <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#0f172a' }}>{item.running_stock}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+    </div>
+  </div>
+)}
 
         {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
