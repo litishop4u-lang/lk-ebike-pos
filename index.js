@@ -267,7 +267,7 @@ export default {
 
         // 1. Lấy lịch sử Nhập hàng
         const importsRes = await db.prepare(`
-          SELECT po.id as code, po.created_at, sup.name as partner_name, poi.price, poi.quantity
+          SELECT po.code as purchase_code, po.created_at, sup.name as partner_name, poi.price, poi.quantity
           FROM purchase_order_items poi
           JOIN purchase_orders po ON poi.purchase_order_id = po.id
           LEFT JOIN suppliers sup ON po.supplier_id = sup.id
@@ -276,7 +276,7 @@ export default {
 
         // 2. Lấy lịch sử Bán hàng (Xuất kho)
         const exportsRes = await db.prepare(`
-          SELECT i.id as code, i.created_at, i.customer_name as partner_name, ii.price, ii.quantity
+          SELECT i.code as invoice_code, i.created_at, i.customer_name as partner_name, ii.price, ii.quantity
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE ii.product_id = ?
@@ -287,7 +287,7 @@ export default {
         // Đưa phiếu nhập vào (Số lượng dương)
         (importsRes.results || []).forEach(item => {
           transactions.push({
-            code: 'NK-' + item.code,
+            code: item.purchase_code || ('NK-' + item.id),
             date: item.created_at,
             partner: item.partner_name || 'Nhà cung cấp',
             import_price: Number(item.price) || 0,
@@ -299,9 +299,9 @@ export default {
         // Đưa phiếu xuất/bán vào (Số lượng âm)
         (exportsRes.results || []).forEach(item => {
           transactions.push({
-            code: 'HD-' + item.code,
+            code: item.invoice_code || ('HD-' + item.id),
             date: item.created_at,
-            partner: item.customer_name || 'Khách lẻ',
+            partner: item.partner_name || 'Khách lẻ',
             import_price: 0,
             export_price: Number(item.price) || 0,
             qty: -(Number(item.quantity) || 0)
