@@ -261,9 +261,27 @@ export default {
 
       // ===== 2. PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG =====
       if (pathname === '/api/invoices' && method === 'POST') {
-        const r = await createInvoice(db, await request.json());
+        const payload = await request.json();
+        const r = await createInvoice(db, payload);
+        
+        // 👉 TỰ ĐỘNG SINH PHIẾU THU NẾU HÓA ĐƠN CÓ THANH TOÁN (paid_amount > 0)
+        const paidAmount = Number(payload.paid_amount) || 0;
+        if (paidAmount > 0 && r && r.code) {
+          const cashCode = 'PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+          const customerName = payload.customer_name || 'Khách hàng';
+          const paymentMethod = payload.payment_method || 'Chuyển khoản';
+          const noteText = `Thu tiền bán hàng từ khách ${customerName} theo hóa đơn ${r.code}`;
+          const customDate = payload.created_at || new Date().toISOString();
+
+          await db.prepare(`
+            INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+            VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
+          `).bind(cashCode, paidAmount, paymentMethod, r.code, noteText, customDate).run();
+        }
+
         return json({ success: true, ...r }, 201, origin);
       }
+
       if (pathname === '/api/orders' && method === 'POST') {
         const r = await createOrder(db, await request.json());
         return json({ success: true, ...r }, 201, origin);
@@ -368,7 +386,6 @@ export default {
       if (pathname === '/api/cash-book' && method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
 
-        // Tính toán Tổng thu, Tổng chi, Lợi nhuận và Số dư tích lũy
         let totalIn = 0;
         let totalOut = 0;
         (results || []).forEach(item => {
@@ -415,7 +432,6 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
-      // Cập nhật phiếu thu / chi hiện có (không tạo mới)
       if (is(/^\/api\/cash-book\/\d+$/, 'PUT')) {
         const id = idOf(pathname);
         const existing = await db.prepare('SELECT id FROM cash_books WHERE id = ?').bind(id).first();
