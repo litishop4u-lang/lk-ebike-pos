@@ -142,7 +142,14 @@ function AppMain() {
   const [showCashModal, setShowCashModal] = useState(false);
   const [cashItems, setCashItems] = useState([]);
   const [cashSummary, setCashSummary] = useState({ totalIn: 0, totalOut: 0, netProfit: 0, balance: 0 });
-  const [cashForm, setCashForm] = useState(EMPTY_CASH_FORM);
+  const [cashForm, setCashForm] = useState({
+  type: 'IN',
+  category: '',
+  amount: '',
+  payment_method: 'Chuyển khoản',
+  note: '',
+  created_at: new Date().toISOString().slice(0, 10) // 👉 Đặt nằm ở trong này đúng cú pháp
+});
   const [editingCashId, setEditingCashId] = useState(null);
   const [selectedCashItem, setSelectedCashItem] = useState(null);
 
@@ -2211,6 +2218,27 @@ function AppMain() {
                 <option value="Tiền mặt">Tiền mặt</option>
               </select>
             </div>
+
+            <div style={{ marginBottom: '15px' }}>
+        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500', color: '#334155', fontSize: '13px' }}>
+          Ngày giao dịch:
+        </label>
+        <input 
+          type="date" 
+          value={cashForm.created_at ? cashForm.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10)} 
+          onChange={(e) => setCashForm({ ...cashForm, created_at: e.target.value })}
+          style={{ 
+            width: '100%', 
+            padding: '10px', 
+            borderRadius: '8px', 
+            border: '1px solid #cbd5e1', 
+            fontSize: '14px', 
+            boxSizing: 'border-box',
+            outline: 'none',
+            background: '#fff'
+          }}
+        />
+      </div>
 
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ghi chú / Chứng từ liên quan:</label>
