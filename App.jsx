@@ -75,7 +75,7 @@ function AppMain() {
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
   const [invoiceForm, setInvoiceForm] = useState({ customer_name: '', items: [] });
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  
+  const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
 
   // ===== States cho Quản lý Sản phẩm =====
   const [showProductModal, setShowProductModal] = useState(false);
@@ -368,6 +368,16 @@ function AppMain() {
         // Nếu đang sửa đơn đặt hàng
         r = await api(`/api/orders/${editingOrderId}`, { method: 'PUT', body: JSON.stringify(body) });
         setMsg({ type: 'ok', text: `Đã cập nhật đơn đặt hàng ${r.code || ''} thành công!` });
+      } else if (modalOrderType === 'invoices' && editingInvoiceId) {
+        // Sửa phiếu: tồn khả dụng = tồn hiện tại + số lượng cũ của phiếu này
+        for (const l of cartLines) {
+          const available = (Number(l.stock) || 0) + (editingInvoiceOriginalQty[l.id] || 0);
+          if (available < l.quantity) {
+            throw new Error(`Sản phẩm "${l.name}" chỉ còn ${available} trong kho, không đủ xuất phiếu bán hàng!`);
+          }
+        }
+        r = await api(`/api/invoices/${editingInvoiceId}`, { method: 'PUT', body: JSON.stringify(body) });
+        setMsg({ type: 'ok', text: `Đã cập nhật phiếu bán hàng ${r.code || ''} thành công!` });
       } else {
         // Tạo mới
         if (modalOrderType === 'invoices') {
@@ -386,6 +396,8 @@ function AppMain() {
       setCustomerSearch('');
       setPaidAmount(0);
       setEditingOrderId(null);
+      setEditingInvoiceId(null);
+      setEditingInvoiceOriginalQty({});
       setShowOrderModal(false);
       loadData();
     } catch (e) {
@@ -598,6 +610,8 @@ function AppMain() {
   const handleEditOrder = async (ord) => {
     try {
       const details = await api(`/api/orders/${ord.id}`);
+      setEditingInvoiceId(null);
+      setEditingInvoiceOriginalQty({});
       setEditingOrderId(ord.id); // Lưu lại ID để biết đang sửa đơn này
       setModalOrderType('orders');
       setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
@@ -616,6 +630,36 @@ function AppMain() {
       setShowOrderModal(true);
     } catch (e) {
       alert('Lỗi khi tải dữ liệu sửa đơn: ' + e.message);
+    }
+  };
+
+  // 2b. Hàm chỉnh sửa phiếu bán hàng (nạp lại vào popup tạo đơn)
+  const handleEditInvoice = async (inv) => {
+    try {
+      const details = await api(`/api/invoices/${inv.id}`);
+      setEditingOrderId(null);
+      setEditingInvoiceId(inv.id);
+      setModalOrderType('invoices');
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setCustomerSearch(details.customer_name);
+      setPaidAmount(details.paid_amount || 0);
+      setPaymentMethod(details.payment_method || 'Tiền mặt');
+      setOrderDate(details.created_at ? details.created_at.split('T')[0] : todayLocal());
+      setPosProductKeyword('');
+
+      const newCart = {};
+      const oldQty = {};
+      (details.items || []).forEach((item) => {
+        newCart[item.product_id] = item.quantity;
+        newCart[item.product_id + '_price'] = item.price;
+        newCart[item.product_id + '_discount'] = item.discount || 0;
+        oldQty[item.product_id] = item.quantity;
+      });
+      setCart(newCart);
+      setEditingInvoiceOriginalQty(oldQty);
+      setShowOrderModal(true);
+    } catch (e) {
+      alert('Lỗi khi tải dữ liệu sửa phiếu: ' + e.message);
     }
   };
 
@@ -967,13 +1011,13 @@ function AppMain() {
               <h2 style={{ margin: 0 }}>Quản lý Đơn hàng & Phiếu bán hàng</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  onClick={() => { setEditingOrderId(null); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  onClick={() => { setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
                   style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Phiếu Bán Hàng
                 </button>
                 <button
-                  onClick={() => { setEditingOrderId(null); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  onClick={() => { setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
                   style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Đơn Đặt Hàng
@@ -1013,35 +1057,7 @@ function AppMain() {
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
-                          <button 
-  onClick={async () => {
-    const res = await api(`/api/invoices/${inv.id}`);
-    if (res) {
-      setEditingInvoiceId(inv.id);
-      setInvoiceForm({
-        customer_name: res.customer_name || '',
-        customer_phone: res.customer_phone || '',
-        address: res.address || '',
-        paid_amount: res.paid_amount || res.total,
-        payment_method: res.payment_method || 'Chuyển khoản',
-        created_at: res.created_at ? res.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
-        items: res.items.map(i => ({
-          product_id: i.product_id,
-          name: i.product_name || i.name,
-          sku: i.sku || '',
-          quantity: i.quantity,
-          price: i.price,
-          discount: i.discount || 0
-        }))
-      });
-      setShowInvoiceModal(true);
-    }
-  }} 
-  style={{ background: '#fef3c7', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#d97706' }} 
-  title="Chỉnh sửa"
->
-  ✏️
-</button>
+                          <button onClick={() => handleEditInvoice(inv)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
                           <button onClick={() => handleDeleteOrderOrInvoice('invoices', inv.id, inv.code)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                         </td>
                       </tr>
@@ -2237,15 +2253,17 @@ function AppMain() {
         </div>
       )}
 
-      {/* POPUP TẠO PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
+      {/* POPUP TẠO / SỬA PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
       {showOrderModal && (
         <div style={{ ...overlayStyle, zIndex: 900 }}>
           <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, color: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed' }}>
-                {modalOrderType === 'invoices' ? '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)'}
+                {modalOrderType === 'invoices'
+                  ? (editingInvoiceId ? '✏️ Sửa Phiếu Bán Hàng' : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
+                  : (editingOrderId ? '✏️ Sửa Đơn Đặt Hàng' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)')}
               </h3>
-              <button onClick={() => setShowOrderModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => { setShowOrderModal(false); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); }} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', flex: 1, overflowY: 'auto' }}>
@@ -2435,7 +2453,9 @@ function AppMain() {
                   onClick={handlePosSubmit}
                   style={{ width: '100%', padding: '14px', background: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '16px' }}
                 >
-                  {modalOrderType === 'invoices' ? 'XÁC NHẬN TẠO PHIẾU BÁN HÀNG' : 'XÁC NHẬN TẠO ĐƠN ĐẶT HÀNG'}
+                  {modalOrderType === 'invoices'
+                    ? (editingInvoiceId ? 'CẬP NHẬT PHIẾU BÁN HÀNG' : 'XÁC NHẬN TẠO PHIẾU BÁN HÀNG')
+                    : (editingOrderId ? 'CẬP NHẬT ĐƠN ĐẶT HÀNG' : 'XÁC NHẬN TẠO ĐƠN ĐẶT HÀNG')}
                 </button>
               </div>
             </div>
