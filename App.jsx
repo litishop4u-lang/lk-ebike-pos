@@ -1683,60 +1683,76 @@ function AppMain() {
                   </div>
 
                   {/* Bảng chi tiết sản phẩm trả lại */}
-                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                      <thead>
-                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
-                          <th style={{ padding: '10px 14px' }}>Mã SP</th>
-                          <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
-                          <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
-                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
-                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
-                          <th style={{ padding: '10px 14px', textAlign: 'center', width: '50px' }}>Xóa</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {returnLoading ? (
-                          <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Đang tải sản phẩm của phiếu bán...</td>
-                          </tr>
-                        ) : (!returnForm.items || returnForm.items.length === 0) ? (
-                          <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
-                              Chưa có sản phẩm trả lại
-                            </td>
-                          </tr>
-                        ) : (
-                          returnForm.items.map((it, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '10px 14px' }}>{it.sku}</td>
-                              <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max={it.max_qty || undefined}
-                                  value={it.quantity}
-                                  onChange={(e) => {
-                                    let q = Math.max(0, Number(e.target.value) || 0);
-                                    if (it.max_qty) q = Math.min(q, it.max_qty);
-                                    updateReturnItem(idx, { quantity: q });
-                                  }}
-                                  style={{ width: '60px', padding: '6px', textAlign: 'center' }}
-                                />
-                                {it.max_qty ? <div style={{ fontSize: '11px', color: '#94a3b8' }}>tối đa {it.max_qty}</div> : null}
-                              </td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>{vnd(it.price)}</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.quantity * it.price)}</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                                <button onClick={() => removeReturnItem(idx)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                 <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
+  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+    <thead>
+      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+        <th style={{ padding: '10px 14px' }}>Mã SP</th>
+        <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
+        <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
+        <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
+        <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
+        <th style={{ padding: '10px 14px', textAlign: 'center', width: '50px' }}>Xóa</th>
+      </tr>
+    </thead>
+    <tbody>
+      {returnLoading ? (
+        <tr>
+          <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Đang tải sản phẩm của phiếu bán...</td>
+        </tr>
+      ) : (!returnForm.items || returnForm.items.length === 0) ? (
+        <tr>
+          <td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+            Chưa có sản phẩm trả lại
+          </td>
+        </tr>
+      ) : (
+        returnForm.items.map((it, idx) => (
+          <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+            <td style={{ padding: '10px 14px' }}>{it.sku}</td>
+            <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
+            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+              <input
+                type="number"
+                min="0"
+                max={it.max_qty || undefined}
+                value={it.quantity}
+                onChange={(e) => {
+                  let q = Math.max(0, Number(e.target.value) || 0);
+                  if (it.max_qty) q = Math.min(q, it.max_qty);
+                  updateReturnItem(idx, { quantity: q });
+                }}
+                style={{ width: '60px', padding: '6px', textAlign: 'center' }}
+              />
+              {it.max_qty ? <div style={{ fontSize: '11px', color: '#94a3b8' }}>tối đa {it.max_qty}</div> : null}
+            </td>
+            
+            {/* 👉 CẬP NHẬT CỘT ĐƠN GIÁ CHO PHÉP NHẬP / SỬA TÙY CHỈNH */}
+            <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+              <input
+                type="number"
+                min="0"
+                value={it.price}
+                onChange={(e) => {
+                  const newPrice = Number(e.target.value) || 0;
+                  updateReturnItem(idx, { price: newPrice });
+                }}
+                style={{ width: '120px', padding: '6px', textAlign: 'right', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}
+              />
+            </td>
+
+            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>
+              {vnd(it.quantity * it.price)}
+            </td>
+            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+              <button onClick={() => removeReturnItem(idx)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+            </td>
+          </tr>
+        ))
+      )}
+    </tbody>
+  </table>
+</div>
 
                   {/* Tổng giá trị và nút hành động */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
