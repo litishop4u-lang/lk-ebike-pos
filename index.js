@@ -26,10 +26,78 @@ const isoDate = (v) => {
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 };
 const idOf = (pathname) => Number(pathname.split('/')[3]);
+const dateOnly = (v) => String(v || '').slice(0, 10);
+// Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
+const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
 
 async function hasTable(db, name) {
   return !!(await db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").bind(name).first());
 }
+
+// Bảng chi tiết phiếu trả hàng (return_order_items): lưu sản phẩm nào, số lượng bao nhiêu để
+// báo cáo Xuất - Nhập - Tồn, thẻ kho và giá vốn tính đúng.
+// Lần đầu tạo bảng sẽ tự bổ sung chi tiết cho các phiếu trả CŨ (chưa có chi tiết) nếu số tiền hoàn
+// đúng bằng tổng phiếu bán gốc (tức là trả toàn bộ phiếu).
+let returnSchemaReady = false;
+async function ensureReturnSchema(db) {
+  if (returnSchemaReady) return;
+  const existed = await hasTable(db, 'return_order_items');
+  if (!existed) {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS return_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      return_order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      price REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0
+    )`).run();
+    try {
+      await db.prepare(`
+        INSERT INTO return_order_items (return_order_id, product_id, quantity, price, total)
+        SELECT r.id, ii.product_id, ii.quantity,
+               CASE WHEN ii.quantity > 0 THEN ROUND(ii.total * 1.0 / ii.quantity) ELSE 0 END,
+               ii.total
+        FROM return_orders r
+        JOIN invoices inv ON inv.code = r.invoice_code
+        JOIN invoice_items ii ON ii.invoice_id = inv.id
+        WHERE r.invoice_code IS NOT NULL AND r.invoice_code <> ''
+          AND ABS(COALESCE(r.refund_amount, 0) - COALESCE(inv.total, 0)) <= 10
+          AND NOT EXISTS (SELECT 1 FROM return_order_items x WHERE x.return_order_id = r.id)
+      `).run();
+    } catch (e) {
+      console.error('backfill return items failed', e);
+    }
+  }
+  returnSchemaReady = true;
+}
+
+// Lấy toàn bộ dòng hàng trả lại của các phiếu trả ĐÃ HOÀN THÀNH (đã cộng lại kho)
+async function loadReturnLines(db) {
+  await ensureReturnSchema(db);
+  const { results } = await db.prepare(`
+    SELECT roi.product_id, roi.quantity, roi.total, ro.return_date, ro.created_at, ro.status
+    FROM return_order_items roi
+    JOIN return_orders ro ON roi.return_order_id = ro.id
+  `).all();
+  return (results || [])
+    .filter((r) => isCompletedReturn(r.status))
+    .map((r) => ({
+      product_id: r.product_id,
+      quantity: Number(r.quantity) || 0,
+      total: Number(r.total) || 0,
+      date: dateOnly(r.return_date || r.created_at),
+    }));
+}
+
+const groupByProduct = (arr) => {
+  const m = new Map();
+  for (const x of arr) {
+    const k = String(x.product_id);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return m;
+};
 
 // Chuẩn hoá & kiểm tra dòng hàng từ client
 function normalizeItems(items) {
@@ -260,8 +328,9 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
-        // ===== API THẺ KHO CHI TIẾT SẢN PHẨM =====
+      // ===== API THẺ KHO CHI TIẾT SẢN PHẨM =====
       if (pathname === '/api/products/stock-card' && method === 'GET') {
+        await ensureReturnSchema(db);
         const urlObj = new URL(request.url);
         const productId = urlObj.searchParams.get('productId');
 
@@ -280,6 +349,15 @@ export default {
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE ii.product_id = ?
+        `).bind(productId).all();
+
+        // 3. Lấy lịch sử Khách trả hàng (Nhập lại kho)
+        const returnsRes = await db.prepare(`
+          SELECT ro.code as return_code, COALESCE(ro.return_date, ro.created_at) as created_at,
+                 ro.customer_name as partner_name, ro.status, roi.price, roi.quantity
+          FROM return_order_items roi
+          JOIN return_orders ro ON roi.return_order_id = ro.id
+          WHERE roi.product_id = ?
         `).bind(productId).all();
 
         let transactions = [];
@@ -308,6 +386,19 @@ export default {
           });
         });
 
+        // Đưa phiếu khách trả hàng vào (Số lượng dương, chỉ phiếu đã hoàn thành mới cộng kho)
+        (returnsRes.results || []).forEach(item => {
+          if (!isCompletedReturn(item.status)) return;
+          transactions.push({
+            code: item.return_code || 'TH',
+            date: item.created_at,
+            partner: item.partner_name || 'Khách lẻ',
+            import_price: 0,
+            export_price: Number(item.price) || 0,
+            qty: Number(item.quantity) || 0
+          });
+        });
+
         // Sắp xếp theo thời gian tăng dần để tính lũy kế chính xác
         transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -327,7 +418,7 @@ export default {
       if (pathname === '/api/invoices' && method === 'POST') {
         const payload = await request.json();
         const r = await createInvoice(db, payload);
-        
+
         // 👉 TỰ ĐỘNG SINH PHIẾU THU NẾU HÓA ĐƠN CÓ THANH TOÁN (paid_amount > 0)
         const paidAmount = Number(payload.paid_amount) || 0;
         if (paidAmount > 0 && r && r.code) {
@@ -414,9 +505,9 @@ export default {
         if (!mainObj) throw new HttpError(404, 'Không tìm thấy dữ liệu');
 
         const items = await db.prepare(`
-          select i.*, p.name as product_name, p.sku 
-          from ${itemTable} i 
-          left join products p on i.product_id = p.id 
+          select i.*, p.name as product_name, p.sku
+          from ${itemTable} i
+          left join products p on i.product_id = p.id
           where i.${foreignKey} = ?
         `).bind(id).all();
 
@@ -514,12 +605,14 @@ export default {
 
       // ===== 1. LẤY DANH SÁCH PHIẾU TRẢ HÀNG & THỐNG KÊ =====
       if (pathname === '/api/return-orders' && method === 'GET') {
+        await ensureReturnSchema(db);
         const returnsRes = await db.prepare('SELECT * FROM return_orders ORDER BY created_at DESC').all();
         const returns = returnsRes.results || [];
 
         let totalReturns = returns.length;
         let pendingReturns = returns.filter(r => r.status === 'Đang xử lý').length;
-        let completedReturns = returns.filter(r => r.status === 'Hoàn Thành' || r.status === 'Đã hoàn thành').length;
+        // SỬA: trạng thái lưu dạng "Hoàn Thành (Cộng kho & trừ nợ)" nên phải so khớp theo cụm "hoàn thành"
+        let completedReturns = returns.filter(r => isCompletedReturn(r.status)).length;
         let totalRefundAmount = returns.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
 
         return json({
@@ -538,33 +631,50 @@ export default {
 
       // ===== 2. TẠO PHIẾU TRẢ HÀNG MỚI =====
       if (pathname === '/api/return-orders' && method === 'POST') {
+        await ensureReturnSchema(db);
         const body = await request.json();
-        const { code, invoice_code, customer_name, return_date, reason, refund_amount, status, items } = body;
+        const { invoice_code, customer_name, return_date, reason, refund_amount } = body;
+        const statusText = str(body.status) || 'Hoàn Thành';
+        const code = str(body.code) || ('PTB-' + Date.now());
 
-        // Lưu phiếu trả hàng
-        const insertRes = await db.prepare(`
-          INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).bind(
-          code || ('PTB-' + Date.now()),
-          invoice_code || '',
-          customer_name || 'Khách lẻ',
-          return_date || new Date().toISOString().slice(0, 10),
-          reason || 'Sản phẩm lỗi',
-          Number(refund_amount) || 0,
-          status || 'Hoàn Thành'
-        ).run();
+        // Chuẩn hoá danh sách hàng trả (phải có sản phẩm để cộng kho và lên báo cáo)
+        const lines = (Array.isArray(body.items) ? body.items : [])
+          .map((it) => ({
+            product_id: Number(it.product_id),
+            quantity: Number(it.quantity),
+            price: money(it.price),
+          }))
+          .filter((l) => Number.isInteger(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0);
+        if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
+        await loadProducts(db, lines, { checkStock: false });
 
-        // Nếu trạng thái là Hoàn Thành, tiến hành cộng lại số lượng vào kho sản phẩm
-        if (status.includes('Hoàn Thành') && items && items.length > 0) {
-          for (const item of items) {
-            if (item.product_id && item.quantity) {
-              await db.prepare(`
-                UPDATE products SET stock = stock + ? WHERE id = ?
-              `).bind(Number(item.quantity), item.product_id).run();
-            }
-          }
+        const stmts = [
+          // Lưu phiếu trả hàng
+          db.prepare(`
+            INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          `).bind(
+            code,
+            invoice_code || '',
+            customer_name || 'Khách lẻ',
+            return_date || new Date().toISOString().slice(0, 10),
+            reason || 'Sản phẩm lỗi',
+            Number(refund_amount) || 0,
+            statusText
+          ),
+          // Lưu chi tiết từng sản phẩm trả lại
+          ...lines.map((l) =>
+            db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, price, total) VALUES ((SELECT id FROM return_orders WHERE code = ?),?,?,?,?)')
+              .bind(code, l.product_id, l.quantity, l.price, l.quantity * l.price)),
+        ];
+
+        // Nếu trạng thái là Hoàn Thành, cộng lại số lượng vào kho sản phẩm (cùng 1 transaction)
+        if (isCompletedReturn(statusText)) {
+          stmts.push(...lines.map((l) =>
+            db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)));
         }
+
+        await db.batch(stmts);
 
         return json({ success: true, message: 'Tạo phiếu trả hàng thành công' }, 200, origin);
       }
@@ -631,7 +741,7 @@ export default {
         if (amount <= 0) throw new HttpError(400, 'Số tiền giao dịch phải lớn hơn 0');
 
         await db.prepare(`
-          UPDATE cash_books 
+          UPDATE cash_books
           SET type = ?, amount = ?, category = ?, payment_method = ?, reference_code = ?, note = ?
           WHERE id = ?
         `).bind(
@@ -949,11 +1059,12 @@ export default {
       }
 
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
+      // Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại (nhập lại kho)
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
         const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
-        const search = (urlObj.searchParams.get('search') || '').toLowerCase();
+        const search = (urlObj.searchParams.get('search') || '').trim().toLowerCase();
 
         // 1. Lấy toàn bộ sản phẩm (chọn các cột cơ bản an toàn tuyệt đối)
         const prodRes = await db.prepare('SELECT * FROM products').all();
@@ -965,7 +1076,7 @@ export default {
           FROM purchase_order_items poi
           JOIN purchase_orders po ON poi.purchase_order_id = po.id
         `).all();
-        const purchaseItems = purchaseRes.results || [];
+        const purchaseMap = groupByProduct((purchaseRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
 
         // 3. Lấy chi tiết lịch sử xuất kho
         const invoiceRes = await db.prepare(`
@@ -973,17 +1084,26 @@ export default {
           FROM invoice_items ii
           JOIN invoices inv ON ii.invoice_id = inv.id
         `).all();
-        const invoiceItems = invoiceRes.results || [];
+        const invoiceMap = groupByProduct((invoiceRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
+
+        // 4. Lấy lịch sử khách trả hàng (đã hoàn thành -> đã cộng lại kho)
+        const returnMap = groupByProduct(await loadReturnLines(db));
 
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
+        const n0 = (v) => Number(v) || 0;
 
-        // 4. Tính toán số liệu cho từng sản phẩm
+        // 5. Tính toán số liệu cho từng sản phẩm
         const reportData = products.map(p => {
-          const currentStock = Number(p.stock) || 0;
+          const key = String(p.id);
+          const pPur = purchaseMap.get(key) || [];
+          const pInv = invoiceMap.get(key) || [];
+          const pRet = returnMap.get(key) || [];
+
+          const currentStock = n0(p.stock);
           // Giá nhập dự phòng trên thẻ sản phẩm (nếu chưa có lịch sử nhập)
-          const fallbackCost = Number(p.import_price ?? p.cost_price) || 0;
-          // SỬA: ưu tiên cột sku làm mã sản phẩm
+          const fallbackCost = n0(p.import_price ?? p.cost_price);
+          // Ưu tiên cột sku làm mã sản phẩm
           const prodCode = String(p.sku || p.code || p.product_code || '---');
           const prodName = String(p.name || p.product_name || 'Không tên');
           const prodUnit = String(p.unit || 'Cái');
@@ -991,47 +1111,47 @@ export default {
           // Giá vốn bình quân gia quyền = tổng giá trị nhập / tổng số lượng nhập (tính đến hết kỳ báo cáo)
           // Nếu chưa có lịch sử nhập thì dùng giá nhập trên thẻ sản phẩm
           let histQty = 0, histVal = 0;
-          for (const i of purchaseItems) {
-            if (String(i.product_id) !== String(p.id)) continue;
-            const d = (i.created_at || '').slice(0, 10);
-            if (d && d > cleanEnd) continue;
-            histQty += Number(i.quantity) || 0;
-            histVal += Number(i.total) || 0;
+          for (const i of pPur) {
+            if (i.date && i.date > cleanEnd) continue;
+            histQty += n0(i.quantity);
+            histVal += n0(i.total);
           }
           const unitCost = histQty > 0 && histVal > 0 ? histVal / histQty : fallbackCost;
 
-          // Lọc lượng nhập trong kỳ
-          const pImports = purchaseItems.filter(i => {
-            if (String(i.product_id) !== String(p.id)) return false;
-            const itemDate = (i.created_at || '').slice(0, 10);
-            if (!itemDate) return true;
-            return itemDate >= cleanStart && itemDate <= cleanEnd;
-          });
+          // Nhập từ NCC: trong kỳ và sau kỳ
+          let purQty = 0, purVal = 0, purAfterQty = 0;
+          for (const i of pPur) {
+            const q = n0(i.quantity);
+            if (!i.date || (i.date >= cleanStart && i.date <= cleanEnd)) {
+              purQty += q;
+              purVal += n0(i.total) || q * unitCost;
+            } else if (i.date > cleanEnd) {
+              purAfterQty += q;
+            }
+          }
 
-          const importQty = pImports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-          const importVal = pImports.reduce((sum, i) => sum + (Number(i.total) || (Number(i.quantity) * unitCost)), 0);
+          // Khách trả hàng (nhập lại kho): trong kỳ và sau kỳ — tính theo giá vốn bình quân
+          let retQty = 0, retAfterQty = 0;
+          for (const r of pRet) {
+            if (r.date >= cleanStart && r.date <= cleanEnd) retQty += n0(r.quantity);
+            else if (r.date > cleanEnd) retAfterQty += n0(r.quantity);
+          }
 
-          // Lọc lượng xuất trong kỳ
-          const pExports = invoiceItems.filter(i => {
-            if (String(i.product_id) !== String(p.id)) return false;
-            const itemDate = (i.created_at || '').slice(0, 10);
-            if (!itemDate) return false;
-            return itemDate >= cleanStart && itemDate <= cleanEnd;
-          });
+          // Xuất bán: trong kỳ và sau kỳ
+          let expQty = 0, expAfterQty = 0;
+          for (const i of pInv) {
+            if (!i.date) continue;
+            if (i.date >= cleanStart && i.date <= cleanEnd) expQty += n0(i.quantity);
+            else if (i.date > cleanEnd) expAfterQty += n0(i.quantity);
+          }
 
-          const exportQty = pExports.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-          const exportVal = exportQty * unitCost;
+          const importQty = purQty + retQty;
+          const importVal = purVal + retQty * unitCost;
+          const exportQty = expQty;
+          const exportVal = expQty * unitCost;
 
-          // SỬA: tính phát sinh SAU kỳ báo cáo để suy ra tồn cuối kỳ đúng
-          const importAfterQty = purchaseItems
-            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
-            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-          const exportAfterQty = invoiceItems
-            .filter(i => String(i.product_id) === String(p.id) && (i.created_at || '').slice(0, 10) > cleanEnd)
-            .reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-
-          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ
-          const closingQty = currentStock + exportAfterQty - importAfterQty;
+          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ - đã khách trả sau kỳ
+          const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty;
           const closingVal = closingQty * unitCost;
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
@@ -1042,24 +1162,24 @@ export default {
             name: prodName,
             unit: prodUnit,
             openingQty,
-            openingVal,
+            openingVal: Math.round(openingVal),
             importQty,
-            importVal,
+            importVal: Math.round(importVal),
             exportQty,
-            exportVal,
+            exportVal: Math.round(exportVal),
             closingQty,
-            closingVal
+            closingVal: Math.round(closingVal)
           };
         });
 
-        // 5. Chỉ hiển thị sản phẩm có phát sinh và khớp từ khóa tìm kiếm
+        // 6. Chỉ hiển thị sản phẩm có phát sinh và khớp từ khóa tìm kiếm
         const activeItems = reportData.filter(item => {
           const hasActivity = item.openingQty !== 0 || item.importQty !== 0 || item.exportQty !== 0 || item.closingQty !== 0;
-          const matchesSearch = item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
+          const matchesSearch = !search || item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
           return hasActivity && matchesSearch;
         });
 
-        // 6. Tính tổng cộng
+        // 7. Tính tổng cộng
         const totals = activeItems.reduce((acc, item) => {
           acc.openingQty += item.openingQty;
           acc.openingVal += item.openingVal;
@@ -1085,88 +1205,116 @@ export default {
         }, 200, origin);
       }
 
-          // ===== BÁO CÁO KẾT QUẢ KINH DOANH =====
+      // ===== BÁO CÁO KẾT QUẢ KINH DOANH =====
       if (pathname === '/api/reports/profit-loss' && method === 'GET') {
+        await ensureReturnSchema(db);
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
         const endDate = urlObj.searchParams.get('endDate') || '2025-12-31';
 
-        // Lấy danh sách hóa đơn bán hàng trong kỳ
-        const invoicesRes = await db.prepare(`
-          SELECT id, total FROM invoices 
+        // 1. Doanh thu bán hàng trong kỳ
+        const revRes = await db.prepare(`
+          SELECT COALESCE(SUM(total), 0) AS gross FROM invoices
           WHERE date(created_at) >= ? AND date(created_at) <= ?
+        `).bind(startDate, endDate).first();
+        const grossRevenue = Number(revRes?.gross) || 0;
+
+        // 2. Các khoản giảm trừ = tiền hoàn của các phiếu trả hàng đã hoàn thành trong kỳ
+        const retRes = await db.prepare(`
+          SELECT COALESCE(SUM(refund_amount), 0) AS refunded FROM return_orders
+          WHERE date(return_date) >= ? AND date(return_date) <= ?
+            AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
+        `).bind(startDate, endDate).first();
+        const returnDeductions = Number(retRes?.refunded) || 0;
+        const netRevenue = grossRevenue - returnDeductions;
+
+        // 3. Giá vốn bình quân gia quyền của từng sản phẩm (tính đến hết kỳ) — cùng cách tính với báo cáo X-N-T
+        const productsRes = await db.prepare('SELECT * FROM products').all();
+        const fallbackCost = {};
+        (productsRes.results || []).forEach((p) => {
+          fallbackCost[p.id] = Number(p.import_price ?? p.cost_price) || 0;
+        });
+
+        const importsRes = await db.prepare(`
+          SELECT poi.product_id, poi.quantity, poi.total
+          FROM purchase_order_items poi
+          JOIN purchase_orders po ON poi.purchase_order_id = po.id
+          WHERE date(po.created_at) <= ?
+        `).bind(endDate).all();
+
+        const ledger = {};
+        (importsRes.results || []).forEach((item) => {
+          const l = ledger[item.product_id] || (ledger[item.product_id] = { qty: 0, amount: 0 });
+          l.qty += Number(item.quantity) || 0;
+          l.amount += Number(item.total) || 0;
+        });
+        const avgCost = (pid) => {
+          const l = ledger[pid];
+          return l && l.qty > 0 && l.amount > 0 ? l.amount / l.qty : (fallbackCost[pid] || 0);
+        };
+
+        // 4. Giá vốn hàng đã xuất bán trong kỳ
+        const soldRes = await db.prepare(`
+          SELECT ii.product_id, SUM(ii.quantity) AS qty
+          FROM invoice_items ii
+          JOIN invoices inv ON ii.invoice_id = inv.id
+          WHERE date(inv.created_at) >= ? AND date(inv.created_at) <= ?
+          GROUP BY ii.product_id
         `).bind(startDate, endDate).all();
-        const invoices = invoicesRes.results || [];
-        const invoiceIds = invoices.map(i => i.id);
 
-        let grossRevenue = invoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
-
-        // Lấy danh sách phiếu trả hàng trong kỳ (Các khoản giảm trừ)
-        const returnsRes = await db.prepare(`
-          SELECT id, refund_amount, invoice_code FROM return_orders 
-          WHERE date(return_date) >= ? AND date(return_date) <= ? AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
-        `).bind(startDate, endDate).all();
-        const returnOrders = returnsRes.results || [];
-        
-        let returnDeductions = returnOrders.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
-        let netRevenue = grossRevenue - returnDeductions;
-
-        // Tính Giá Vốn Hàng Bán (COGS) chuẩn bình quân gia quyền & trừ phần hàng bị trả lại kho
         let cogs = 0;
-        if (invoiceIds.length > 0) {
-          const placeholders = invoiceIds.map(() => '?').join(',');
-          const itemsRes = await db.prepare(`
-            select ii.product_id, ii.quantity, ii.price 
-            from invoice_items ii
-            where ii.invoice_id IN (${placeholders})
-          `).bind(...invoiceIds).all();
+        (soldRes.results || []).forEach((row) => {
+          cogs += (Number(row.qty) || 0) * avgCost(row.product_id);
+        });
 
-          // Lấy giá vốn bình quân của sản phẩm tính đến hết kỳ
-          const importsRes = await db.prepare(`
-            select p.id as product_id, poi.quantity, poi.price 
-            from purchase_order_items poi
-            join purchase_orders po on poi.purchase_order_id = po.id
-            join products p on poi.product_id = p.id
-            where date(po.created_at) <= ?
-          `).bind(endDate).all();
+        // 5. Trừ lại giá vốn của hàng bán bị khách trả lại trong kỳ (hàng đã nhập lại kho)
+        const returnedRes = await db.prepare(`
+          SELECT roi.product_id, SUM(roi.quantity) AS qty
+          FROM return_order_items roi
+          JOIN return_orders ro ON roi.return_order_id = ro.id
+          WHERE date(ro.return_date) >= ? AND date(ro.return_date) <= ?
+            AND (ro.status LIKE '%Hoàn Thành%' OR ro.status LIKE '%Đã hoàn thành%')
+          GROUP BY roi.product_id
+        `).bind(startDate, endDate).all();
 
-          const stockLedger = {};
-          (importsRes.results || []).forEach(item => {
-            if (!stockLedger[item.product_id]) stockLedger[item.product_id] = { totalQty: 0, totalAmount: 0 };
-            stockLedger[item.product_id].totalQty += Number(item.quantity) || 0;
-            stockLedger[item.product_id].totalAmount += (Number(item.quantity) || 0) * (Number(item.price) || 0);
-          });
+        (returnedRes.results || []).forEach((row) => {
+          cogs -= (Number(row.qty) || 0) * avgCost(row.product_id);
+        });
 
-          const productAvgCost = {};
-          Object.keys(stockLedger).forEach(pid => {
-            const l = stockLedger[pid];
-            productAvgCost[pid] = l.totalQty > 0 ? (l.totalAmount / l.totalQty) : 0;
-          });
+        cogs = Math.round(Math.max(0, cogs));
+        const grossProfit = netRevenue - cogs;
 
-          // Tổng vốn xuất bán
-          (itemsRes.results || []).forEach(item => {
-            const avgCost = productAvgCost[item.product_id] || 0;
-            cogs += (Number(item.quantity) || 0) * avgCost;
-          });
+        // 6. Chi phí hoạt động lấy từ Sổ quỹ (phiếu chi theo danh mục)
+        const expRes = await db.prepare(`
+          SELECT category, COALESCE(SUM(amount), 0) AS amt FROM cash_books
+          WHERE type = 'OUT' AND date(created_at) >= ? AND date(created_at) <= ?
+          GROUP BY category
+        `).bind(startDate, endDate).all();
 
-          // Trừ đi giá vốn của phần hàng bị khách trả lại trong kỳ
-          // (Đảm bảo giá vốn hàng bán phản ánh đúng lượng hàng thực tế bán ra)
-          for (const ret of returnOrders) {
-            // Lấy chi tiết sản phẩm của phiếu bán gốc hoặc mặc định trừ theo giá vốn bình quân
-            cogs -= (Number(ret.refund_amount) || 0) > 0 ? 0 : 0; // Điều chỉnh tự động nếu có items trả lại
-          }
-        }
+        const expenses = { shipping: 0, tax: 0, salary: 0, other: 0, total: 0 };
+        (expRes.results || []).forEach((row) => {
+          const amt = Number(row.amt) || 0;
+          if (row.category === 'Chi phí vận chuyển') expenses.shipping += amt;
+          else if (row.category === 'Chi thuế') expenses.tax += amt;
+          else if (row.category === 'Chi lương nhân viên') expenses.salary += amt;
+          else if (row.category === 'Chi phí khác') expenses.other += amt;
+          // Các danh mục "Mua hàng / Trả nợ NCC", "Chi hoàn trả khách hàng" không phải chi phí hoạt động
+        });
+        expenses.total = expenses.shipping + expenses.tax + expenses.salary + expenses.other;
 
-        let grossProfit = netRevenue - cogs;
+        const netProfit = grossProfit - expenses.total;
 
         return json({
           success: true,
           data: {
-            grossRevenue,      // Doanh thu bán hàng
-            returnDeductions,  // Các khoản giảm trừ (Trả lại)
-            netRevenue,        // Doanh thu thuần
-            cogs,              // Giá vốn hàng bán
-            grossProfit        // Lợi nhuận gộp
+            grossRevenue,                    // Doanh thu bán hàng
+            totalDiscount: returnDeductions, // Các khoản giảm trừ (hiển thị ở giao diện)
+            returnDeductions,                // Các khoản giảm trừ (trả lại)
+            netRevenue,                      // Doanh thu thuần
+            cogs,                            // Giá vốn hàng bán (đã trừ giá vốn hàng bị trả lại)
+            grossProfit,                     // Lợi nhuận gộp
+            expenses,                        // Chi phí hoạt động
+            netProfit                        // Lợi nhuận thuần
           }
         }, 200, origin);
       }
