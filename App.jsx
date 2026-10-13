@@ -1,7 +1,8 @@
-import { Component, useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
-const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
+// Làm tròn về số nguyên đồng để không hiện số lẻ kiểu 35.331.754,667 ₫
+const vnd = (n) => Math.round(Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
 // Chuyển chuỗi số kiểu "1,500,000" / "1.500.000 ₫" thành số
 const num = (s) => Number(String(s ?? '').replace(/[.,\s₫]/g, '')) || 0;
 const splitRow = (l) => l.split(/\t|;/).map((x) => x.trim().replace(/^["']|["']$/g, ''));
@@ -262,6 +263,7 @@ function AppMain() {
   const [reportItems, setReportItems] = useState([]);
   const [reportSummary, setReportSummary] = useState({ totalOpeningVal: 0, totalImportVal: 0, totalExportVal: 0, totalClosingVal: 0 });
   const [reportSearch, setReportSearch] = useState('');
+  const reportReqRef = useRef(0); // đánh số mỗi lần gọi để bỏ qua kết quả cũ trả về chậm
 
   const [reportType, setReportType] = useState('month'); // 'day', 'month', 'quarter', 'year', 'custom'
   const [reportValue, setReportValue] = useState(new Date().toISOString().slice(0, 7)); // ví dụ: '2026-10'
@@ -308,6 +310,7 @@ function AppMain() {
   }, [currentView]);
 
   const loadInventoryReport = async () => {
+    const reqId = ++reportReqRef.current;
     try {
       let start = '2025-01-01';
       let end = '2030-12-31';
@@ -340,7 +343,10 @@ function AppMain() {
       }
 
       // Gọi API với ngày tháng chuẩn dạng YYYY-MM-DD
-      const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch || '')}`);
+      const res = await api(`/api/reports/inventory-summary?startDate=${start}&endDate=${end}&search=${encodeURIComponent(reportSearch.trim())}`);
+
+      // Có lần gọi mới hơn (ví dụ đang gõ tìm kiếm) thì bỏ qua kết quả này
+      if (reqId !== reportReqRef.current) return;
 
       if (res && res.success) {
         // Chuẩn hóa dữ liệu: ép số, tránh null/undefined làm sập giao diện
@@ -376,6 +382,13 @@ function AppMain() {
       loadInventoryReport();
     }
   }, [currentView]);
+
+  // Ô tìm kiếm sản phẩm: tự lọc lại báo cáo sau khi ngừng gõ 0,3 giây
+  useEffect(() => {
+    if (currentView !== 'inventory-report') return;
+    const t = setTimeout(() => { loadInventoryReport(); }, 300);
+    return () => clearTimeout(t);
+  }, [reportSearch]);
 
   // ===== States cho Báo cáo Kết quả kinh doanh (Lãi / Lỗ) =====
   const [plReport, setPlReport] = useState(EMPTY_PL_REPORT);
@@ -2250,6 +2263,7 @@ function AppMain() {
                 placeholder="🔍 Tìm mã hoặc tên sản phẩm..."
                 value={reportSearch}
                 onChange={(e) => setReportSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') loadInventoryReport(); }}
                 style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
               />
 
