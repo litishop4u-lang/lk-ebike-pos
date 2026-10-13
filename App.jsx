@@ -576,19 +576,13 @@ function AppMain() {
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
         items: cartLines.map((l) => {
-          const details = [
-            cart[l.id + '_chassis'] ? `Số khung: ${cart[l.id + '_chassis']}` : '',
-            cart[l.id + '_frame'] ? `Số sườn: ${cart[l.id + '_frame']}` : '',
-            cart[l.id + '_color'] ? `Màu: ${cart[l.id + '_color']}` : '',
-            cart[l.id + '_note'] ? `Ghi chú: ${cart[l.id + '_note']}` : ''
-          ].filter(Boolean).join(' | ');
-
+          const chassisVal = cart[l.id + '_chassis'] || cart[l.id + '_chassis_color'] || l.chassis_color || '';
           return {
             product_id: l.id,
             quantity: l.quantity,
             price: l.price,
             discount: l.discount,
-            chassis_color: details
+            chassis_color: chassisVal
           };
         })
       };
@@ -899,8 +893,19 @@ function AppMain() {
       const newCart = {};
       const oldQty = {};
       (details.items || []).forEach((item) => {
-        putItemIntoCart(newCart, item);
-        oldQty[item.product_id] = item.quantity;
+        const pid = item.product_id;
+        newCart[pid] = item.quantity;
+        newCart[pid + '_price'] = item.price;
+        newCart[pid + '_discount'] = item.discount || 0;
+        oldQty[pid] = item.quantity;
+
+        // 👉 Nạp lại thông tin số khung, số sườn, màu sắc cũ (nếu có) vào giỏ hàng khi mở form sửa
+        if (item.chassis_color) {
+          // Phân tách chuỗi lưu trữ hoặc gán trực tiếp tùy theo cách bạn lưu
+          // Nếu lưu dạng chuỗi gộp: "Số khung: ABC | Số sườn: DEF | Màu: X" hoặc lưu riêng
+          // Dưới đây chúng ta gán trực tiếp vào _chassis để hiển thị hoặc tách ra các state tương ứng:
+          newCart[pid + '_chassis'] = item.chassis_color;
+        }
       });
       setCart(newCart);
       setEditingInvoiceOriginalQty(oldQty);
