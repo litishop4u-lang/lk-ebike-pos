@@ -575,16 +575,13 @@ function AppMain() {
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: cartLines.map((l) => {
-          const chassisVal = cart[l.id + '_chassis'] || cart[l.id + '_chassis_color'] || l.chassis_color || '';
-          return {
-            product_id: l.id,
-            quantity: l.quantity,
-            price: l.price,
-            discount: l.discount,
-            chassis_color: chassisVal
-          };
-        })
+        items: cartLines.map((l) => ({
+          product_id: l.id,
+          quantity: l.quantity,
+          price: l.price,
+          discount: l.discount,
+          chassis_color: cart[l.id + '_chassis'] || l.chassis_color || ''
+        }))
       };
 
       let r;
@@ -899,11 +896,8 @@ function AppMain() {
         newCart[pid + '_discount'] = item.discount || 0;
         oldQty[pid] = item.quantity;
 
-        // 👉 Nạp lại thông tin số khung, số sườn, màu sắc cũ (nếu có) vào giỏ hàng khi mở form sửa
+        // 👉 Nạp chính xác trường chassis_color từ dữ liệu cũ vào giỏ hàng
         if (item.chassis_color) {
-          // Phân tách chuỗi lưu trữ hoặc gán trực tiếp tùy theo cách bạn lưu
-          // Nếu lưu dạng chuỗi gộp: "Số khung: ABC | Số sườn: DEF | Màu: X" hoặc lưu riêng
-          // Dưới đây chúng ta gán trực tiếp vào _chassis để hiển thị hoặc tách ra các state tương ứng:
           newCart[pid + '_chassis'] = item.chassis_color;
         }
       });
