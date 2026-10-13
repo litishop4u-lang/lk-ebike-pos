@@ -1183,10 +1183,10 @@ function AppMain() {
               📦 Trả Hàng Bán
             </button>
           </li>
-          <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>Sản phẩm</button></li>
-          <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>Nhà cung cấp</button></li>
-          <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>Nhập hàng</button></li>
-          <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>Khách hàng</button></li>
+          <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>🏷️ Sản phẩm</button></li>
+          <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>🚚 Nhà cung cấp</button></li>
+          <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>📥 Nhập hàng</button></li>
+          <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>👥 Khách hàng</button></li>
           <li>
             <button
               onClick={() => setCurrentView('cash-book')}
