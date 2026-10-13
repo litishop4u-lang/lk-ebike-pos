@@ -9,6 +9,34 @@ const splitRow = (l) => l.split(/\t|;/).map((x) => x.trim().replace(/^["']|["']$
 // Ngày hôm nay theo GIỜ ĐỊA PHƯƠNG (toISOString dùng UTC nên 0h-7h sáng VN sẽ ra ngày hôm qua)
 const todayLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
+// Tách chuỗi "Số khung: A | Số sườn: B | Màu: C | Ghi chú: D" thành từng trường để nạp lại vào giỏ hàng khi sửa phiếu
+const parseItemDetails = (str) => {
+  const out = { chassis: '', frame: '', color: '', note: '' };
+  String(str || '').split(' | ').forEach((part) => {
+    const t = part.trim();
+    if (!t) return;
+    if (t.startsWith('Số khung:')) out.chassis = t.slice('Số khung:'.length).trim();
+    else if (t.startsWith('Số sườn:')) out.frame = t.slice('Số sườn:'.length).trim();
+    else if (t.startsWith('Màu:')) out.color = t.slice('Màu:'.length).trim();
+    else if (t.startsWith('Ghi chú:')) out.note = t.slice('Ghi chú:'.length).trim();
+    else out.note = out.note ? `${out.note} | ${t}` : t; // chuỗi cũ không theo định dạng -> đưa vào ghi chú
+  });
+  return out;
+};
+
+// Nạp 1 dòng hàng (từ API) vào giỏ, kèm số khung / số sườn / màu / ghi chú
+const putItemIntoCart = (cartObj, item) => {
+  const id = item.product_id;
+  cartObj[id] = item.quantity;
+  cartObj[id + '_price'] = item.price;
+  cartObj[id + '_discount'] = item.discount || 0;
+  const d = parseItemDetails(item.chassis_color);
+  if (d.chassis) cartObj[id + '_chassis'] = d.chassis;
+  if (d.frame) cartObj[id + '_frame'] = d.frame;
+  if (d.color) cartObj[id + '_color'] = d.color;
+  if (d.note) cartObj[id + '_note'] = d.note;
+};
+
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -497,6 +525,10 @@ function AppMain() {
         delete next[id];
         delete next[id + '_price'];
         delete next[id + '_discount'];
+        delete next[id + '_chassis'];
+        delete next[id + '_frame'];
+        delete next[id + '_color'];
+        delete next[id + '_note'];
       } else {
         next[id] = q;
       }
@@ -516,11 +548,7 @@ function AppMain() {
 
       // Đưa sản phẩm vào giỏ hàng
       const newCart = {};
-      details.items.forEach(item => {
-        newCart[item.product_id] = item.quantity;
-        newCart[item.product_id + '_price'] = item.price;
-        newCart[item.product_id + '_discount'] = item.discount || 0;
-      });
+      details.items.forEach(item => putItemIntoCart(newCart, item));
       setCart(newCart);
     } catch (e) {
       alert('Lỗi tải đơn đặt hàng: ' + e.message);
@@ -846,11 +874,7 @@ function AppMain() {
       setOrderDate(details.created_at ? details.created_at.split('T')[0] : todayLocal());
 
       const newCart = {};
-      details.items.forEach(item => {
-        newCart[item.product_id] = item.quantity;
-        newCart[item.product_id + '_price'] = item.price;
-        newCart[item.product_id + '_discount'] = item.discount || 0;
-      });
+      details.items.forEach(item => putItemIntoCart(newCart, item));
       setCart(newCart);
       setShowOrderModal(true);
     } catch (e) {
@@ -875,9 +899,7 @@ function AppMain() {
       const newCart = {};
       const oldQty = {};
       (details.items || []).forEach((item) => {
-        newCart[item.product_id] = item.quantity;
-        newCart[item.product_id + '_price'] = item.price;
-        newCart[item.product_id + '_discount'] = item.discount || 0;
+        putItemIntoCart(newCart, item);
         oldQty[item.product_id] = item.quantity;
       });
       setCart(newCart);
@@ -1415,7 +1437,10 @@ function AppMain() {
                   <tbody>
                     {(detailData.items || []).map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '8px' }}>{item.product_name}</td>
+                        <td style={{ padding: '8px' }}>
+                          <div>{item.product_name}</div>
+                          {item.chassis_color && <div style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic' }}>{item.chassis_color}</div>}
+                        </td>
                         <td style={{ padding: '8px' }}>{item.quantity}</td>
                         <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
                         <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
