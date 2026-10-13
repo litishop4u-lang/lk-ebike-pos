@@ -96,6 +96,7 @@ function AppMain() {
   const [invoiceForm, setInvoiceForm] = useState({ customer_name: '', items: [] });
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
+  const [activeChassisProduct, setActiveChassisProduct] = useState(null);
 
   const [returnOrdersData, setReturnOrdersData] = useState(EMPTY_RETURN_DATA);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -546,14 +547,22 @@ function AppMain() {
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: cartLines.map((l) => ({ 
-          product_id: l.id, 
-          quantity: l.quantity, 
-          price: l.price, 
-          discount: l.discount,
-          chassis_color: cart[l.id + '_chassis'] || '' 
-        }))
-      };
+        items: cartLines.map((l) => {
+  const details = [
+    cart[l.id + '_chassis'] ? `Số khung: ${cart[l.id + '_chassis']}` : '',
+    cart[l.id + '_frame'] ? `Số sườn: ${cart[l.id + '_frame']}` : '',
+    cart[l.id + '_color'] ? `Màu: ${cart[l.id + '_color']}` : '',
+    cart[l.id + '_note'] ? `Ghi chú: ${cart[l.id + '_note']}` : ''
+  ].filter(Boolean).join(' | ');
+
+  return {
+    product_id: l.id,
+    quantity: l.quantity,
+    price: l.price,
+    discount: l.discount,
+    chassis_color: details
+  };
+})
 
       let r;
       if (modalOrderType === 'orders' && editingOrderId) {
@@ -3228,29 +3237,42 @@ function AppMain() {
                           <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có sản phẩm nào</td></tr>
                         ) : (
                           cartLines.map((l) => (
-                            <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
-                              <td style={{ padding: '10px' }}>
-      <div style={{ fontWeight: '500' }}>{l.name}</div>
-      <input 
-        type="text"
-        placeholder="Nhập số khung, số sườn, màu sắc..."
-        value={l.chassis_color || ''}
-        onChange={(e) => {
-          const val = e.target.value;
-          setCart((c) => ({ ...c, [l.id + '_chassis']: val }));
-        }}
+  <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
+    <td style={{ padding: '10px' }}>
+      <div style={{ fontWeight: '500', marginBottom: '4px' }}>{l.name}</div>
+      
+      {/* Hiển thị tóm tắt thông tin đã chọn nếu có */}
+      {(cart[l.id + '_chassis'] || cart[l.id + '_frame'] || cart[l.id + '_color'] || cart[l.id + '_note']) && (
+        <div style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', marginBottom: '4px' }}>
+          {[
+            cart[l.id + '_chassis'] ? `Số khung: ${cart[l.id + '_chassis']}` : '',
+            cart[l.id + '_frame'] ? `Số sườn: ${cart[l.id + '_frame']}` : '',
+            cart[l.id + '_color'] ? `Màu: ${cart[l.id + '_color']}` : '',
+            cart[l.id + '_note'] ? `Ghi chú: ${cart[l.id + '_note']}` : ''
+          ].filter(Boolean.join(' | '))}
+        </div>
+      )}
+
+      {/* Nút bấm mở popup "Thêm số khung, số sườn, ghi chú" giống ảnh mẫu */}
+      <button
+        type="button"
+        onClick={() => setActiveChassisProduct(l.id)}
         style={{
-          width: '100%',
-          marginTop: '6px',
-          padding: '4px 8px',
-          fontSize: '12px',
-          border: '1px dashed #cbd5e1',
+          background: '#f3e8ff',
+          color: '#7c3aed',
+          border: '1px dashed #d8b4fe',
+          padding: '3px 8px',
           borderRadius: '4px',
-          background: '#f8fafc',
-          color: '#475569',
-          boxSizing: 'border-box'
+          fontSize: '11px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px'
         }}
-      />
+      >
+        ✏️ + Thêm số khung, số sườn, ghi chú
+      </button>
     </td>
                               <td style={{ padding: '10px' }}>
                                 <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
@@ -3363,6 +3385,86 @@ function AppMain() {
           </div>
         )}
 
+        {/* POPUP TÙY CHỌN THÔNG TIN SẢN PHẨM (SỐ KHUNG, SỐ SƯỜN, MÀU SẮC, GHI CHÚ) */}
+{activeChassisProduct && (() => {
+  const prod = cartLines.find(l => l.id === activeChassisProduct);
+  if (!prod) return null;
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200 }}>
+      <div style={{ background: '#fff', width: '450px', borderRadius: '10px', padding: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px' }}>
+          <h4 style={{ margin: 0, color: '#0f172a' }}>Tùy chọn thông tin sản phẩm</h4>
+          <button onClick={() => setActiveChassisProduct(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c3aed', marginBottom: '15px' }}>
+          Sản phẩm: {prod.name}
+        </div>
+
+        {/* Ô nhập Số khung */}
+        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số khung:</label>
+          <input
+            type="text"
+            placeholder="Nhập số khung..."
+            value={cart[prod.id + '_chassis'] || ''}
+            onChange={(e) => setCart(c => ({ ...c, [prod.id + '_chassis']: e.target.value }))}
+            style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+          />
+        </div>
+
+        {/* Ô nhập Số sườn */}
+        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số sườn:</label>
+          <input
+            type="text"
+            placeholder="Nhập số sườn..."
+            value={cart[prod.id + '_frame'] || ''}
+            onChange={(e) => setCart(c => ({ ...c, [prod.id + '_frame']: e.target.value }))}
+            style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+          />
+        </div>
+
+        {/* Ô nhập Màu sắc */}
+        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Màu sắc:</label>
+          <input
+            type="text"
+            placeholder="Nhập màu sắc..."
+            value={cart[prod.id + '_color'] || ''}
+            onChange={(e) => setCart(c => ({ ...c, [prod.id + '_color']: e.target.value }))}
+            style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+          />
+        </div>
+
+        {/* Ô nhập Ghi chú */}
+        <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Ghi chú:</label>
+          <input
+            type="text"
+            placeholder="Nhập ghi chú khác..."
+            value={cart[prod.id + '_note'] || ''}
+            onChange={(e) => setCart(c => ({ ...c, [prod.id + '_note']: e.target.value }))}
+            style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <button
+            onClick={() => setActiveChassisProduct(null)}
+            style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Xong
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+})()}
+        
         {/* MODAL IMPORT SẢN PHẨM */}
         {showProductImportModal && (
           <div style={overlayStyle}>
