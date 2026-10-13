@@ -546,7 +546,13 @@ function AppMain() {
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
-        items: cartLines.map((l) => ({ product_id: l.id, quantity: l.quantity, price: l.price, discount: l.discount }))
+        items: cartLines.map((l) => ({ 
+          product_id: l.id, 
+          quantity: l.quantity, 
+          price: l.price, 
+          discount: l.discount,
+          chassis_color: cart[l.id + '_chassis'] || '' 
+        }))
       };
 
       let r;
@@ -656,26 +662,34 @@ function AppMain() {
     let totalDiscount = 0;
 
     const itemsHtml = items.map((prod, index) => {
-      const price = Number(prod.price) || 0;
-      const qty = Number(prod.quantity) || 0;
-      const discount = Number(prod.discount) || 0;
-      const lineGross = price * qty;
-      const lineNet = lineGross - discount;
+    const price = Number(prod.price) || 0;
+    const qty = Number(prod.quantity) || 0;
+    const discount = Number(prod.discount) || 0;
+    const lineGross = price * qty;
+    const lineNet = lineGross - discount;
 
-      grossTotal += lineGross;
-      totalDiscount += discount;
+    grossTotal += lineGross;
+    totalDiscount += discount;
 
-      return `
-        <tr>
-          <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${prod.product_name || prod.name || 'Sản phẩm'}</td>
-          <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${qty}</td>
-          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0;">${price.toLocaleString('vi-VN')}</td>
-          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; color: #dc2626;">${discount > 0 ? discount.toLocaleString('vi-VN') : '0'}</td>
-          <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${lineNet.toLocaleString('vi-VN')}</td>
-        </tr>
-      `;
-    }).join('');
+    const productName = prod.product_name || prod.name || 'Sản phẩm';
+    const chassisText = prod.chassis_color 
+      ? `<div style="font-size: 11px; color: #555; font-style: italic; margin-top: 2px;">Số khung/sườn & Màu: ${prod.chassis_color}</div>` 
+      : '';
+
+    return `
+      <tr>
+        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${index + 1}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">
+          <div>${productName}</div>
+          ${chassisText}
+        </td>
+        <td style="text-align: center; padding: 8px; border-bottom: 1px solid #e2e8f0;">${qty}</td>
+        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0;">${price.toLocaleString('vi-VN')}</td>
+        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; color: #dc2626;">${discount > 0 ? discount.toLocaleString('vi-VN') : '0'}</td>
+        <td style="text-align: right; padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${lineNet.toLocaleString('vi-VN')}</td>
+      </tr>
+    `;
+  }).join('');
 
     const finalTotal = grossTotal - totalDiscount;
     const printPaidAmount = Number(printData.paid_amount) || 0;
@@ -3215,7 +3229,29 @@ function AppMain() {
                         ) : (
                           cartLines.map((l) => (
                             <tr key={l.id} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
-                              <td style={{ padding: '10px', fontWeight: '500' }}>{l.name}</td>
+                              <td style={{ padding: '10px' }}>
+      <div style={{ fontWeight: '500' }}>{l.name}</div>
+      <input 
+        type="text"
+        placeholder="Nhập số khung, số sườn, màu sắc..."
+        value={l.chassis_color || ''}
+        onChange={(e) => {
+          const val = e.target.value;
+          setCart((c) => ({ ...c, [l.id + '_chassis']: val }));
+        }}
+        style={{
+          width: '100%',
+          marginTop: '6px',
+          padding: '4px 8px',
+          fontSize: '12px',
+          border: '1px dashed #cbd5e1',
+          borderRadius: '4px',
+          background: '#f8fafc',
+          color: '#475569',
+          boxSizing: 'border-box'
+        }}
+      />
+    </td>
                               <td style={{ padding: '10px' }}>
                                 <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ width: '50px', textAlign: 'center', padding: '4px' }} />
                               </td>
