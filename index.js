@@ -183,6 +183,12 @@ function normalizeItems(items) {
 }
 const sumTotal = (lines) => lines.reduce((s, l) => s + l.total, 0);
 
+// [MỚI] Chuẩn hoá dòng hàng của phiếu trả hàng (bán + nhập)
+const normalizeReturnLines = (items) =>
+  (Array.isArray(items) ? items : [])
+    .map((it) => ({ product_id: Number(it.product_id), quantity: Number(it.quantity), price: money(it.price) }))
+    .filter((l) => Number.isInteger(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0);
+
 // Kiểm tra sản phẩm tồn tại (và đủ tồn kho nếu cần). Trả về danh sách id duy nhất.
 async function loadProducts(db, lines, { checkStock }) {
   const need = new Map();
@@ -728,13 +734,7 @@ export default {
         const code = str(body.code) || ('PTB-' + Date.now());
 
         // Chuẩn hoá danh sách hàng trả (phải có sản phẩm để cộng kho và lên báo cáo)
-        const lines = (Array.isArray(body.items) ? body.items : [])
-          .map((it) => ({
-            product_id: Number(it.product_id),
-            quantity: Number(it.quantity),
-            price: money(it.price),
-          }))
-          .filter((l) => Number.isInteger(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0);
+        const lines = normalizeReturnLines(body.items);
         if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
         await loadProducts(db, lines, { checkStock: false });
 
@@ -793,6 +793,107 @@ export default {
         await db.batch(stmts);
 
         return json({ success: true, message: 'Tạo phiếu trả hàng thành công' }, 200, origin);
+      }
+
+      // ===== [MỚI] XEM CHI TIẾT PHIẾU TRẢ HÀNG BÁN =====
+      if (is(/^\/api\/return-orders\/\d+$/, 'GET')) {
+        await ensureReturnSchema(db);
+        const id = idOf(pathname);
+        const head = await db.prepare('SELECT * FROM return_orders WHERE id = ?').bind(id).first();
+        if (!head) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng');
+        const items = await db.prepare(`
+          SELECT roi.*, p.name AS product_name, p.sku, p.unit
+          FROM return_order_items roi LEFT JOIN products p ON roi.product_id = p.id
+          WHERE roi.return_order_id = ?
+        `).bind(id).all();
+        return json({ ...head, items: items.results || [] }, 200, origin);
+      }
+
+      // ===== [MỚI] SỬA PHIẾU TRẢ HÀNG BÁN (cập nhật tại chỗ, KHÔNG tạo phiếu mới, giữ nguyên mã phiếu) =====
+      if (is(/^\/api\/return-orders\/\d+$/, 'PUT')) {
+        await ensureReturnSchema(db);
+        const id = idOf(pathname);
+        const old = await db.prepare('SELECT * FROM return_orders WHERE id = ?').bind(id).first();
+        if (!old) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng');
+
+        const body = await request.json();
+        const lines = normalizeReturnLines(body.items);
+        if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
+        const newIds = await loadProducts(db, lines, { checkStock: false });
+
+        const oldItems = (await db.prepare('SELECT product_id, quantity FROM return_order_items WHERE return_order_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...newIds])];
+
+        const statusText = str(body.status) || old.status || 'Hoàn Thành';
+        const refundTotal = money(body.refund_amount);
+        const retDate = str(body.return_date) || old.return_date || new Date().toISOString().slice(0, 10);
+        const custName = str(body.customer_name) || old.customer_name || 'Khách lẻ';
+        const invoiceCode = body.invoice_code !== undefined ? str(body.invoice_code) : (old.invoice_code || '');
+        const reason = str(body.reason) || old.reason || 'Sản phẩm lỗi';
+
+        // Giữ nguyên ngày của phiếu chi cũ (nếu có)
+        const oldCash = await db.prepare("SELECT created_at FROM cash_books WHERE reference_code = ? AND type = 'OUT' LIMIT 1").bind(old.code).first();
+        const cashDate = oldCash?.created_at || new Date().toISOString();
+
+        const stmts = [];
+        // 1. Hoàn tác ảnh hưởng của phiếu cũ: phiếu cũ đã cộng kho thì trừ lại
+        if (isCompletedReturn(old.status)) {
+          stmts.push(...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)));
+        }
+        // 2. Xóa phiếu chi cũ trong Sổ quỹ và chi tiết cũ
+        stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(old.code));
+        stmts.push(db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').bind(id));
+        // 3. Cập nhật chính phiếu này
+        stmts.push(
+          db.prepare('UPDATE return_orders SET invoice_code = ?, customer_name = ?, return_date = ?, reason = ?, refund_amount = ?, status = ? WHERE id = ?')
+            .bind(invoiceCode, custName, retDate, reason, refundTotal, statusText, id)
+        );
+        // 4. Ghi lại chi tiết mới
+        stmts.push(...lines.map((l) =>
+          db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, price, total) VALUES (?,?,?,?,?)')
+            .bind(id, l.product_id, l.quantity, l.price, l.quantity * l.price)));
+        // 5. Áp dụng phiếu mới: hoàn thành thì cộng kho + sinh lại phiếu chi
+        if (isCompletedReturn(statusText)) {
+          stmts.push(...lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)));
+          const cashRefund = Math.min(body.refund_paid !== undefined ? money(body.refund_paid) : refundTotal, refundTotal);
+          if (cashRefund > 0) {
+            stmts.push(
+              db.prepare(`
+                INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+                VALUES (?, 'OUT', ?, 'Chi hoàn trả khách hàng', ?, ?, ?, ?)
+              `).bind(
+                genCode('TC'), cashRefund, str(body.payment_method) || 'Tiền mặt', old.code,
+                `Hoàn tiền trả hàng cho khách ${custName} theo phiếu trả ${old.code}${invoiceCode ? ' (HĐ ' + invoiceCode + ')' : ''} (Đã cập nhật)`,
+                cashDate
+              )
+            );
+          }
+        }
+        stmts.push(stockGuard(db, ids)); // kho âm thì rollback toàn bộ
+        await runBatch(db, stmts, 'Không thể sửa phiếu: tồn kho không đủ để hoàn lại (hàng đã trả có thể đã được bán đi)');
+        return json({ success: true, code: old.code }, 200, origin);
+      }
+
+      // ===== [MỚI] XÓA PHIẾU TRẢ HÀNG BÁN =====
+      if (is(/^\/api\/return-orders\/\d+$/, 'DELETE')) {
+        await ensureReturnSchema(db);
+        const id = idOf(pathname);
+        const head = await db.prepare('SELECT * FROM return_orders WHERE id = ?').bind(id).first();
+        if (!head) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng');
+        const items = (await db.prepare('SELECT product_id, quantity FROM return_order_items WHERE return_order_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set(items.map((i) => i.product_id))];
+
+        const stmts = [];
+        if (isCompletedReturn(head.status)) {
+          // Phiếu đã cộng kho -> trừ lại khi xóa
+          stmts.push(...items.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)));
+        }
+        stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(head.code));
+        stmts.push(db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').bind(id));
+        stmts.push(db.prepare('DELETE FROM return_orders WHERE id = ?').bind(id));
+        if (isCompletedReturn(head.status) && ids.length) stmts.push(stockGuard(db, ids));
+        await runBatch(db, stmts, 'Không thể xóa phiếu: hàng trả lại đã được bán nên tồn kho không đủ để hoàn lại');
+        return json({ success: true }, 200, origin);
       }
 
       // ===== 7. QUẢN LÝ THU CHI =====
@@ -900,9 +1001,7 @@ export default {
         const sup = supplier_id ? await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').bind(supplier_id).first() : null;
         if (!sup) throw new HttpError(400, 'Vui lòng chọn nhà cung cấp');
 
-        const lines = (Array.isArray(b.items) ? b.items : [])
-          .map((it) => ({ product_id: Number(it.product_id), quantity: Number(it.quantity), price: money(it.price) }))
-          .filter((l) => Number.isInteger(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0);
+        const lines = normalizeReturnLines(b.items);
         if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
 
         const statusText = str(b.status) || 'Hoàn Thành';
@@ -964,6 +1063,77 @@ export default {
           WHERE i.return_id = ?
         `).bind(id).all();
         return json({ ...head, items: items.results || [] }, 200, origin);
+      }
+
+      // ===== [MỚI] SỬA PHIẾU TRẢ HÀNG NHẬP (cập nhật tại chỗ, KHÔNG tạo phiếu mới, giữ nguyên mã phiếu) =====
+      if (is(/^\/api\/purchase-returns\/\d+$/, 'PUT')) {
+        await ensurePurchaseReturnSchema(db);
+        const id = idOf(pathname);
+        const old = await db.prepare('SELECT * FROM purchase_return_orders WHERE id = ?').bind(id).first();
+        if (!old) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng nhập');
+
+        const b = await request.json();
+        const supplier_id = Number(b.supplier_id) || old.supplier_id;
+        const sup = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').bind(supplier_id).first();
+        if (!sup) throw new HttpError(400, 'Vui lòng chọn nhà cung cấp');
+
+        const lines = normalizeReturnLines(b.items);
+        if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
+        const newIds = await loadProducts(db, lines, { checkStock: false });
+
+        const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_return_order_items WHERE return_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...newIds])];
+
+        const statusText = str(b.status) || old.status || 'Hoàn Thành';
+        const done = isCompletedReturn(statusText);
+        const total = lines.reduce((s, l) => s + l.quantity * l.price, 0);
+        const retDate = str(b.return_date) || old.return_date || new Date().toISOString().slice(0, 10);
+        const payMethod = str(b.payment_method) || old.payment_method || 'Tiền mặt';
+        const reason = str(b.reason) || old.reason || 'Hàng thừa / Trả lại';
+        const purchaseCode = b.purchase_code !== undefined ? str(b.purchase_code) : (old.purchase_code || '');
+        const receivedRaw = b.received_amount ?? b.refund_received ?? b.paid_amount ?? 0;
+        const received = done ? Math.min(money(receivedRaw), total) : 0;
+
+        // Giữ nguyên ngày của phiếu thu cũ (nếu có)
+        const oldCash = await db.prepare("SELECT created_at FROM cash_books WHERE reference_code = ? AND type = 'IN' LIMIT 1").bind(old.code).first();
+        const cashDate = oldCash?.created_at || new Date().toISOString();
+
+        const stmts = [];
+        // 1. Hoàn tác phiếu cũ: đã trừ kho thì cộng lại
+        if (isCompletedReturn(old.status)) {
+          stmts.push(...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(i.quantity, i.product_id)));
+        }
+        // 2. Xóa phiếu thu cũ trong Sổ quỹ + chi tiết cũ
+        stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(old.code));
+        stmts.push(db.prepare('DELETE FROM purchase_return_order_items WHERE return_id = ?').bind(id));
+        // 3. Cập nhật chính phiếu này
+        stmts.push(
+          db.prepare(`UPDATE purchase_return_orders
+                      SET purchase_code = ?, supplier_id = ?, supplier_name = ?, return_date = ?, reason = ?,
+                          total_amount = ?, received_amount = ?, payment_method = ?, status = ?
+                      WHERE id = ?`)
+            .bind(purchaseCode, sup.id, sup.name, retDate, reason, total, received, payMethod, statusText, id)
+        );
+        // 4. Ghi chi tiết mới
+        stmts.push(...lines.map((l) =>
+          db.prepare('INSERT INTO purchase_return_order_items (return_id, product_id, quantity, price, total) VALUES (?,?,?,?,?)')
+            .bind(id, l.product_id, l.quantity, l.price, l.quantity * l.price)));
+        // 5. Áp dụng phiếu mới
+        if (done) {
+          stmts.push(...lines.map((l) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)));
+          if (received > 0) {
+            stmts.push(
+              db.prepare(`
+                INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+                VALUES (?, 'IN', ?, 'Thu hoàn tiền NCC', ?, ?, ?, ?)
+              `).bind(genCode('PT'), received, payMethod, old.code,
+                      `Thu hoàn tiền trả hàng nhập từ ${sup.name} theo phiếu ${old.code} (Đã cập nhật)`, cashDate)
+            );
+          }
+        }
+        stmts.push(stockGuard(db, ids));
+        await runBatch(db, stmts, 'Tồn kho không đủ để trả NCC theo số lượng mới. Vui lòng kiểm tra lại số lượng');
+        return json({ success: true, code: old.code, total, received }, 200, origin);
       }
 
       if (is(/^\/api\/purchase-returns\/\d+$/, 'DELETE')) {
