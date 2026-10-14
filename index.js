@@ -166,6 +166,141 @@ const groupByProduct = (arr) => {
   return m;
 };
 
+// ===== [MỚI] TÍNH XUẤT - NHẬP - TỒN THEO BÌNH QUÂN GIA QUYỀN CUỐI KỲ =====
+// Dùng chung cho báo cáo Xuất Nhập Tồn và báo cáo Kết quả kinh doanh để giá vốn luôn khớp nhau.
+//
+//  - Giá trị tồn đầu  = SL tồn đầu × giá bình quân các lần nhập TRƯỚC kỳ (chưa có thì dùng giá nhập trên thẻ SP)
+//  - Đơn giá bình quân kỳ = (Giá trị tồn đầu + Giá trị nhập NCC trong kỳ − Giá trị trả NCC)
+//                           ÷ (SL tồn đầu + SL nhập NCC trong kỳ − SL trả NCC)
+//  - Giá trị xuất     = SL bán × đơn giá bình quân kỳ + giá trị hàng trả NCC
+//  - Giá trị nhập     = Giá trị nhập NCC + SL khách trả lại × đơn giá bình quân kỳ
+//  - Giá trị tồn cuối = Tồn đầu + Nhập − Xuất  (luôn khớp công thức, = SL tồn cuối × đơn giá bình quân)
+async function buildInventoryReport(db, startDate, endDate) {
+  const cleanStart = dateOnly(startDate);
+  const cleanEnd = dateOnly(endDate);
+  const n0 = (v) => Number(v) || 0;
+
+  const prodRes = await db.prepare('SELECT * FROM products').all();
+  const products = prodRes.results || [];
+
+  const purchaseRes = await db.prepare(`
+    SELECT poi.product_id, poi.quantity, poi.total, po.created_at
+    FROM purchase_order_items poi
+    JOIN purchase_orders po ON poi.purchase_order_id = po.id
+  `).all();
+  const purchaseMap = groupByProduct((purchaseRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
+
+  const invoiceRes = await db.prepare(`
+    SELECT ii.product_id, ii.quantity, inv.created_at
+    FROM invoice_items ii
+    JOIN invoices inv ON ii.invoice_id = inv.id
+  `).all();
+  const invoiceMap = groupByProduct((invoiceRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
+
+  const returnMap = groupByProduct(await loadReturnLines(db));          // khách trả hàng (đã cộng lại kho)
+  const supRetMap = groupByProduct(await loadPurchaseReturnLines(db));  // trả hàng NCC (đã trừ kho)
+
+  return products.map((p) => {
+    const key = String(p.id);
+    const pPur = purchaseMap.get(key) || [];
+    const pInv = invoiceMap.get(key) || [];
+    const pRet = returnMap.get(key) || [];
+    const pSup = supRetMap.get(key) || [];
+
+    const currentStock = n0(p.stock);
+    const fallbackCost = n0(p.import_price ?? p.cost_price);
+    const prodCode = String(p.sku || p.code || p.product_code || '---');
+    const prodName = String(p.name || p.product_name || 'Không tên');
+    const prodUnit = String(p.unit || 'Cái');
+
+    // Giá bình quân các lần nhập TRƯỚC kỳ -> dùng định giá tồn đầu kỳ
+    let priorQty = 0, priorVal = 0;
+    for (const i of pPur) {
+      if (i.date && i.date < cleanStart) { priorQty += n0(i.quantity); priorVal += n0(i.total); }
+    }
+    const openingUnitCost = priorQty > 0 && priorVal > 0 ? priorVal / priorQty : fallbackCost;
+
+    // Nhập từ NCC: trong kỳ và sau kỳ
+    let purQty = 0, purVal = 0, purAfterQty = 0;
+    for (const i of pPur) {
+      const q = n0(i.quantity);
+      if (!i.date || (i.date >= cleanStart && i.date <= cleanEnd)) {
+        purQty += q;
+        purVal += n0(i.total) || q * openingUnitCost;
+      } else if (i.date > cleanEnd) {
+        purAfterQty += q;
+      }
+    }
+
+    // Khách trả hàng: trong kỳ và sau kỳ
+    let retQty = 0, retAfterQty = 0;
+    for (const r of pRet) {
+      if (r.date >= cleanStart && r.date <= cleanEnd) retQty += n0(r.quantity);
+      else if (r.date > cleanEnd) retAfterQty += n0(r.quantity);
+    }
+
+    // Xuất bán: trong kỳ và sau kỳ
+    let expQty = 0, expAfterQty = 0;
+    for (const i of pInv) {
+      if (!i.date) continue;
+      if (i.date >= cleanStart && i.date <= cleanEnd) expQty += n0(i.quantity);
+      else if (i.date > cleanEnd) expAfterQty += n0(i.quantity);
+    }
+
+    // Trả hàng cho NCC: trong kỳ và sau kỳ
+    let supQty = 0, supVal = 0, supAfterQty = 0;
+    for (const r of pSup) {
+      if (r.date >= cleanStart && r.date <= cleanEnd) {
+        const q = n0(r.quantity);
+        supQty += q;
+        supVal += n0(r.total) || q * openingUnitCost;
+      } else if (r.date > cleanEnd) supAfterQty += n0(r.quantity);
+    }
+
+    // Số lượng
+    const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty + supAfterQty;
+    const importQty = purQty + retQty;
+    const exportQty = expQty + supQty;
+    const openingQty = closingQty - importQty + exportQty;
+
+    // Giá trị tồn đầu kỳ
+    const openingValRaw = Math.max(0, openingQty) * openingUnitCost;
+
+    // Đơn giá bình quân gia quyền cuối kỳ
+    const poolQty = Math.max(0, openingQty) + purQty - supQty;
+    const poolVal = openingValRaw + purVal - supVal;
+    let avgCost;
+    if (poolQty > 0 && poolVal > 0) avgCost = poolVal / poolQty;
+    else if (purQty > 0 && purVal > 0) avgCost = purVal / purQty;
+    else avgCost = openingUnitCost;
+
+    // Giá trị (làm tròn từng khoản rồi suy ra tồn cuối để cộng trừ luôn khớp)
+    const openingVal = Math.round(openingValRaw);
+    const importVal = Math.round(purVal + retQty * avgCost);
+    const exportVal = Math.round(expQty * avgCost + supVal);
+    const closingVal = closingQty === 0 ? 0 : openingVal + importVal - exportVal;
+
+    return {
+      id: p.id,
+      code: prodCode,
+      name: prodName,
+      unit: prodUnit,
+      openingQty,
+      openingVal,
+      importQty,
+      importVal,
+      exportQty,
+      exportVal,
+      closingQty,
+      closingVal,
+      // Thông tin phụ cho báo cáo lãi lỗ
+      avgCost,
+      soldQty: expQty,
+      returnedQty: retQty,
+    };
+  });
+}
+
 // Chuẩn hoá & kiểm tra dòng hàng từ client
 function normalizeItems(items) {
   if (!Array.isArray(items) || items.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trống');
@@ -1467,140 +1602,27 @@ export default {
       }
 
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
-      // [FIX] Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại
-      //       Xuất trong kỳ = hàng bán ra + hàng trả lại NCC (trả NCC là giảm kho nên nằm ở cột XUẤT, không ghi âm ở cột nhập)
+      // [FIX] Tính giá trị theo BÌNH QUÂN GIA QUYỀN CUỐI KỲ (xem buildInventoryReport):
+      //   Tồn đầu + Nhập − Xuất = Tồn cuối (cả số lượng lẫn giá trị đều khớp)
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
         const endDate = urlObj.searchParams.get('endDate') || '2030-12-31';
         const search = (urlObj.searchParams.get('search') || '').trim().toLowerCase();
 
-        // 1. Lấy toàn bộ sản phẩm (chọn các cột cơ bản an toàn tuyệt đối)
-        const prodRes = await db.prepare('SELECT * FROM products').all();
-        const products = prodRes.results || [];
+        const reportData = await buildInventoryReport(db, startDate, endDate);
 
-        // 2. Lấy chi tiết lịch sử nhập kho
-        const purchaseRes = await db.prepare(`
-          SELECT poi.product_id, poi.quantity, poi.total, po.created_at
-          FROM purchase_order_items poi
-          JOIN purchase_orders po ON poi.purchase_order_id = po.id
-        `).all();
-        const purchaseMap = groupByProduct((purchaseRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
+        // Chỉ hiển thị sản phẩm có phát sinh và khớp từ khóa tìm kiếm
+        const activeItems = reportData
+          .filter((item) => {
+            const hasActivity = item.openingQty !== 0 || item.importQty !== 0 || item.exportQty !== 0 || item.closingQty !== 0;
+            const matchesSearch = !search || item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
+            return hasActivity && matchesSearch;
+          })
+          // Bỏ các trường phụ chỉ dùng nội bộ cho báo cáo lãi lỗ
+          .map(({ avgCost, soldQty, returnedQty, ...rest }) => rest);
 
-        // 3. Lấy chi tiết lịch sử xuất kho
-        const invoiceRes = await db.prepare(`
-          SELECT ii.product_id, ii.quantity, inv.created_at
-          FROM invoice_items ii
-          JOIN invoices inv ON ii.invoice_id = inv.id
-        `).all();
-        const invoiceMap = groupByProduct((invoiceRes.results || []).map((i) => ({ ...i, date: dateOnly(i.created_at) })));
-
-        // 4. Lấy lịch sử khách trả hàng (đã hoàn thành -> đã cộng lại kho)
-        const returnMap = groupByProduct(await loadReturnLines(db));
-        // 4b. Lấy lịch sử trả hàng cho NCC (đã hoàn thành -> đã trừ kho)
-        const supRetMap = groupByProduct(await loadPurchaseReturnLines(db));
-
-        const cleanStart = startDate.slice(0, 10);
-        const cleanEnd = endDate.slice(0, 10);
-        const n0 = (v) => Number(v) || 0;
-
-        // 5. Tính toán số liệu cho từng sản phẩm
-        const reportData = products.map(p => {
-          const key = String(p.id);
-          const pPur = purchaseMap.get(key) || [];
-          const pInv = invoiceMap.get(key) || [];
-          const pRet = returnMap.get(key) || [];
-          const pSup = supRetMap.get(key) || [];
-
-          const currentStock = n0(p.stock);
-          // Giá nhập dự phòng trên thẻ sản phẩm (nếu chưa có lịch sử nhập)
-          const fallbackCost = n0(p.import_price ?? p.cost_price);
-          // Ưu tiên cột sku làm mã sản phẩm
-          const prodCode = String(p.sku || p.code || p.product_code || '---');
-          const prodName = String(p.name || p.product_name || 'Không tên');
-          const prodUnit = String(p.unit || 'Cái');
-
-          // Giá vốn bình quân gia quyền = tổng giá trị nhập / tổng số lượng nhập (tính đến hết kỳ báo cáo)
-          // Nếu chưa có lịch sử nhập thì dùng giá nhập trên thẻ sản phẩm
-          let histQty = 0, histVal = 0;
-          for (const i of pPur) {
-            if (i.date && i.date > cleanEnd) continue;
-            histQty += n0(i.quantity);
-            histVal += n0(i.total);
-          }
-          const unitCost = histQty > 0 && histVal > 0 ? histVal / histQty : fallbackCost;
-
-          // Nhập từ NCC: trong kỳ và sau kỳ
-          let purQty = 0, purVal = 0, purAfterQty = 0;
-          for (const i of pPur) {
-            const q = n0(i.quantity);
-            if (!i.date || (i.date >= cleanStart && i.date <= cleanEnd)) {
-              purQty += q;
-              purVal += n0(i.total) || q * unitCost;
-            } else if (i.date > cleanEnd) {
-              purAfterQty += q;
-            }
-          }
-
-          // Khách trả hàng (nhập lại kho): trong kỳ và sau kỳ — tính theo giá vốn bình quân
-          let retQty = 0, retAfterQty = 0;
-          for (const r of pRet) {
-            if (r.date >= cleanStart && r.date <= cleanEnd) retQty += n0(r.quantity);
-            else if (r.date > cleanEnd) retAfterQty += n0(r.quantity);
-          }
-
-          // Xuất bán: trong kỳ và sau kỳ
-          let expQty = 0, expAfterQty = 0;
-          for (const i of pInv) {
-            if (!i.date) continue;
-            if (i.date >= cleanStart && i.date <= cleanEnd) expQty += n0(i.quantity);
-            else if (i.date > cleanEnd) expAfterQty += n0(i.quantity);
-          }
-
-          // Trả hàng cho NCC: trong kỳ và sau kỳ
-          let supQty = 0, supAfterQty = 0;
-          for (const r of pSup) {
-            if (r.date >= cleanStart && r.date <= cleanEnd) supQty += n0(r.quantity);
-            else if (r.date > cleanEnd) supAfterQty += n0(r.quantity);
-          }
-
-          // [FIX] Nhập = mua NCC + khách trả lại (KHÔNG trừ hàng trả NCC nữa)
-          const importQty = purQty + retQty;
-          const importVal = purVal + retQty * unitCost;
-          // [FIX] Xuất = bán ra + trả lại NCC
-          const exportQty = expQty + supQty;
-          const exportVal = (expQty + supQty) * unitCost;
-
-          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ - đã khách trả sau kỳ + đã trả NCC sau kỳ
-          const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty + supAfterQty;
-          const closingVal = closingQty * unitCost;
-          const openingQty = closingQty - importQty + exportQty;
-          const openingVal = openingQty * unitCost;
-
-          return {
-            id: p.id,
-            code: prodCode,
-            name: prodName,
-            unit: prodUnit,
-            openingQty,
-            openingVal: Math.round(openingVal),
-            importQty,
-            importVal: Math.round(importVal),
-            exportQty,
-            exportVal: Math.round(exportVal),
-            closingQty,
-            closingVal: Math.round(closingVal)
-          };
-        });
-
-        // 6. Chỉ hiển thị sản phẩm có phát sinh và khớp từ khóa tìm kiếm
-        const activeItems = reportData.filter(item => {
-          const hasActivity = item.openingQty !== 0 || item.importQty !== 0 || item.exportQty !== 0 || item.closingQty !== 0;
-          const matchesSearch = !search || item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
-          return hasActivity && matchesSearch;
-        });
-
-        // 7. Tính tổng cộng
+        // Tính tổng cộng
         const totals = activeItems.reduce((acc, item) => {
           acc.openingQty += item.openingQty;
           acc.openingVal += item.openingVal;
@@ -1649,63 +1671,17 @@ export default {
         const returnDeductions = Number(retRes?.refunded) || 0;
         const netRevenue = grossRevenue - returnDeductions;
 
-        // 3. Giá vốn bình quân gia quyền của từng sản phẩm (tính đến hết kỳ) — cùng cách tính với báo cáo X-N-T
-        const productsRes = await db.prepare('SELECT * FROM products').all();
-        const fallbackCost = {};
-        (productsRes.results || []).forEach((p) => {
-          fallbackCost[p.id] = Number(p.import_price ?? p.cost_price) || 0;
-        });
-
-        const importsRes = await db.prepare(`
-          SELECT poi.product_id, poi.quantity, poi.total
-          FROM purchase_order_items poi
-          JOIN purchase_orders po ON poi.purchase_order_id = po.id
-          WHERE date(po.created_at) <= ?
-        `).bind(endDate).all();
-
-        const ledger = {};
-        (importsRes.results || []).forEach((item) => {
-          const l = ledger[item.product_id] || (ledger[item.product_id] = { qty: 0, amount: 0 });
-          l.qty += Number(item.quantity) || 0;
-          l.amount += Number(item.total) || 0;
-        });
-        const avgCost = (pid) => {
-          const l = ledger[pid];
-          return l && l.qty > 0 && l.amount > 0 ? l.amount / l.qty : (fallbackCost[pid] || 0);
-        };
-
-        // 4. Giá vốn hàng đã xuất bán trong kỳ
-        const soldRes = await db.prepare(`
-          SELECT ii.product_id, SUM(ii.quantity) AS qty
-          FROM invoice_items ii
-          JOIN invoices inv ON ii.invoice_id = inv.id
-          WHERE date(inv.created_at) >= ? AND date(inv.created_at) <= ?
-          GROUP BY ii.product_id
-        `).bind(startDate, endDate).all();
-
+        // 3. Giá vốn hàng bán = (SL bán − SL khách trả lại) × đơn giá bình quân gia quyền cuối kỳ
+        //    Dùng chung hàm với báo cáo Xuất Nhập Tồn nên giá vốn luôn khớp với giá trị xuất kho
+        const invReport = await buildInventoryReport(db, startDate, endDate);
         let cogs = 0;
-        (soldRes.results || []).forEach((row) => {
-          cogs += (Number(row.qty) || 0) * avgCost(row.product_id);
-        });
-
-        // 5. Trừ lại giá vốn của hàng bán bị khách trả lại trong kỳ (hàng đã nhập lại kho)
-        const returnedRes = await db.prepare(`
-          SELECT roi.product_id, SUM(roi.quantity) AS qty
-          FROM return_order_items roi
-          JOIN return_orders ro ON roi.return_order_id = ro.id
-          WHERE date(ro.return_date) >= ? AND date(ro.return_date) <= ?
-            AND (ro.status LIKE '%Hoàn Thành%' OR ro.status LIKE '%Đã hoàn thành%')
-          GROUP BY roi.product_id
-        `).bind(startDate, endDate).all();
-
-        (returnedRes.results || []).forEach((row) => {
-          cogs -= (Number(row.qty) || 0) * avgCost(row.product_id);
-        });
-
+        for (const r of invReport) {
+          cogs += (r.soldQty - r.returnedQty) * r.avgCost;
+        }
         cogs = Math.round(Math.max(0, cogs));
         const grossProfit = netRevenue - cogs;
 
-        // 6. Chi phí hoạt động lấy từ Sổ quỹ (phiếu chi theo danh mục)
+        // 4. Chi phí hoạt động lấy từ Sổ quỹ (phiếu chi theo danh mục)
         const expRes = await db.prepare(`
           SELECT category, COALESCE(SUM(amount), 0) AS amt FROM cash_books
           WHERE type = 'OUT' AND date(created_at) >= ? AND date(created_at) <= ?
