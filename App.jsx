@@ -84,6 +84,18 @@ const EMPTY_RETURN_DATA = { list: [], stats: { total: 0, pending: 0, completed: 
 const isDoneReturn = (s) => /hoàn thành/i.test(String(s || ''));
 const PR_DONE = 'Hoàn Thành (Trừ kho & giảm nợ NCC)';
 const PR_REASONS = ['Hàng thừa / Trả lại', 'Hàng lỗi', 'Sai quy cách', 'Lý do khác'];
+// ===== Trả hàng bán (khách trả lại) =====
+const SR_DONE = 'Hoàn Thành (Cộng kho & trừ nợ)';
+const newReturnForm = () => ({
+  customer_name: '',
+  invoice_code: '',
+  return_date: todayLocal(),
+  reason: 'Sản phẩm lỗi',
+  refund_amount: 0,
+  payment_method: 'Tiền mặt',
+  status: SR_DONE,
+  items: [],
+});
 // refund_received = số tiền thực tế đã thu lại từ NCC (sẽ tự sinh phiếu thu trong Sổ quỹ)
 // refund_touched = người dùng đã tự sửa số tiền thu lại (nếu chưa thì tự = tổng giá trị hàng trả)
 const newPrForm = () => ({ supplier_id: '', supplier_name: '', purchase_code: '', return_date: todayLocal(), reason: PR_REASONS[0], status: PR_DONE, items: [], refund_received: 0, refund_touched: false, payment_method: 'Tiền mặt' });
@@ -144,16 +156,9 @@ function AppMain() {
 
   const [returnOrdersData, setReturnOrdersData] = useState(EMPTY_RETURN_DATA);
   const [showReturnModal, setShowReturnModal] = useState(false);
-  const [returnForm, setReturnForm] = useState({
-    customer_name: '',
-    invoice_code: '',
-    return_date: todayLocal(),
-    reason: 'Sản phẩm lỗi',
-    refund_amount: 0,
-    payment_method: 'Tiền mặt',
-    status: 'Hoàn Thành (Cộng kho & trừ nợ)',
-    items: []
-  });
+  const [returnForm, setReturnForm] = useState(newReturnForm);
+  const [editingReturnId, setEditingReturnId] = useState(null); // ID phiếu trả hàng bán đang sửa (null = tạo mới)
+  const [returnDetail, setReturnDetail] = useState(null); // Dữ liệu popup xem chi tiết phiếu trả hàng bán
 
   const loadReturnOrders = async () => {
     try {
@@ -203,6 +208,21 @@ function AppMain() {
     setReturnProductKeyword('');
   };
 
+  // Mở popup tạo phiếu trả hàng bán mới
+  const openCreateReturn = () => {
+    setEditingReturnId(null);
+    setReturnForm(newReturnForm());
+    setReturnCustomerSearch('');
+    setReturnProductKeyword('');
+    setShowReturnCustomerDropdown(false);
+    setShowReturnModal(true);
+  };
+
+  const closeReturnModal = () => {
+    setShowReturnModal(false);
+    setEditingReturnId(null);
+  };
+
   // Chọn phiếu bán gốc -> tự nạp các sản phẩm của phiếu đó vào danh sách trả
   const handleSelectReturnInvoice = async (invCode) => {
     if (!invCode) {
@@ -238,6 +258,7 @@ function AppMain() {
     }
   };
 
+  // Tạo mới HOẶC cập nhật phiếu trả hàng bán (tùy editingReturnId)
   const handleCreateReturnOrder = async () => {
     const items = (returnForm.items || [])
       .filter((it) => Number(it.quantity) > 0)
@@ -246,23 +267,74 @@ function AppMain() {
     if (!returnForm.customer_name) { alert('Vui lòng chọn khách hàng!'); return; }
     if (items.length === 0) { alert('Vui lòng chọn ít nhất 1 sản phẩm trả lại!'); return; }
 
+    const isEdit = !!editingReturnId;
     try {
-      const res = await api('/api/return-orders', {
-        method: 'POST',
+      const res = await api(isEdit ? `/api/return-orders/${editingReturnId}` : '/api/return-orders', {
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...returnForm, refund_amount: Number(returnForm.refund_amount) || 0, items })
       });
       if (res && res.success) {
-        alert('Tạo phiếu trả hàng thành công!');
-        setShowReturnModal(false);
+        alert(isEdit ? 'Cập nhật phiếu trả hàng thành công!' : 'Tạo phiếu trả hàng thành công!');
+        closeReturnModal();
         loadReturnOrders();
         loadData(); // cập nhật lại tồn kho / công nợ
       } else {
-        alert((res && res.error) || 'Có lỗi xảy ra khi tạo phiếu trả.');
+        alert((res && res.error) || (isEdit ? 'Có lỗi xảy ra khi cập nhật phiếu trả.' : 'Có lỗi xảy ra khi tạo phiếu trả.'));
       }
     } catch (err) {
-      console.error('Lỗi tạo phiếu trả:', err);
+      console.error('Lỗi lưu phiếu trả:', err);
       alert('Lỗi: ' + err.message);
+    }
+  };
+
+  // Xem chi tiết phiếu trả hàng bán
+  const handleViewReturn = async (item) => {
+    try { setReturnDetail(await api(`/api/return-orders/${item.id}`)); }
+    catch (e) { alert('Lỗi tải chi tiết: ' + e.message); }
+  };
+
+  // Sửa phiếu trả hàng bán: nạp dữ liệu cũ vào popup, khi lưu sẽ gọi PUT (cập nhật đúng phiếu này)
+  const handleEditReturn = async (item) => {
+    try {
+      const d = await api(`/api/return-orders/${item.id}`);
+      setEditingReturnId(item.id);
+      setReturnForm({
+        customer_name: d.customer_name || '',
+        invoice_code: d.invoice_code || '',
+        return_date: d.return_date ? String(d.return_date).slice(0, 10) : todayLocal(),
+        reason: d.reason || 'Sản phẩm lỗi',
+        refund_amount: Number(d.refund_amount) || 0,
+        payment_method: d.payment_method || 'Tiền mặt',
+        status: isDoneReturn(d.status) ? SR_DONE : 'Đang xử lý',
+        items: (d.items || []).map((it) => ({
+          product_id: it.product_id,
+          sku: it.sku || '',
+          name: it.product_name || '',
+          quantity: Number(it.quantity) || 0,
+          max_qty: null,
+          price: Number(it.price) || 0,
+        })),
+      });
+      setReturnCustomerSearch(d.customer_name || '');
+      setReturnProductKeyword('');
+      setShowReturnCustomerDropdown(false);
+      setShowReturnModal(true);
+    } catch (e) {
+      alert('Lỗi tải phiếu để sửa: ' + e.message);
+    }
+  };
+
+  // Xóa phiếu trả hàng bán
+  const handleDeleteReturn = async (item) => {
+    if (!confirm(`Xóa phiếu trả hàng ${item.code}? Hàng đã cộng lại kho sẽ được trừ ra và phiếu chi hoàn tiền trong Thu chi (nếu có) cũng bị xóa.`)) return;
+    try {
+      await api(`/api/return-orders/${item.id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: `Đã xóa phiếu trả hàng ${item.code}` });
+      loadReturnOrders();
+      loadData();
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
     }
   };
 
@@ -274,6 +346,7 @@ function AppMain() {
   const [prDate, setPrDate] = useState('');
   const [showPrModal, setShowPrModal] = useState(false);
   const [prForm, setPrForm] = useState(newPrForm);
+  const [editingPrId, setEditingPrId] = useState(null); // ID phiếu trả hàng nhập đang sửa (null = tạo mới)
   const [prSupplierSearch, setPrSupplierSearch] = useState('');
   const [showPrSupplierDropdown, setShowPrSupplierDropdown] = useState(false);
   const [prProductKeyword, setPrProductKeyword] = useState('');
@@ -315,6 +388,21 @@ function AppMain() {
     setPrProductKeyword('');
   };
 
+  // Mở popup tạo phiếu trả hàng nhập mới
+  const openCreatePr = () => {
+    setEditingPrId(null);
+    setPrForm(newPrForm());
+    setPrSupplierSearch('');
+    setPrProductKeyword('');
+    setShowPrSupplierDropdown(false);
+    setShowPrModal(true);
+  };
+
+  const closePrModal = () => {
+    setShowPrModal(false);
+    setEditingPrId(null);
+  };
+
   // Chọn phiếu nhập gốc -> tự nạp NCC và các sản phẩm của phiếu đó
   const handleSelectPrPurchase = async (poId) => {
     if (!poId) { setPrForm((f) => ({ ...f, purchase_code: '' })); return; }
@@ -345,6 +433,7 @@ function AppMain() {
     }
   };
 
+  // Tạo mới HOẶC cập nhật phiếu trả hàng nhập (tùy editingPrId)
   const handleCreatePurchaseReturn = async () => {
     const items = (prForm.items || [])
       .filter((it) => Number(it.quantity) > 0)
@@ -359,9 +448,10 @@ function AppMain() {
       return;
     }
 
+    const isEdit = !!editingPrId;
     try {
-      const res = await api('/api/purchase-returns', {
-        method: 'POST',
+      const res = await api(isEdit ? `/api/purchase-returns/${editingPrId}` : '/api/purchase-returns', {
+        method: isEdit ? 'PUT' : 'POST',
         body: JSON.stringify({
           supplier_id: prForm.supplier_id,
           purchase_code: prForm.purchase_code,
@@ -374,8 +464,8 @@ function AppMain() {
         }),
       });
       if (res && res.success) {
-        setMsg({ type: 'ok', text: `Tạo phiếu trả hàng nhập ${res.code} thành công!` });
-        setShowPrModal(false);
+        setMsg({ type: 'ok', text: isEdit ? `Cập nhật phiếu trả hàng nhập ${res.code} thành công!` : `Tạo phiếu trả hàng nhập ${res.code} thành công!` });
+        closePrModal();
         loadPurchaseReturns();
         loadData(); // cập nhật tồn kho / công nợ NCC
       }
@@ -387,6 +477,39 @@ function AppMain() {
   const handleViewPr = async (item) => {
     try { setPrDetail(await api(`/api/purchase-returns/${item.id}`)); }
     catch (e) { alert('Lỗi tải chi tiết: ' + e.message); }
+  };
+
+  // Sửa phiếu trả hàng nhập: nạp dữ liệu cũ vào popup, khi lưu sẽ gọi PUT (cập nhật đúng phiếu này)
+  const handleEditPr = async (item) => {
+    try {
+      const d = await api(`/api/purchase-returns/${item.id}`);
+      setEditingPrId(item.id);
+      setPrForm({
+        supplier_id: d.supplier_id,
+        supplier_name: d.supplier_name || '',
+        purchase_code: d.purchase_code || '',
+        return_date: d.return_date ? String(d.return_date).slice(0, 10) : todayLocal(),
+        reason: d.reason || PR_REASONS[0],
+        status: isDoneReturn(d.status) ? PR_DONE : 'Đang xử lý',
+        items: (d.items || []).map((it) => ({
+          product_id: it.product_id,
+          sku: it.sku || '',
+          name: it.product_name || '',
+          quantity: Number(it.quantity) || 0,
+          max_qty: null,
+          price: Number(it.price) || 0,
+        })),
+        refund_received: Number(d.refund_received ?? d.received_amount) || 0,
+        refund_touched: true, // giữ nguyên số đã thu lại của phiếu, không tự đổi theo tổng tiền
+        payment_method: d.payment_method || 'Tiền mặt',
+      });
+      setPrSupplierSearch(d.supplier_name || '');
+      setPrProductKeyword('');
+      setShowPrSupplierDropdown(false);
+      setShowPrModal(true);
+    } catch (e) {
+      alert('Lỗi tải phiếu để sửa: ' + e.message);
+    }
   };
 
   const handleDeletePr = async (item) => {
@@ -1637,13 +1760,7 @@ function AppMain() {
                   🔄 Làm mới
                 </button>
                 <button
-                  onClick={() => {
-                    setReturnForm({ customer_name: '', invoice_code: '', return_date: todayLocal(), reason: 'Sản phẩm lỗi', refund_amount: 0, payment_method: 'Tiền mặt', status: 'Hoàn Thành (Cộng kho & trừ nợ)', items: [] });
-                    setReturnCustomerSearch('');
-                    setReturnProductKeyword('');
-                    setShowReturnCustomerDropdown(false);
-                    setShowReturnModal(true);
-                  }}
+                  onClick={openCreateReturn}
                   style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Phiếu Trả Hàng
@@ -1694,7 +1811,7 @@ function AppMain() {
                     </tr>
                   ) : (
                     returnOrdersData.list.map((item, index) => (
-                      <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <tr key={item.id ?? index} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '14px', fontWeight: 'bold', color: '#0284c7' }}>{item.code}</td>
                         <td style={{ padding: '14px', color: '#475569' }}>{item.invoice_code || '-'}</td>
                         <td style={{ padding: '14px', fontWeight: '500' }}>{item.customer_name}</td>
@@ -1703,14 +1820,14 @@ function AppMain() {
                         <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
                         <td style={{ padding: '14px' }}>{item.reason}</td>
                         <td style={{ padding: '14px' }}>
-                          <span style={{ padding: '4px 10px', borderRadius: '20px', background: '#dcfce7', color: '#16a34a', fontWeight: '500', fontSize: '12px' }}>
+                          <span style={{ padding: '4px 10px', borderRadius: '20px', background: isDoneReturn(item.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(item.status) ? '#16a34a' : '#d97706', fontWeight: '500', fontSize: '12px' }}>
                             {item.status}
                           </span>
                         </td>
                         <td style={{ padding: '14px', textAlign: 'center' }}>
-                          <button title="Xem" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
-                          <button title="Sửa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
-                          <button title="Xóa" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
+                          <button title="Xem" onClick={() => handleViewReturn(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
+                          <button title="Sửa" onClick={() => handleEditReturn(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
+                          <button title="Xóa" onClick={() => handleDeleteReturn(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
                         </td>
                       </tr>
                     ))
@@ -1719,15 +1836,59 @@ function AppMain() {
               </table>
             </div>
 
-            {/* POPUP TẠO PHIẾU TRẢ HÀNG */}
+            {/* POPUP XEM CHI TIẾT PHIẾU TRẢ HÀNG BÁN */}
+            {returnDetail && (
+              <div style={overlayStyle}>
+                <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết: {returnDetail.code}</h3>
+                    <button onClick={() => setReturnDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                    <div><b>Khách hàng:</b> {returnDetail.customer_name}</div>
+                    <div><b>Phiếu bán gốc:</b> {returnDetail.invoice_code || '---'}</div>
+                    <div><b>Ngày trả:</b> {returnDetail.return_date ? String(returnDetail.return_date).slice(0, 10) : '---'}</div>
+                    <div><b>Lý do:</b> {returnDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {returnDetail.status}</div>
+                    <div><b>Phương thức hoàn tiền:</b> {returnDetail.payment_method || 'Tiền mặt'}</div>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '15px' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>Sản phẩm</th><th style={{ padding: '8px' }}>SL</th><th style={{ padding: '8px' }}>Đơn giá</th><th style={{ padding: '8px' }}>Thành tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(returnDetail.items || []).length === 0 ? (
+                        <tr><td colSpan="4" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Phiếu này chưa có chi tiết sản phẩm.</td></tr>
+                      ) : (returnDetail.items || []).map((it, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '8px' }}>{it.sku ? `${it.sku} - ` : ''}{it.product_name}</td>
+                          <td style={{ padding: '8px' }}>{it.quantity}</td>
+                          <td style={{ padding: '8px' }}>{vnd(it.price)}</td>
+                          <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(it.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                    <span>Tiền hoàn trả khách:</span><span style={{ color: '#dc2626' }}>{vnd(returnDetail.refund_amount)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                    <button onClick={() => setReturnDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* POPUP TẠO / SỬA PHIẾU TRẢ HÀNG */}
             {showReturnModal && (
               <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
                 <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', overflowY: 'auto', boxSizing: 'border-box' }}>
 
                   {/* Header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
-                    <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng (Khách Trả Lại)</h3>
-                    <button onClick={() => setShowReturnModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+                    <h3 style={{ margin: 0, color: '#1e293b' }}>{editingReturnId ? '✏️ Sửa Phiếu Trả Hàng (Khách Trả Lại)' : 'Tạo Phiếu Trả Hàng (Khách Trả Lại)'}</h3>
+                    <button onClick={closeReturnModal} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
                   </div>
 
                   {/* Hàng 1: Khách hàng, Chọn phiếu bán gốc, Ngày trả */}
@@ -1984,7 +2145,7 @@ function AppMain() {
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button
-                        onClick={() => setShowReturnModal(false)}
+                        onClick={closeReturnModal}
                         style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                       >
                         Hủy
@@ -1993,7 +2154,7 @@ function AppMain() {
                         onClick={handleCreateReturnOrder}
                         style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                       >
-                        Tạo Phiếu Trả
+                        {editingReturnId ? 'Cập Nhật Phiếu Trả' : 'Tạo Phiếu Trả'}
                       </button>
                     </div>
                   </div>
@@ -2022,7 +2183,7 @@ function AppMain() {
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button onClick={loadPurchaseReturns} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>🔄 Làm mới</button>
                   <button
-                    onClick={() => { setPrForm(newPrForm()); setPrSupplierSearch(''); setPrProductKeyword(''); setShowPrSupplierDropdown(false); setShowPrModal(true); }}
+                    onClick={openCreatePr}
                     style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                   >+ Tạo Phiếu Trả Nhập</button>
                 </div>
@@ -2074,7 +2235,7 @@ function AppMain() {
                         <td style={{ padding: '14px' }}>{r.supplier_name}</td>
                         <td style={{ padding: '14px' }}>{r.return_date ? new Date(r.return_date).toLocaleDateString('vi-VN') : ''}</td>
                         <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(r.total_amount)}</td>
-                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(r.refund_received)}</td>
+                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(r.refund_received ?? r.received_amount)}</td>
                         <td style={{ padding: '14px' }}>{r.reason}</td>
                         <td style={{ padding: '14px' }}>
                           <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: isDoneReturn(r.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(r.status) ? '#16a34a' : '#d97706' }}>
@@ -2083,6 +2244,7 @@ function AppMain() {
                         </td>
                         <td style={{ padding: '14px', textAlign: 'center' }}>
                           <button title="Xem" onClick={() => handleViewPr(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
+                          <button title="Sửa" onClick={() => handleEditPr(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>✏️</button>
                           <button title="Xóa" onClick={() => handleDeletePr(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
                         </td>
                       </tr>
@@ -2094,13 +2256,13 @@ function AppMain() {
           );
         })()}
 
-        {/* POPUP TẠO PHIẾU TRẢ HÀNG NHẬP */}
+        {/* POPUP TẠO / SỬA PHIẾU TRẢ HÀNG NHẬP */}
         {showPrModal && (
           <div style={overlayStyle}>
             <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
-                <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng Nhập (Trả Lại NCC)</h3>
-                <button onClick={() => setShowPrModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+                <h3 style={{ margin: 0, color: '#1e293b' }}>{editingPrId ? '✏️ Sửa Phiếu Trả Hàng Nhập (Trả Lại NCC)' : 'Tạo Phiếu Trả Hàng Nhập (Trả Lại NCC)'}</h3>
+                <button onClick={closePrModal} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
@@ -2291,8 +2453,8 @@ function AppMain() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => setShowPrModal(false)} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
-                  <button onClick={handleCreatePurchaseReturn} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Tạo Phiếu Trả</button>
+                  <button onClick={closePrModal} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
+                  <button onClick={handleCreatePurchaseReturn} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>{editingPrId ? 'Cập Nhật Phiếu Trả' : 'Tạo Phiếu Trả'}</button>
                 </div>
               </div>
             </div>
@@ -2312,6 +2474,7 @@ function AppMain() {
                 <div><b>Phiếu nhập gốc:</b> {prDetail.purchase_code || '---'}</div>
                 <div><b>Ngày trả:</b> {prDetail.return_date ? new Date(prDetail.return_date).toLocaleDateString('vi-VN') : '---'}</div>
                 <div><b>Lý do:</b> {prDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {prDetail.status}</div>
+                <div><b>Phương thức nhận tiền:</b> {prDetail.payment_method || 'Tiền mặt'}</div>
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '15px' }}>
                 <thead>
@@ -2334,7 +2497,7 @@ function AppMain() {
                 <span>Tổng tiền trả:</span><span style={{ color: '#dc2626' }}>{vnd(prDetail.total_amount)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                <span>Đã thu lại từ NCC:</span><span style={{ color: '#16a34a' }}>{vnd(prDetail.refund_received)}</span>
+                <span>Đã thu lại từ NCC:</span><span style={{ color: '#16a34a' }}>{vnd(prDetail.refund_received ?? prDetail.received_amount)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
                 <button onClick={() => setPrDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
@@ -3539,6 +3702,7 @@ function AppMain() {
                   ) : (
                     <>
                       <option value="Bán hàng / Thu nợ KH">Bán hàng / Thu nợ KH</option>
+                      <option value="Thu hoàn tiền NCC">Thu hoàn tiền NCC</option>
                       <option value="Thu hoàn trả từ NCC">Thu hoàn trả từ NCC</option>
                       <option value="Thu nhập khác">Thu nhập khác</option>
                     </>
@@ -4393,5 +4557,5 @@ const inputStyle = { width: '100%', padding: '10px', margin: '6px 0', borderRadi
 const labelStyle = { display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '5px' };
 const cardStyle = { background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' };
 const cellStyle = { padding: '12px' };
-const statBoxStyle = { background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' };
+const statBoxStyle = { background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' };
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
