@@ -37,6 +37,14 @@ const putItemIntoCart = (cartObj, item) => {
   if (d.note) cartObj[id + '_note'] = d.note;
 };
 
+// Gộp số khung / số sườn / màu / ghi chú của 1 dòng hàng thành 1 chuỗi để lưu vào DB
+const buildItemDetails = (cartObj, id) => [
+  cartObj[id + '_chassis'] ? `Số khung: ${cartObj[id + '_chassis']}` : '',
+  cartObj[id + '_frame'] ? `Số sườn: ${cartObj[id + '_frame']}` : '',
+  cartObj[id + '_color'] ? `Màu: ${cartObj[id + '_color']}` : '',
+  cartObj[id + '_note'] ? `Ghi chú: ${cartObj[id + '_note']}` : '',
+].filter(Boolean).join(' | ');
+
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -580,7 +588,7 @@ function AppMain() {
           quantity: l.quantity,
           price: l.price,
           discount: l.discount,
-          chassis_color: cart[l.id + '_chassis'] || l.chassis_color || ''
+          chassis_color: buildItemDetails(cart, l.id)
         }))
       };
 
@@ -890,17 +898,9 @@ function AppMain() {
       const newCart = {};
       const oldQty = {};
       (details.items || []).forEach((item) => {
-        const pid = item.product_id;
-        newCart[pid] = item.quantity;
-        newCart[pid + '_price'] = item.price;
-        newCart[pid + '_discount'] = item.discount || 0;
-        oldQty[pid] = item.quantity;
-
-        // 👉 Nạp chính xác trường chassis_color từ dữ liệu cũ vào giỏ hàng
-        if (item.chassis_color) {
-          newCart[pid + '_chassis'] = item.chassis_color;
-        }
-      });
+  putItemIntoCart(newCart, item); // tách đúng số khung / sườn / màu / ghi chú
+  oldQty[item.product_id] = item.quantity;
+});
       setCart(newCart);
       setEditingInvoiceOriginalQty(oldQty);
       setShowOrderModal(true);
