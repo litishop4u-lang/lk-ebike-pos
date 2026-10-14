@@ -80,6 +80,12 @@ const EMPTY_PL_REPORT = {
 };
 const EMPTY_RETURN_DATA = { list: [], stats: { total: 0, pending: 0, completed: 0, totalRefund: 0 } };
 
+// ===== Trả hàng nhập (trả lại NCC) =====
+const isDoneReturn = (s) => /hoàn thành/i.test(String(s || ''));
+const PR_DONE = 'Hoàn Thành (Trừ kho & giảm nợ NCC)';
+const PR_REASONS = ['Hàng thừa / Trả lại', 'Hàng lỗi', 'Sai quy cách', 'Lý do khác'];
+const newPrForm = () => ({ supplier_id: '', supplier_name: '', purchase_code: '', return_date: todayLocal(), reason: PR_REASONS[0], status: PR_DONE, items: [] });
+
 // Hiện lỗi ngay trên màn hình thay vì trắng trơn, để biết chính xác lỗi ở đâu
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -110,7 +116,7 @@ export default function App() {
 }
 
 function AppMain() {
-  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'return-orders' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
+  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'return-orders' | 'purchase-returns' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
 
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
   const [products, setProducts] = useState([]);
@@ -254,6 +260,130 @@ function AppMain() {
     } catch (err) {
       console.error('Lỗi tạo phiếu trả:', err);
       alert('Lỗi: ' + err.message);
+    }
+  };
+
+  // ===== Trả hàng nhập (trả lại NCC) =====
+  const [prData, setPrData] = useState({ list: [], stats: { total: 0, totalAmount: 0, completed: 0 } });
+  const [prSearch, setPrSearch] = useState('');
+  const [prStatus, setPrStatus] = useState('');
+  const [prReason, setPrReason] = useState('');
+  const [prDate, setPrDate] = useState('');
+  const [showPrModal, setShowPrModal] = useState(false);
+  const [prForm, setPrForm] = useState(newPrForm);
+  const [prSupplierSearch, setPrSupplierSearch] = useState('');
+  const [showPrSupplierDropdown, setShowPrSupplierDropdown] = useState(false);
+  const [prProductKeyword, setPrProductKeyword] = useState('');
+  const [prLoading, setPrLoading] = useState(false);
+  const [prDetail, setPrDetail] = useState(null);
+
+  const loadPurchaseReturns = async () => {
+    try {
+      const res = await api('/api/purchase-returns');
+      if (res && res.success) {
+        const d = res.data || {};
+        setPrData({
+          list: Array.isArray(d.list) ? d.list : [],
+          stats: { total: 0, totalAmount: 0, completed: 0, ...(d.stats || {}) },
+        });
+      }
+    } catch (e) {
+      setMsg({ type: 'err', text: 'Không tải được trả hàng nhập: ' + e.message });
+    }
+  };
+
+  const calcPrTotal = (items) => (items || []).reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.price) || 0), 0);
+  const setPrItems = (items) => setPrForm((f) => ({ ...f, items }));
+  const updatePrItem = (index, patch) => setPrItems((prForm.items || []).map((it, i) => (i === index ? { ...it, ...patch } : it)));
+  const removePrItem = (index) => setPrItems((prForm.items || []).filter((_, i) => i !== index));
+
+  const addPrProduct = (p) => {
+    const items = prForm.items || [];
+    const exist = items.find((it) => it.product_id === p.id);
+    const next = exist
+      ? items.map((it) => {
+          if (it.product_id !== p.id) return it;
+          const q = it.quantity + 1;
+          return { ...it, quantity: it.max_qty ? Math.min(q, it.max_qty) : q };
+        })
+      : [...items, { product_id: p.id, sku: p.sku || '', name: p.name, quantity: 1, max_qty: null, price: Number(p.import_price) || Number(p.price) || 0 }];
+    setPrItems(next);
+    setPrProductKeyword('');
+  };
+
+  // Chọn phiếu nhập gốc -> tự nạp NCC và các sản phẩm của phiếu đó
+  const handleSelectPrPurchase = async (poId) => {
+    if (!poId) { setPrForm((f) => ({ ...f, purchase_code: '' })); return; }
+    const po = (purchaseOrders || []).find((x) => String(x.id) === String(poId));
+    if (!po) return;
+    setPrForm((f) => ({ ...f, purchase_code: po.code, supplier_id: po.supplier_id, supplier_name: po.supplier_name || f.supplier_name }));
+    if (po.supplier_name) setPrSupplierSearch(po.supplier_name);
+    setPrLoading(true);
+    try {
+      const details = await api(`/api/purchase_orders/${po.id}`);
+      const items = (details.items || []).map((it) => {
+        const qty = Number(it.quantity) || 0;
+        const net = Number(it.total) || ((Number(it.price) || 0) * qty - (Number(it.discount) || 0));
+        return {
+          product_id: it.product_id,
+          sku: it.sku || '',
+          name: it.product_name || '',
+          quantity: qty,
+          max_qty: qty,
+          price: qty > 0 ? Math.round(net / qty) : (Number(it.price) || 0),
+        };
+      });
+      setPrItems(items);
+    } catch (e) {
+      alert('Lỗi tải chi tiết phiếu nhập: ' + e.message);
+    } finally {
+      setPrLoading(false);
+    }
+  };
+
+  const handleCreatePurchaseReturn = async () => {
+    const items = (prForm.items || [])
+      .filter((it) => Number(it.quantity) > 0)
+      .map((it) => ({ product_id: it.product_id, quantity: Number(it.quantity), price: Number(it.price) || 0 }));
+    if (!prForm.supplier_id) { alert('Vui lòng chọn nhà cung cấp!'); return; }
+    if (items.length === 0) { alert('Vui lòng chọn ít nhất 1 sản phẩm trả lại!'); return; }
+    try {
+      const res = await api('/api/purchase-returns', {
+        method: 'POST',
+        body: JSON.stringify({
+          supplier_id: prForm.supplier_id,
+          purchase_code: prForm.purchase_code,
+          return_date: prForm.return_date,
+          reason: prForm.reason,
+          status: prForm.status,
+          items,
+        }),
+      });
+      if (res && res.success) {
+        setMsg({ type: 'ok', text: `Tạo phiếu trả hàng nhập ${res.code} thành công!` });
+        setShowPrModal(false);
+        loadPurchaseReturns();
+        loadData(); // cập nhật tồn kho / công nợ NCC
+      }
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
+    }
+  };
+
+  const handleViewPr = async (item) => {
+    try { setPrDetail(await api(`/api/purchase-returns/${item.id}`)); }
+    catch (e) { alert('Lỗi tải chi tiết: ' + e.message); }
+  };
+
+  const handleDeletePr = async (item) => {
+    if (!confirm(`Xóa phiếu trả hàng nhập ${item.code}? Hàng đã trả sẽ được cộng lại vào kho.`)) return;
+    try {
+      await api(`/api/purchase-returns/${item.id}`, { method: 'DELETE' });
+      setMsg({ type: 'ok', text: `Đã xóa phiếu ${item.code}` });
+      loadPurchaseReturns();
+      loadData();
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
     }
   };
 
@@ -898,9 +1028,9 @@ function AppMain() {
       const newCart = {};
       const oldQty = {};
       (details.items || []).forEach((item) => {
-  putItemIntoCart(newCart, item); // tách đúng số khung / sườn / màu / ghi chú
-  oldQty[item.product_id] = item.quantity;
-});
+        putItemIntoCart(newCart, item); // tách đúng số khung / sườn / màu / ghi chú
+        oldQty[item.product_id] = item.quantity;
+      });
       setCart(newCart);
       setEditingInvoiceOriginalQty(oldQty);
       setShowOrderModal(true);
@@ -1226,6 +1356,19 @@ function AppMain() {
               }}
             >
               📦 Trả Hàng Bán
+            </button>
+          </li>
+          <li>
+            <button
+              onClick={() => { setCurrentView('purchase-returns'); loadPurchaseReturns(); }}
+              style={{
+                width: '100%', padding: '12px 15px', textAlign: 'left',
+                background: currentView === 'purchase-returns' ? '#7c3aed' : 'transparent',
+                color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer',
+                fontWeight: '500', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
+              }}
+            >
+              ↩️ Trả Hàng Nhập
             </button>
           </li>
           <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>🏷️ Sản phẩm</button></li>
@@ -1827,6 +1970,311 @@ function AppMain() {
               </div>
             )}
 
+          </div>
+        )}
+
+        {/* MÀN HÌNH TRẢ HÀNG NHẬP */}
+        {currentView === 'purchase-returns' && (() => {
+          const q = prSearch.trim().toLowerCase();
+          const rows = prData.list.filter((r) =>
+            (!q || (r.code || '').toLowerCase().includes(q) || (r.supplier_name || '').toLowerCase().includes(q) || (r.purchase_code || '').toLowerCase().includes(q)) &&
+            (!prStatus || (prStatus === 'done' ? isDoneReturn(r.status) : !isDoneReturn(r.status))) &&
+            (!prReason || r.reason === prReason) &&
+            (!prDate || String(r.return_date || '').slice(0, 10) === prDate)
+          );
+          const statCard = { background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' };
+          return (
+            <div style={{ padding: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '24px' }}>Trả Hàng Nhập</h2>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={loadPurchaseReturns} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>🔄 Làm mới</button>
+                  <button
+                    onClick={() => { setPrForm(newPrForm()); setPrSupplierSearch(''); setPrProductKeyword(''); setShowPrSupplierDropdown(false); setShowPrModal(true); }}
+                    style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  >+ Tạo Phiếu Trả Nhập</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' }}>
+                <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{prData.stats.total}</div></div>
+                <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền trả</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>{vnd(prData.stats.totalAmount)}</div></div>
+                <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đã hoàn thành</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{prData.stats.completed}</div></div>
+              </div>
+
+              <div style={{ ...statCard, display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
+                <input placeholder="Tìm mã phiếu, NCC..." value={prSearch} onChange={(e) => setPrSearch(e.target.value)} style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                <select value={prStatus} onChange={(e) => setPrStatus(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="">Tất cả trạng thái</option>
+                  <option value="done">Hoàn thành</option>
+                  <option value="pending">Đang xử lý</option>
+                </select>
+                <select value={prReason} onChange={(e) => setPrReason(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="">Tất cả lý do</option>
+                  {PR_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input type="date" value={prDate} onChange={(e) => setPrDate(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                <button onClick={loadPurchaseReturns} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '8px 22px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Lọc</button>
+              </div>
+
+              <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                      <th style={{ padding: '14px' }}>MÃ PHIẾU TRẢ</th>
+                      <th style={{ padding: '14px' }}>PHIẾU NHẬP GỐC</th>
+                      <th style={{ padding: '14px' }}>NCC</th>
+                      <th style={{ padding: '14px' }}>NGÀY TRẢ</th>
+                      <th style={{ padding: '14px', textAlign: 'right' }}>TỔNG TIỀN</th>
+                      <th style={{ padding: '14px' }}>LÝ DO</th>
+                      <th style={{ padding: '14px' }}>TRẠNG THÁI</th>
+                      <th style={{ padding: '14px', textAlign: 'center' }}>THAO TÁC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr><td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nhập nào.</td></tr>
+                    ) : rows.map((r) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '14px', fontWeight: 'bold' }}>{r.code}</td>
+                        <td style={{ padding: '14px', color: '#475569' }}>{r.purchase_code || '-'}</td>
+                        <td style={{ padding: '14px' }}>{r.supplier_name}</td>
+                        <td style={{ padding: '14px' }}>{r.return_date ? new Date(r.return_date).toLocaleDateString('vi-VN') : ''}</td>
+                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(r.total_amount)}</td>
+                        <td style={{ padding: '14px' }}>{r.reason}</td>
+                        <td style={{ padding: '14px' }}>
+                          <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: isDoneReturn(r.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(r.status) ? '#16a34a' : '#d97706' }}>
+                            {isDoneReturn(r.status) ? 'Hoàn Thành' : r.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px', textAlign: 'center' }}>
+                          <button title="Xem" onClick={() => handleViewPr(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', marginRight: '8px' }}>👁️</button>
+                          <button title="Xóa" onClick={() => handleDeletePr(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* POPUP TẠO PHIẾU TRẢ HÀNG NHẬP */}
+        {showPrModal && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '950px', maxHeight: '90vh', borderRadius: '12px', padding: '24px', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '20px' }}>
+                <h3 style={{ margin: 0, color: '#1e293b' }}>Tạo Phiếu Trả Hàng Nhập (Trả Lại NCC)</h3>
+                <button onClick={() => setShowPrModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                <div>
+                  <label style={labelStyle}>Nhà cung cấp:</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      placeholder="Gõ tên, SĐT hoặc mã NCC..."
+                      value={prSupplierSearch}
+                      onChange={(e) => {
+                        setPrSupplierSearch(e.target.value);
+                        setPrForm((f) => ({ ...f, supplier_id: '', supplier_name: e.target.value, purchase_code: '' }));
+                        setShowPrSupplierDropdown(true);
+                      }}
+                      onFocus={() => setShowPrSupplierDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowPrSupplierDropdown(false), 150)}
+                      style={{ ...inputStyle, margin: 0 }}
+                    />
+                    {showPrSupplierDropdown && (() => {
+                      const k = prSupplierSearch.trim().toLowerCase();
+                      const list = (suppliers || []).filter((s) =>
+                        !k || (s.name || '').toLowerCase().includes(k) || (s.phone && s.phone.includes(k)) || (s.code || '').toLowerCase().includes(k)
+                      ).slice(0, 50);
+                      if (list.length === 0) return null;
+                      return (
+                        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                          {list.map((s) => (
+                            <div
+                              key={s.id}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                const changed = s.id !== prForm.supplier_id;
+                                setPrSupplierSearch(s.name);
+                                setPrForm((f) => ({ ...f, supplier_id: s.id, supplier_name: s.name, purchase_code: changed ? '' : f.purchase_code, items: changed ? [] : f.items }));
+                                setShowPrSupplierDropdown(false);
+                              }}
+                              style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                            >
+                              <b>{s.name}</b> <span style={{ color: '#64748b' }}>({s.code})</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Chọn phiếu nhập gốc:</label>
+                  <select
+                    value={(purchaseOrders.find((p) => p.code === prForm.purchase_code) || {}).id || ''}
+                    onChange={(e) => handleSelectPrPurchase(e.target.value)}
+                    style={{ ...inputStyle, margin: 0, background: '#fff' }}
+                  >
+                    <option value="">-- Chọn Phiếu Nhập Gốc --</option>
+                    {(purchaseOrders || [])
+                      .filter((po) => !prForm.supplier_id || po.supplier_id === prForm.supplier_id)
+                      .map((po) => (
+                        <option key={po.id} value={po.id}>{po.code} - {po.supplier_name || ''} ({vnd(po.total)})</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Ngày trả:</label>
+                  <input type="date" value={prForm.return_date} onChange={(e) => setPrForm({ ...prForm, return_date: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+                <div>
+                  <label style={labelStyle}>Lý do trả:</label>
+                  <select value={prForm.reason} onChange={(e) => setPrForm({ ...prForm, reason: e.target.value })} style={{ ...inputStyle, margin: 0, background: '#fff' }}>
+                    {PR_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Trạng thái xử lý:</label>
+                  <select value={prForm.status} onChange={(e) => setPrForm({ ...prForm, status: e.target.value })} style={{ ...inputStyle, margin: 0, background: '#fff' }}>
+                    <option value={PR_DONE}>{PR_DONE}</option>
+                    <option value="Đang xử lý">Đang xử lý (chưa trừ kho)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '15px', position: 'relative' }}>
+                <input
+                  placeholder="🔍 Hoặc gõ mã/tên sản phẩm để thêm vào danh sách trả..."
+                  value={prProductKeyword}
+                  onChange={(e) => setPrProductKeyword(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, padding: '12px' }}
+                />
+                {prProductKeyword.trim() && (() => {
+                  const k = prProductKeyword.trim().toLowerCase();
+                  const list = (products || []).filter((p) => (p.name || '').toLowerCase().includes(k) || (p.sku && p.sku.toLowerCase().includes(k))).slice(0, 30);
+                  return (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '220px', overflowY: 'auto', zIndex: 20, marginTop: '4px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                      {list.length === 0 ? (
+                        <div style={{ padding: '12px', color: '#94a3b8', textAlign: 'center' }}>Không tìm thấy sản phẩm nào.</div>
+                      ) : list.map((p) => (
+                        <div key={p.id} onClick={() => addPrProduct(p)} style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}>
+                          <span><b>{p.sku ? `${p.sku} - ` : ''}{p.name}</b> <small style={{ color: '#64748b' }}>(Tồn: {p.stock})</small></span>
+                          <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>{vnd(p.import_price)} <span style={{ color: '#0284c7' }}>+ Thêm</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                      <th style={{ padding: '10px 14px' }}>Mã SP</th>
+                      <th style={{ padding: '10px 14px' }}>Tên Sản Phẩm</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Số lượng</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right' }}>Đơn giá</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right' }}>Thành tiền</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', width: '50px' }}>Xóa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {prLoading ? (
+                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Đang tải sản phẩm của phiếu nhập...</td></tr>
+                    ) : (prForm.items || []).length === 0 ? (
+                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Chưa có sản phẩm trả lại</td></tr>
+                    ) : prForm.items.map((it, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 14px' }}>{it.sku}</td>
+                        <td style={{ padding: '10px 14px', fontWeight: '500' }}>{it.name}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <input
+                            type="number" min="0" max={it.max_qty || undefined} value={it.quantity}
+                            onChange={(e) => {
+                              let qv = Math.max(0, Number(e.target.value) || 0);
+                              if (it.max_qty) qv = Math.min(qv, it.max_qty);
+                              updatePrItem(idx, { quantity: qv });
+                            }}
+                            style={{ width: '60px', padding: '6px', textAlign: 'center' }}
+                          />
+                          {it.max_qty ? <div style={{ fontSize: '11px', color: '#94a3b8' }}>tối đa {it.max_qty}</div> : null}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                          <input type="number" min="0" value={it.price} onChange={(e) => updatePrItem(idx, { price: Number(e.target.value) || 0 })}
+                            style={{ width: '120px', padding: '6px', textAlign: 'right', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }} />
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(it.quantity * it.price)}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <button onClick={() => removePrItem(idx)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+                  Tổng giá trị hàng trả NCC: <span style={{ color: '#7c3aed' }}>{vnd(calcPrTotal(prForm.items))}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={() => setShowPrModal(false)} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
+                  <button onClick={handleCreatePurchaseReturn} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Tạo Phiếu Trả</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP XEM CHI TIẾT PHIẾU TRẢ HÀNG NHẬP */}
+        {prDetail && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết: {prDetail.code}</h3>
+                <button onClick={() => setPrDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                <div><b>Nhà cung cấp:</b> {prDetail.supplier_name}</div>
+                <div><b>Phiếu nhập gốc:</b> {prDetail.purchase_code || '---'}</div>
+                <div><b>Ngày trả:</b> {prDetail.return_date ? new Date(prDetail.return_date).toLocaleDateString('vi-VN') : '---'}</div>
+                <div><b>Lý do:</b> {prDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {prDetail.status}</div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '15px' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Sản phẩm</th><th style={{ padding: '8px' }}>SL</th><th style={{ padding: '8px' }}>Đơn giá</th><th style={{ padding: '8px' }}>Thành tiền</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(prDetail.items || []).map((it, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px' }}>{it.sku ? `${it.sku} - ` : ''}{it.product_name}</td>
+                      <td style={{ padding: '8px' }}>{it.quantity}</td>
+                      <td style={{ padding: '8px' }}>{vnd(it.price)}</td>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(it.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                <span>Tổng tiền trả:</span><span style={{ color: '#dc2626' }}>{vnd(prDetail.total_amount)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                <button onClick={() => setPrDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+              </div>
+            </div>
           </div>
         )}
 
