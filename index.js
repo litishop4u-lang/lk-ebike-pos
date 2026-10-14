@@ -784,7 +784,7 @@ export default {
                 str(body.payment_method) || 'Tiền mặt',
                 code,
                 `Hoàn tiền trả hàng cho khách ${custName} theo phiếu trả ${code}${invoice_code ? ' (HĐ ' + invoice_code + ')' : ''}`,
-                new Date().toISOString()
+                retDate // ngày phiếu chi = ngày trả hàng
               )
             );
           }
@@ -831,9 +831,8 @@ export default {
         const invoiceCode = body.invoice_code !== undefined ? str(body.invoice_code) : (old.invoice_code || '');
         const reason = str(body.reason) || old.reason || 'Sản phẩm lỗi';
 
-        // Giữ nguyên ngày của phiếu chi cũ (nếu có)
-        const oldCash = await db.prepare("SELECT created_at FROM cash_books WHERE reference_code = ? AND type = 'OUT' LIMIT 1").bind(old.code).first();
-        const cashDate = oldCash?.created_at || new Date().toISOString();
+        // Ngày phiếu chi trong Sổ quỹ = ngày trả hàng
+        const cashDate = retDate;
 
         const stmts = [];
         // 1. Hoàn tác ảnh hưởng của phiếu cũ: phiếu cũ đã cộng kho thì trừ lại
@@ -959,7 +958,8 @@ export default {
 
         await db.prepare(`
           UPDATE cash_books
-          SET type = ?, amount = ?, category = ?, payment_method = ?, reference_code = ?, note = ?
+          SET type = ?, amount = ?, category = ?, payment_method = ?, reference_code = ?, note = ?,
+              created_at = COALESCE(?, created_at)
           WHERE id = ?
         `).bind(
           type,
@@ -968,6 +968,7 @@ export default {
           str(b.payment_method) || 'Chuyển khoản',
           str(b.reference_code) || '',
           str(b.note) || '',
+          str(b.created_at || b.date) || null, // không gửi ngày thì giữ nguyên ngày cũ
           id
         ).run();
 
@@ -1043,7 +1044,7 @@ export default {
                 payMethod,
                 code,
                 `Thu hoàn tiền trả hàng nhập từ ${sup.name} theo phiếu ${code}`,
-                new Date().toISOString()
+                retDate // ngày phiếu thu = ngày trả hàng
               )
             );
           }
@@ -1094,9 +1095,8 @@ export default {
         const receivedRaw = b.received_amount ?? b.refund_received ?? b.paid_amount ?? 0;
         const received = done ? Math.min(money(receivedRaw), total) : 0;
 
-        // Giữ nguyên ngày của phiếu thu cũ (nếu có)
-        const oldCash = await db.prepare("SELECT created_at FROM cash_books WHERE reference_code = ? AND type = 'IN' LIMIT 1").bind(old.code).first();
-        const cashDate = oldCash?.created_at || new Date().toISOString();
+        // Ngày phiếu thu trong Sổ quỹ = ngày trả hàng
+        const cashDate = retDate;
 
         const stmts = [];
         // 1. Hoàn tác phiếu cũ: đã trừ kho thì cộng lại
