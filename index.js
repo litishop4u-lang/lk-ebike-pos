@@ -71,6 +71,19 @@ async function ensureReturnSchema(db) {
   returnSchemaReady = true;
 }
 
+// Tự thêm cột chassis_color (lưu số khung/sườn/màu/ghi chú) nếu bảng chưa có
+let chassisReady = false;
+async function ensureChassisColumns(db) {
+  if (chassisReady) return;
+  for (const t of ['invoice_items', 'order_items']) {
+    const { results } = await db.prepare(`PRAGMA table_info(${t})`).all();
+    if (!(results || []).some((c) => c.name === 'chassis_color')) {
+      await db.prepare(`ALTER TABLE ${t} ADD COLUMN chassis_color TEXT`).run();
+    }
+  }
+  chassisReady = true;
+}
+
 // Lấy toàn bộ dòng hàng trả lại của các phiếu trả ĐÃ HOÀN THÀNH (đã cộng lại kho)
 async function loadReturnLines(db) {
   await ensureReturnSchema(db);
@@ -78,6 +91,51 @@ async function loadReturnLines(db) {
     SELECT roi.product_id, roi.quantity, roi.total, ro.return_date, ro.created_at, ro.status
     FROM return_order_items roi
     JOIN return_orders ro ON roi.return_order_id = ro.id
+  `).all();
+  return (results || [])
+    .filter((r) => isCompletedReturn(r.status))
+    .map((r) => ({
+      product_id: r.product_id,
+      quantity: Number(r.quantity) || 0,
+      total: Number(r.total) || 0,
+      date: dateOnly(r.return_date || r.created_at),
+    }));
+}
+
+// ===== Trả hàng nhập (trả hàng lại cho NCC) =====
+let purchaseReturnReady = false;
+async function ensurePurchaseReturnSchema(db) {
+  if (purchaseReturnReady) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS purchase_return_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE,
+    purchase_code TEXT,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    return_date TEXT,
+    reason TEXT,
+    total_amount REAL NOT NULL DEFAULT 0,
+    status TEXT,
+    created_at TEXT
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS purchase_return_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0
+  )`).run();
+  purchaseReturnReady = true;
+}
+
+// Các dòng hàng đã trả NCC (chỉ phiếu đã hoàn thành mới trừ kho)
+async function loadPurchaseReturnLines(db) {
+  await ensurePurchaseReturnSchema(db);
+  const { results } = await db.prepare(`
+    SELECT i.product_id, i.quantity, i.total, r.return_date, r.created_at, r.status
+    FROM purchase_return_order_items i
+    JOIN purchase_return_orders r ON i.return_id = r.id
   `).all();
   return (results || [])
     .filter((r) => isCompletedReturn(r.status))
@@ -111,7 +169,7 @@ function normalizeItems(items) {
     const discount = money(it.discount);
     const gross = quantity * price;
     if (discount > gross) throw new HttpError(400, 'Giảm giá không được lớn hơn thành tiền');
-    return { product_id, quantity, price, discount, total: gross - discount };
+    return { product_id, quantity, price, discount, total: gross - discount, chassis_color: str(it.chassis_color) };
   });
 }
 const sumTotal = (lines) => lines.reduce((s, l) => s + l.total, 0);
@@ -190,8 +248,8 @@ async function createInvoice(db, b) {
       .bind(code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method),
     ...lines.map((l) =>
       // Bảng invoice_items của bạn có cột unit_price (NOT NULL) nên ghi thêm cả unit_price lẫn price
-      db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?,?)')
-        .bind(code, l.product_id, l.quantity, l.price, l.price, l.discount, l.total)),
+      db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total, chassis_color) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.price, l.price, l.discount, l.total, l.chassis_color)),
     ...lines.map((l) =>
       db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
     stockGuard(db, ids),
@@ -218,8 +276,8 @@ async function createOrder(db, b) {
     db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, created_at, status) VALUES (?,?,?,?,?,?)')
       .bind(code, customer_name, customer_phone, total, created_at, 'Pending'),
     ...lines.map((l) =>
-      db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?)')
-        .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
+      db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?,?)')
+        .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total, l.chassis_color)),
   ]);
   return { code, total };
 }
@@ -252,6 +310,9 @@ export default {
     if (method === 'OPTIONS') return json(null, 204, origin);
 
     try {
+      // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
+      if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) await ensureChassisColumns(db);
+
       // ===== 1. SẢN PHẨM =====
       if (pathname === '/api/products' && method === 'GET') {
         const { results } = await db.prepare('SELECT * FROM products ORDER BY id DESC').all();
@@ -399,6 +460,26 @@ export default {
           });
         });
 
+        // Trả hàng cho NCC (xuất khỏi kho, số lượng âm)
+        await ensurePurchaseReturnSchema(db);
+        const supRetRes = await db.prepare(`
+          SELECT r.code, COALESCE(r.return_date, r.created_at) AS created_at, r.supplier_name, r.status, i.price, i.quantity
+          FROM purchase_return_order_items i
+          JOIN purchase_return_orders r ON i.return_id = r.id
+          WHERE i.product_id = ?
+        `).bind(productId).all();
+        (supRetRes.results || []).forEach((item) => {
+          if (!isCompletedReturn(item.status)) return;
+          transactions.push({
+            code: item.code,
+            date: item.created_at,
+            partner: item.supplier_name || 'Nhà cung cấp',
+            import_price: Number(item.price) || 0,
+            export_price: 0,
+            qty: -(Number(item.quantity) || 0)
+          });
+        });
+
         // Sắp xếp theo thời gian tăng dần để tính lũy kế chính xác
         transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -484,8 +565,8 @@ export default {
         for (const item of items) {
           const lineTotal = (item.quantity * item.price) - (item.discount || 0);
           stmts.push(
-            db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total) VALUES (?, ?, ?, ?, ?, ?)')
-              .bind(id, item.product_id, item.quantity, item.price, item.discount || 0, lineTotal)
+            db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .bind(id, item.product_id, item.quantity, item.price, item.discount || 0, lineTotal, str(item.chassis_color))
           );
         }
 
@@ -575,8 +656,8 @@ export default {
           db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(id),
           // Bảng invoice_items có cột unit_price (NOT NULL) nên ghi cả unit_price lẫn price
           ...lines.map((l) =>
-            db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total) VALUES (?,?,?,?,?,?,?)')
-              .bind(id, l.product_id, l.quantity, l.price, l.price, l.discount, l.total)),
+            db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total, chassis_color) VALUES (?,?,?,?,?,?,?,?)')
+              .bind(id, l.product_id, l.quantity, l.price, l.price, l.discount, l.total, l.chassis_color)),
           // Trừ tồn kho theo phiếu mới
           ...lines.map((l) =>
             db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)),
@@ -757,19 +838,107 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+      // ===== TRẢ HÀNG NHẬP =====
+      if (pathname === '/api/purchase-returns' && method === 'GET') {
+        await ensurePurchaseReturnSchema(db);
+        const { results } = await db.prepare('SELECT * FROM purchase_return_orders ORDER BY id DESC').all();
+        const list = results || [];
+        return json({
+          success: true,
+          data: {
+            list,
+            stats: {
+              total: list.length,
+              totalAmount: list.reduce((s, r) => s + (Number(r.total_amount) || 0), 0),
+              completed: list.filter((r) => isCompletedReturn(r.status)).length,
+            },
+          },
+        }, 200, origin);
+      }
+
+      if (pathname === '/api/purchase-returns' && method === 'POST') {
+        await ensurePurchaseReturnSchema(db);
+        const b = await request.json();
+
+        const supplier_id = Number(b.supplier_id);
+        const sup = supplier_id ? await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').bind(supplier_id).first() : null;
+        if (!sup) throw new HttpError(400, 'Vui lòng chọn nhà cung cấp');
+
+        const lines = (Array.isArray(b.items) ? b.items : [])
+          .map((it) => ({ product_id: Number(it.product_id), quantity: Number(it.quantity), price: money(it.price) }))
+          .filter((l) => Number.isInteger(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0);
+        if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
+
+        const statusText = str(b.status) || 'Hoàn Thành';
+        const done = isCompletedReturn(statusText);
+        const ids = await loadProducts(db, lines, { checkStock: done }); // trả NCC thì phải đủ tồn kho
+
+        const total = lines.reduce((s, l) => s + l.quantity * l.price, 0);
+        const code = genCode('RTN');
+
+        const stmts = [
+          db.prepare(`INSERT INTO purchase_return_orders (code, purchase_code, supplier_id, supplier_name, return_date, reason, total_amount, status, created_at)
+                      VALUES (?,?,?,?,?,?,?,?,?)`)
+            .bind(code, str(b.purchase_code), sup.id, sup.name, str(b.return_date) || new Date().toISOString().slice(0, 10),
+                  str(b.reason) || 'Hàng thừa / Trả lại', total, statusText, new Date().toISOString()),
+          ...lines.map((l) =>
+            db.prepare('INSERT INTO purchase_return_order_items (return_id, product_id, quantity, price, total) VALUES ((SELECT id FROM purchase_return_orders WHERE code = ?),?,?,?,?)')
+              .bind(code, l.product_id, l.quantity, l.price, l.quantity * l.price)),
+        ];
+        if (done) {
+          stmts.push(...lines.map((l) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)));
+          stmts.push(stockGuard(db, ids));
+        }
+        await runBatch(db, stmts, 'Tồn kho vừa thay đổi, không đủ hàng để trả NCC. Vui lòng tải lại và thử lại');
+        return json({ success: true, code, total }, 201, origin);
+      }
+
+      if (is(/^\/api\/purchase-returns\/\d+$/, 'GET')) {
+        await ensurePurchaseReturnSchema(db);
+        const id = idOf(pathname);
+        const head = await db.prepare('SELECT * FROM purchase_return_orders WHERE id = ?').bind(id).first();
+        if (!head) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng nhập');
+        const items = await db.prepare(`
+          SELECT i.*, p.name AS product_name, p.sku
+          FROM purchase_return_order_items i LEFT JOIN products p ON i.product_id = p.id
+          WHERE i.return_id = ?
+        `).bind(id).all();
+        return json({ ...head, items: items.results || [] }, 200, origin);
+      }
+
+      if (is(/^\/api\/purchase-returns\/\d+$/, 'DELETE')) {
+        await ensurePurchaseReturnSchema(db);
+        const id = idOf(pathname);
+        const head = await db.prepare('SELECT * FROM purchase_return_orders WHERE id = ?').bind(id).first();
+        if (!head) throw new HttpError(404, 'Không tìm thấy phiếu trả hàng nhập');
+        const items = (await db.prepare('SELECT product_id, quantity FROM purchase_return_order_items WHERE return_id = ?').bind(id).all()).results || [];
+        const stmts = [];
+        if (isCompletedReturn(head.status)) {
+          // Xóa phiếu trả -> hoàn lại số hàng đã trừ khỏi kho
+          stmts.push(...items.map((i) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(i.quantity, i.product_id)));
+        }
+        stmts.push(db.prepare('DELETE FROM purchase_return_order_items WHERE return_id = ?').bind(id));
+        stmts.push(db.prepare('DELETE FROM purchase_return_orders WHERE id = ?').bind(id));
+        await db.batch(stmts);
+        return json({ success: true }, 200, origin);
+      }
+
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
-        // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau)
+        await ensurePurchaseReturnSchema(db);
+        // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau) - hàng đã trả NCC
         const { results } = await db.prepare(`
           SELECT s.*,
             COALESCE(p.total_purchase, 0) AS total_purchase,
             COALESCE(p.po_paid, 0) + COALESCE(pay.total_paid, 0) AS total_paid,
-            COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0) AS total_debt
+            COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0) - COALESCE(rt.total_returned, 0) AS total_debt
           FROM suppliers s
           LEFT JOIN (SELECT supplier_id, SUM(total) AS total_purchase, SUM(paid_amount) AS po_paid
                      FROM purchase_orders GROUP BY supplier_id) p ON s.id = p.supplier_id
           LEFT JOIN (SELECT supplier_id, SUM(amount) AS total_paid
                      FROM supplier_payments GROUP BY supplier_id) pay ON s.id = pay.supplier_id
+          LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned
+                     FROM purchase_return_orders WHERE status LIKE '%Hoàn Thành%' GROUP BY supplier_id) rt ON s.id = rt.supplier_id
           ORDER BY s.id DESC
         `).all();
         return json(results || [], 200, origin);
@@ -842,7 +1011,12 @@ export default {
         return json({
           purchases: await safeAll('purchase_orders'),
           payments: await safeAll('supplier_payments'),
-          returns: await safeAll('supplier_returns'),
+          returns: await (async () => {
+            try {
+              await ensurePurchaseReturnSchema(db);
+              return (await db.prepare('SELECT *, total_amount AS total, reason AS note, return_date AS created_at FROM purchase_return_orders WHERE supplier_id = ? ORDER BY id DESC').bind(id).all()).results || [];
+            } catch (e) { return []; }
+          })(),
         }, 200, origin);
       }
 
@@ -1059,7 +1233,7 @@ export default {
       }
 
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
-      // Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại (nhập lại kho)
+      // Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại - hàng trả lại NCC
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
@@ -1088,6 +1262,8 @@ export default {
 
         // 4. Lấy lịch sử khách trả hàng (đã hoàn thành -> đã cộng lại kho)
         const returnMap = groupByProduct(await loadReturnLines(db));
+        // 4b. Lấy lịch sử trả hàng cho NCC (đã hoàn thành -> đã trừ kho)
+        const supRetMap = groupByProduct(await loadPurchaseReturnLines(db));
 
         const cleanStart = startDate.slice(0, 10);
         const cleanEnd = endDate.slice(0, 10);
@@ -1099,6 +1275,7 @@ export default {
           const pPur = purchaseMap.get(key) || [];
           const pInv = invoiceMap.get(key) || [];
           const pRet = returnMap.get(key) || [];
+          const pSup = supRetMap.get(key) || [];
 
           const currentStock = n0(p.stock);
           // Giá nhập dự phòng trên thẻ sản phẩm (nếu chưa có lịch sử nhập)
@@ -1145,13 +1322,20 @@ export default {
             else if (i.date > cleanEnd) expAfterQty += n0(i.quantity);
           }
 
-          const importQty = purQty + retQty;
-          const importVal = purVal + retQty * unitCost;
+          // Trả hàng cho NCC: trong kỳ và sau kỳ
+          let supQty = 0, supAfterQty = 0;
+          for (const r of pSup) {
+            if (r.date >= cleanStart && r.date <= cleanEnd) supQty += n0(r.quantity);
+            else if (r.date > cleanEnd) supAfterQty += n0(r.quantity);
+          }
+
+          const importQty = purQty + retQty - supQty;
+          const importVal = purVal + retQty * unitCost - supQty * unitCost;
           const exportQty = expQty;
           const exportVal = expQty * unitCost;
 
-          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ - đã khách trả sau kỳ
-          const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty;
+          // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ - đã khách trả sau kỳ + đã trả NCC sau kỳ
+          const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty + supAfterQty;
           const closingVal = closingQty * unitCost;
           const openingQty = closingQty - importQty + exportQty;
           const openingVal = openingQty * unitCost;
