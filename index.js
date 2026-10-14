@@ -115,6 +115,8 @@ async function ensurePurchaseReturnSchema(db) {
     return_date TEXT,
     reason TEXT,
     total_amount REAL NOT NULL DEFAULT 0,
+    received_amount REAL NOT NULL DEFAULT 0,
+    payment_method TEXT,
     status TEXT,
     created_at TEXT
   )`).run();
@@ -126,6 +128,13 @@ async function ensurePurchaseReturnSchema(db) {
     price REAL NOT NULL DEFAULT 0,
     total REAL NOT NULL DEFAULT 0
   )`).run();
+  // [FIX] Bảng cũ chưa có cột "đã thu lại tiền hoàn từ NCC" -> tự bổ sung
+  const { results } = await db.prepare('PRAGMA table_info(purchase_return_orders)').all();
+  const cols = (results || []).map((c) => c.name);
+  if (!cols.includes('received_amount'))
+    await db.prepare('ALTER TABLE purchase_return_orders ADD COLUMN received_amount REAL NOT NULL DEFAULT 0').run();
+  if (!cols.includes('payment_method'))
+    await db.prepare('ALTER TABLE purchase_return_orders ADD COLUMN payment_method TEXT').run();
   purchaseReturnReady = true;
 }
 
@@ -729,6 +738,9 @@ export default {
         if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
         await loadProducts(db, lines, { checkStock: false });
 
+        const refundTotal = money(refund_amount);
+        const retDate = return_date || new Date().toISOString().slice(0, 10);
+
         const stmts = [
           // Lưu phiếu trả hàng
           db.prepare(`
@@ -738,9 +750,9 @@ export default {
             code,
             invoice_code || '',
             customer_name || 'Khách lẻ',
-            return_date || new Date().toISOString().slice(0, 10),
+            retDate,
             reason || 'Sản phẩm lỗi',
-            Number(refund_amount) || 0,
+            refundTotal,
             statusText
           ),
           // Lưu chi tiết từng sản phẩm trả lại
@@ -753,6 +765,29 @@ export default {
         if (isCompletedReturn(statusText)) {
           stmts.push(...lines.map((l) =>
             db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)));
+
+          // [FIX] Trả tiền hoàn cho khách -> tự sinh PHIẾU CHI vào Sổ quỹ (thu chi)
+          // Số tiền thực chi: ưu tiên field refund_paid (nếu giao diện gửi), mặc định = refund_amount. Không vượt quá tiền hoàn.
+          const cashRefund = Math.min(
+            body.refund_paid !== undefined ? money(body.refund_paid) : refundTotal,
+            refundTotal
+          );
+          if (cashRefund > 0) {
+            const custName = customer_name || 'Khách lẻ';
+            stmts.push(
+              db.prepare(`
+                INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+                VALUES (?, 'OUT', ?, 'Chi hoàn trả khách hàng', ?, ?, ?, ?)
+              `).bind(
+                genCode('TC'),
+                cashRefund,
+                str(body.payment_method) || 'Tiền mặt',
+                code,
+                `Hoàn tiền trả hàng cho khách ${custName} theo phiếu trả ${code}${invoice_code ? ' (HĐ ' + invoice_code + ')' : ''}`,
+                new Date().toISOString()
+              )
+            );
+          }
         }
 
         await db.batch(stmts);
@@ -850,6 +885,7 @@ export default {
             stats: {
               total: list.length,
               totalAmount: list.reduce((s, r) => s + (Number(r.total_amount) || 0), 0),
+              totalReceived: list.reduce((s, r) => s + (Number(r.received_amount) || 0), 0),
               completed: list.filter((r) => isCompletedReturn(r.status)).length,
             },
           },
@@ -875,12 +911,19 @@ export default {
 
         const total = lines.reduce((s, l) => s + l.quantity * l.price, 0);
         const code = genCode('RTN');
+        const retDate = str(b.return_date) || new Date().toISOString().slice(0, 10);
+        const payMethod = str(b.payment_method) || 'Tiền mặt';
+
+        // [FIX] Số tiền đã thu lại từ NCC (không vượt quá tổng giá trị hàng trả). Chỉ ghi nhận khi phiếu đã hoàn thành.
+        // Giao diện gửi lên: received_amount (hoặc refund_received / paid_amount)
+        const receivedRaw = b.received_amount ?? b.refund_received ?? b.paid_amount ?? 0;
+        const received = done ? Math.min(money(receivedRaw), total) : 0;
 
         const stmts = [
-          db.prepare(`INSERT INTO purchase_return_orders (code, purchase_code, supplier_id, supplier_name, return_date, reason, total_amount, status, created_at)
-                      VALUES (?,?,?,?,?,?,?,?,?)`)
-            .bind(code, str(b.purchase_code), sup.id, sup.name, str(b.return_date) || new Date().toISOString().slice(0, 10),
-                  str(b.reason) || 'Hàng thừa / Trả lại', total, statusText, new Date().toISOString()),
+          db.prepare(`INSERT INTO purchase_return_orders (code, purchase_code, supplier_id, supplier_name, return_date, reason, total_amount, received_amount, payment_method, status, created_at)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+            .bind(code, str(b.purchase_code), sup.id, sup.name, retDate,
+                  str(b.reason) || 'Hàng thừa / Trả lại', total, received, payMethod, statusText, new Date().toISOString()),
           ...lines.map((l) =>
             db.prepare('INSERT INTO purchase_return_order_items (return_id, product_id, quantity, price, total) VALUES ((SELECT id FROM purchase_return_orders WHERE code = ?),?,?,?,?)')
               .bind(code, l.product_id, l.quantity, l.price, l.quantity * l.price)),
@@ -888,9 +931,26 @@ export default {
         if (done) {
           stmts.push(...lines.map((l) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(l.quantity, l.product_id)));
           stmts.push(stockGuard(db, ids));
+
+          // [FIX] Thu lại tiền hoàn từ NCC -> tự sinh PHIẾU THU vào Sổ quỹ (thu chi)
+          if (received > 0) {
+            stmts.push(
+              db.prepare(`
+                INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+                VALUES (?, 'IN', ?, 'Thu hoàn tiền NCC', ?, ?, ?, ?)
+              `).bind(
+                genCode('PT'),
+                received,
+                payMethod,
+                code,
+                `Thu hoàn tiền trả hàng nhập từ ${sup.name} theo phiếu ${code}`,
+                new Date().toISOString()
+              )
+            );
+          }
         }
         await runBatch(db, stmts, 'Tồn kho vừa thay đổi, không đủ hàng để trả NCC. Vui lòng tải lại và thử lại');
-        return json({ success: true, code, total }, 201, origin);
+        return json({ success: true, code, total, received }, 201, origin);
       }
 
       if (is(/^\/api\/purchase-returns\/\d+$/, 'GET')) {
@@ -917,6 +977,8 @@ export default {
           // Xóa phiếu trả -> hoàn lại số hàng đã trừ khỏi kho
           stmts.push(...items.map((i) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(i.quantity, i.product_id)));
         }
+        // [FIX] Xóa luôn phiếu thu hoàn tiền NCC trong Sổ quỹ để thu chi không bị lệch
+        stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(head.code));
         stmts.push(db.prepare('DELETE FROM purchase_return_order_items WHERE return_id = ?').bind(id));
         stmts.push(db.prepare('DELETE FROM purchase_return_orders WHERE id = ?').bind(id));
         await db.batch(stmts);
@@ -926,18 +988,20 @@ export default {
       // ===== 3. NHÀ CUNG CẤP =====
       if (pathname === '/api/suppliers' && method === 'GET') {
         await ensurePurchaseReturnSchema(db);
-        // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau) - hàng đã trả NCC
+        // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau) - hàng đã trả NCC + tiền NCC đã hoàn lại cho mình
+        // [FIX] Cộng lại received_amount: nếu NCC đã hoàn tiền mặt thì phần đó không còn làm giảm nợ nữa
         const { results } = await db.prepare(`
           SELECT s.*,
             COALESCE(p.total_purchase, 0) AS total_purchase,
             COALESCE(p.po_paid, 0) + COALESCE(pay.total_paid, 0) AS total_paid,
-            COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0) - COALESCE(rt.total_returned, 0) AS total_debt
+            COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0)
+              - COALESCE(rt.total_returned, 0) + COALESCE(rt.total_received, 0) AS total_debt
           FROM suppliers s
           LEFT JOIN (SELECT supplier_id, SUM(total) AS total_purchase, SUM(paid_amount) AS po_paid
                      FROM purchase_orders GROUP BY supplier_id) p ON s.id = p.supplier_id
           LEFT JOIN (SELECT supplier_id, SUM(amount) AS total_paid
                      FROM supplier_payments GROUP BY supplier_id) pay ON s.id = pay.supplier_id
-          LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned
+          LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned, SUM(COALESCE(received_amount, 0)) AS total_received
                      FROM purchase_return_orders WHERE status LIKE '%Hoàn Thành%' GROUP BY supplier_id) rt ON s.id = rt.supplier_id
           ORDER BY s.id DESC
         `).all();
@@ -1233,7 +1297,8 @@ export default {
       }
 
       // GET /api/reports/inventory-summary — Báo cáo Xuất Nhập Tồn theo khoảng thời gian
-      // Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại - hàng trả lại NCC
+      // [FIX] Nhập trong kỳ = nhập hàng từ NCC + hàng bán bị khách trả lại
+      //       Xuất trong kỳ = hàng bán ra + hàng trả lại NCC (trả NCC là giảm kho nên nằm ở cột XUẤT, không ghi âm ở cột nhập)
       if (pathname === '/api/reports/inventory-summary' && method === 'GET') {
         const urlObj = new URL(request.url);
         const startDate = urlObj.searchParams.get('startDate') || '2025-01-01';
@@ -1329,10 +1394,12 @@ export default {
             else if (r.date > cleanEnd) supAfterQty += n0(r.quantity);
           }
 
-          const importQty = purQty + retQty - supQty;
-          const importVal = purVal + retQty * unitCost - supQty * unitCost;
-          const exportQty = expQty;
-          const exportVal = expQty * unitCost;
+          // [FIX] Nhập = mua NCC + khách trả lại (KHÔNG trừ hàng trả NCC nữa)
+          const importQty = purQty + retQty;
+          const importVal = purVal + retQty * unitCost;
+          // [FIX] Xuất = bán ra + trả lại NCC
+          const exportQty = expQty + supQty;
+          const exportVal = (expQty + supQty) * unitCost;
 
           // Tồn cuối kỳ = tồn hiện tại + đã xuất sau kỳ - đã nhập sau kỳ - đã khách trả sau kỳ + đã trả NCC sau kỳ
           const closingQty = currentStock + expAfterQty - purAfterQty - retAfterQty + supAfterQty;
