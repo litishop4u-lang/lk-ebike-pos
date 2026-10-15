@@ -80,19 +80,37 @@ body, html {
   background-color: #f8fafc;
 }
 
-/* Thu gọn danh sách gợi ý sản phẩm trên mobile chỉ hiển thị tầm 2-3 sản phẩm */
-.product-dropdown-list, 
-.search-results-container,
-div[style*="position: absolute"] {
-  max-height: 180px !important;
-  overflow-y: auto !important;
+/* ===== Fix popup tạo phiếu / đơn trên điện thoại ===== */
+@media (max-width: 900px) {
+  /* Danh sách sản phẩm chỉ cao ~2-3 dòng, kéo để xem thêm */
+  .main-content div[style*="max-height: 55vh"] {
+    max-height: 180px !important;
+    overflow-y: auto !important;
+  }
+
+  /* Cột lưới không bị nội dung dài kéo tràn ra ngoài màn hình */
+  .main-content div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .main-content div[style*="grid-template-columns"] > * {
+    min-width: 0;
+  }
+
+  /* Ô nhập luôn vừa bề ngang popup */
+  .main-content input,
+  .main-content select,
+  .main-content textarea {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Tên sản phẩm dài tự xuống dòng thay vì bị cắt */
+  .main-content div[style*="max-height: 55vh"] > div {
+    word-break: break-word;
+  }
 }
 
-/* Tối ưu popup tạo phiếu bán hàng và đơn đặt hàng trên mobile */
-@media (max-width: 768px) {
-  .modal-content, .pos-modal-container {
-    max-height: 85vh !important;
-    overflow-y: auto !important;
-    padding: 10px !important;
-  }
+/* Chữ đồng nhất (trong hình đang bị font có chân) */
+.layout, .layout button, .layout input, .layout select, .layout textarea {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
