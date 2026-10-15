@@ -124,6 +124,65 @@ class ErrorBoundary extends Component {
 export default function App() {
   return (
     <ErrorBoundary>
+      <style>
+        const RESPONSIVE_CSS = `
+.mobile-topbar, .sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  /* Thanh trên cùng có nút ☰ */
+  .mobile-topbar {
+    display: flex; position: fixed; top: 0; left: 0; right: 0; height: 52px;
+    background: #1e293b; color: #fff; align-items: center; gap: 12px;
+    padding: 0 14px; z-index: 800; box-shadow: 0 2px 6px rgba(0,0,0,.2);
+  }
+  .mobile-topbar button {
+    background: transparent; border: none; color: #fff; font-size: 26px;
+    cursor: pointer; line-height: 1; padding: 4px 8px;
+  }
+  .mobile-topbar span { font-weight: bold; color: #38bdf8; font-size: 16px; }
+
+  /* Menu trái trượt ra / vào */
+  .sidebar {
+    position: fixed !important; top: 0; left: 0; bottom: 0;
+    width: 260px !important; max-width: 82vw; box-sizing: border-box;
+    overflow-y: auto; transform: translateX(-100%);
+    transition: transform .25s ease; z-index: 1100;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.show {
+    display: block; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 1050;
+  }
+
+  /* Nội dung chính */
+  .main-content {
+    padding: 64px 10px 16px !important; width: 100%;
+    box-sizing: border-box; min-width: 0;
+  }
+
+  /* Bảng cuộn ngang thay vì tràn màn hình */
+  .main-content table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
+
+  /* Lưới nhiều cột -> 1 cột (thẻ thống kê -> 2 cột) */
+  .main-content div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+  .main-content div[style*="repeat("] { grid-template-columns: repeat(2, 1fr) !important; }
+  .main-content div[style*="grid-column"] { grid-column: auto !important; }
+
+  /* Hàng tiêu đề + nút tự xuống dòng */
+  .main-content div[style*="justify-content: space-between"] { flex-wrap: wrap !important; gap: 8px; }
+
+  /* Popup full màn hình điện thoại */
+  .main-content div[style*="position: fixed"] { padding: 8px; box-sizing: border-box; }
+  .main-content div[style*="position: fixed"] > div {
+    width: 100% !important; max-width: 100% !important;
+    max-height: 94vh !important; box-sizing: border-box;
+  }
+
+  /* Chống iOS tự zoom khi bấm vào ô nhập */
+  .main-content input, .main-content select, .main-content textarea { font-size: 16px; }
+}
+`;
+        </style>
       <AppMain />
     </ErrorBoundary>
   );
@@ -131,7 +190,7 @@ export default function App() {
 
 function AppMain() {
   const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'return-orders' | 'purchase-returns' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
-
+  const [sidebarOpen, setSidebarOpen] = useState(false); // menu trái trên điện thoại
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState({});
@@ -1464,11 +1523,25 @@ function AppMain() {
   );
 
   return (
-    <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
+        <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
+      <style>{RESPONSIVE_CSS}</style>
+
+      {/* Thanh trên cùng (chỉ hiện trên điện thoại) */}
+      <div className="mobile-topbar">
+        <button onClick={() => setSidebarOpen(true)} aria-label="Mở menu">☰</button>
+        <span>LK Ebike POS</span>
+      </div>
+
+      {/* Nền mờ bấm vào để đóng menu (chỉ hiện trên điện thoại) */}
+      <div className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`} onClick={() => setSidebarOpen(false)} />
+
       {/* Thanh menu bên trái */}
-      <aside className="sidebar" style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
         <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
-        <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <ul
+          onClick={(e) => { if (e.target.closest('button')) setSidebarOpen(false); }} /* chọn mục xong tự ẩn menu */
+          style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}
+        >
           <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>📦 Tạo đơn hàng</button></li>
           <li>
             <button
