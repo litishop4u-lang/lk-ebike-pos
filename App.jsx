@@ -164,6 +164,18 @@ const RESPONSIVE_CSS = `
     max-height: 94vh !important; box-sizing: border-box;
   }
   .main-content input, .main-content select, .main-content textarea { font-size: 16px; }
+  /* Danh sách sản phẩm trong popup chỉ cao ~2-3 dòng, kéo để xem thêm */
+  .main-content .pos-product-list { max-height: 180px !important; overflow-y: auto !important; }
+  .main-content .pos-product-list > div { word-break: break-word; }
+
+  /* Cột lưới không bị nội dung dài kéo tràn màn hình */
+  .main-content div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+  .main-content div[style*="grid-template-columns"] > * { min-width: 0; }
+  .main-content input, .main-content select, .main-content textarea { max-width: 100%; }
+}
+  /* Đồng nhất font (áp dụng cả máy tính và điện thoại) */
+.layout, .layout button, .layout input, .layout select, .layout textarea {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 `;
 export default function App() {
