@@ -3889,7 +3889,7 @@ function AppMain() {
                       style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                     >+</button>
                   </div>
-                  <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                  <div className="pos-product-list" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
                     {filteredPosProducts.map((p) => {
                       const isOutOfStock = p.stock <= 0;
                       return (
