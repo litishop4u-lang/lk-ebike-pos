@@ -83,7 +83,7 @@ body, html {
 /* Thu gọn danh sách gợi ý sản phẩm trên mobile chỉ hiển thị tầm 2-3 sản phẩm */
 .product-dropdown-list, 
 .search-results-container {
-  max-height: 220px !important;
+  max-height: 120px !important;
   overflow-y: auto !important;
 }
 
