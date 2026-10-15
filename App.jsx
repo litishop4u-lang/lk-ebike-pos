@@ -1149,8 +1149,13 @@ function AppMain() {
           </div>
 
           <script>
-            window.onload = function() { window.print(); window.close(); };
-          <\/script>
+    // Thêm độ trễ 400ms để trình duyệt trên điện thoại kịp render nội dung trước khi gọi lệnh in
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 400);
+    };
+  </script>
         </body>
       </html>
     `);
