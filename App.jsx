@@ -121,15 +121,11 @@ class ErrorBoundary extends Component {
   }
 }
 
-export default function App() {
-  return (
-    <ErrorBoundary>
-      <style>
-        const RESPONSIVE_CSS = `
+  // 1. Đặt đoạn này ở đầu file App.jsx (ngoài cùng, trên function App)
+const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
 @media (max-width: 900px) {
-  /* Thanh trên cùng có nút ☰ */
   .mobile-topbar {
     display: flex; position: fixed; top: 0; left: 0; right: 0; height: 52px;
     background: #1e293b; color: #fff; align-items: center; gap: 12px;
@@ -141,7 +137,6 @@ export default function App() {
   }
   .mobile-topbar span { font-weight: bold; color: #38bdf8; font-size: 16px; }
 
-  /* Menu trái trượt ra / vào */
   .sidebar {
     position: fixed !important; top: 0; left: 0; bottom: 0;
     width: 260px !important; max-width: 82vw; box-sizing: border-box;
@@ -154,35 +149,27 @@ export default function App() {
     background: rgba(0,0,0,.45); z-index: 1050;
   }
 
-  /* Nội dung chính */
   .main-content {
     padding: 64px 10px 16px !important; width: 100%;
     box-sizing: border-box; min-width: 0;
   }
-
-  /* Bảng cuộn ngang thay vì tràn màn hình */
   .main-content table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
-
-  /* Lưới nhiều cột -> 1 cột (thẻ thống kê -> 2 cột) */
   .main-content div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
   .main-content div[style*="repeat("] { grid-template-columns: repeat(2, 1fr) !important; }
   .main-content div[style*="grid-column"] { grid-column: auto !important; }
-
-  /* Hàng tiêu đề + nút tự xuống dòng */
   .main-content div[style*="justify-content: space-between"] { flex-wrap: wrap !important; gap: 8px; }
-
-  /* Popup full màn hình điện thoại */
   .main-content div[style*="position: fixed"] { padding: 8px; box-sizing: border-box; }
   .main-content div[style*="position: fixed"] > div {
     width: 100% !important; max-width: 100% !important;
     max-height: 94vh !important; box-sizing: border-box;
   }
-
-  /* Chống iOS tự zoom khi bấm vào ô nhập */
   .main-content input, .main-content select, .main-content textarea { font-size: 16px; }
 }
 `;
-        </style>
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <style>{RESPONSIVE_CSS}</style>
       <AppMain />
     </ErrorBoundary>
   );
