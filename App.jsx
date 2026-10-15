@@ -125,6 +125,18 @@ class ErrorBoundary extends Component {
 const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
+/* ===== Màn hình Phiếu bán hàng + Đơn đặt hàng: vừa khít chiều cao màn hình ===== */
+.pos-page {
+  display: flex; flex-direction: column; gap: 16px;
+  height: calc(100vh - 48px);
+}
+.pos-page > div:first-child { flex-shrink: 0; margin-bottom: 0 !important; }
+.pos-card {
+  flex: 0 1 auto; min-height: 180px; overflow-y: auto;
+  margin-bottom: 0 !important; box-sizing: border-box;
+}
+.pos-card thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+
 @media (max-width: 900px) {
   .mobile-topbar {
     display: flex; position: fixed; top: 0; left: 0; right: 0; height: 52px;
@@ -153,6 +165,11 @@ const RESPONSIVE_CSS = `
     padding: 64px 10px 16px !important; width: 100%;
     box-sizing: border-box; min-width: 0;
   }
+  /* Điện thoại: trang cuộn bình thường, mỗi bảng tối đa 60% chiều cao màn hình */
+  .pos-page { height: auto; }
+  .pos-card { flex: none; max-height: 60vh; }
+  .pos-card thead th { position: static; }
+  
   .main-content table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
   .main-content div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
   .main-content div[style*="repeat("] { grid-template-columns: repeat(2, 1fr) !important; }
@@ -1660,7 +1677,7 @@ function AppMain() {
 
         {/* 1. MÀN HÌNH DANH SÁCH ĐƠN HÀNG & PHIẾU BÁN HÀNG */}
         {currentView === 'pos' && (
-          <div>
+            <div className="pos-page">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Quản lý Đơn hàng & Phiếu bán hàng</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -1680,7 +1697,7 @@ function AppMain() {
             </div>
 
             {/* Bảng Danh sách Phiếu Bán Hàng */}
-            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+           <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({invoicesList.length})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -1722,7 +1739,7 @@ function AppMain() {
             </div>
 
             {/* Bảng Danh sách Đơn Đặt Hàng */}
-            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({ordersList.length})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
