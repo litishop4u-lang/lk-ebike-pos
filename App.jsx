@@ -250,6 +250,7 @@ function AppMain() {
   const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
   const [posProductKeyword, setPosProductKeyword] = useState('');
   const [showPosSuggest, setShowPosSuggest] = useState(false);
+  const [depositFromOrder, setDepositFromOrder] = useState(0); // tạm ứng lấy từ đơn đặt hàng khi xuất phiếu bán
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
@@ -931,6 +932,7 @@ function AppMain() {
 
       // Lấy số tiền đã cọc từ đơn đặt hàng làm mặc định đã thanh toán / tạm ứng
       setPaidAmount(details.paid_amount || 0);
+      setDepositFromOrder(Number(details.paid_amount) || 0);
 
       // Đưa sản phẩm vào giỏ hàng
       const newCart = {};
@@ -1842,6 +1844,25 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
   useEffect(() => {
     if (customerChildOpen) setShowCustomerDetailModal(false);
   }, [customerChildOpen]);
+
+    // Đơn đặt hàng chưa xuất bán (để tính tạm ứng, tránh cộng trùng khi đã chuyển thành phiếu bán)
+  const isPendingOrder = (o) => !o.status || /pending|chờ|đang/i.test(String(o.status));
+  // Tổng đã thanh toán của khách = số server tính (phiếu bán) + tạm ứng các đơn đặt hàng chưa xuất bán
+  const customerPaidOf = (c) =>
+    (Number(c.total_paid) || 0) +
+    (ordersList || [])
+      .filter((o) => o.customer_name === c.name && isPendingOrder(o))
+      .reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
+  // Phiếu bán + đơn đặt hàng của khách đang xem (cho tab Đơn hàng)
+  const getCustomerOrderRows = () => {
+    const cus = selectedCustomerDetail;
+    if (!cus) return [];
+    const invs = customerDetailData.invoices || [];
+    const ords = (ordersList || []).filter((o) => o.customer_name === cus.name);
+    return [...invs, ...ords].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  };
+
+  useEffect(() => { if (!showOrderModal) setDepositFromOrder(0); }, [showOrderModal]);
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -3817,7 +3838,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                       <td style={cellStyle}>{c.phone || '-'}</td>
                       <td style={cellStyle}>{c.address || '-'}</td>
                       <td style={cellStyle}>{vnd(c.total_purchased)}</td>
-                      <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(c.total_paid)}</td>
+                      <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(customerPaidOf(c))}</td>
                       <td style={{ ...cellStyle, color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
                       <td style={{ ...cellStyle, textAlign: 'center' }}>
                         <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
@@ -4523,7 +4544,46 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                       <span>TỔNG CỘNG:</span>
                       <span style={{ color: '#7c3aed' }}>{vnd(cartTotal)}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'start' }}>
+                    {depositFromOrder > 0 && modalOrderType === 'invoices' && (() => {
+                      const remain = Math.max(0, cartTotal - depositFromOrder);
+                      const extra = Math.max(0, (Number(paidAmount) || 0) - depositFromOrder);
+                      return (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', alignItems: 'start' }}>
+                          <div>
+                            <label style={{ fontSize: '12px', color: '#64748b' }}>Đã tạm ứng (từ đơn đặt hàng):</label>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#16a34a', marginTop: '8px' }}>{vnd(depositFromOrder)}</div>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '12px', color: '#64748b' }}>Còn phải thanh toán:</label>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#7c3aed', marginTop: '8px' }}>{vnd(remain)}</div>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '12px', color: '#64748b' }}>Thanh toán thêm lần này:</label>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={extra || ''}
+                              onChange={(e) => setPaidAmount(depositFromOrder + Math.max(0, Number(e.target.value) || 0))}
+                              style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '12px', color: '#64748b' }}>Còn nợ đơn này:</label>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: remain - extra > 0 ? '#dc2626' : '#16a34a', marginTop: '8px' }}>{vnd(Math.max(0, remain - extra))}</div>
+                          </div>
+                          <div style={{ gridColumn: 'span 2' }}>
+                            <label style={{ fontSize: '12px', color: '#64748b' }}>Phương thức TT (khoản thanh toán thêm):</label>
+                            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0' }}>
+                              <option value="Tiền mặt">💵 Tiền mặt</option>
+                              <option value="Chuyển khoản">🏦 Chuyển khoản</option>
+                              <option value="Công nợ">📒 Công nợ</option>
+                            </select>
+                          </div>
+                        </div>
+                        );
+                    })()}
+                    <div style={{ display: (depositFromOrder > 0 && modalOrderType === 'invoices') ? 'none' : 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'start' }}>
                       <div>
                         <label style={{ fontSize: '12px', color: '#64748b' }}>Khách đã thanh toán:</label>
                         <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={{ ...inputStyle, margin: '2px 0 0 0', fontWeight: 'bold' }} />
@@ -4988,7 +5048,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
                 <div style={statBoxStyle}>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{customerDetailData.invoices.length}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{getCustomerOrderRows().length}</div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
                 </div>
                 <div style={statBoxStyle}>
@@ -4996,7 +5056,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Tổng chi tiêu</div>
                 </div>
                 <div style={statBoxStyle}>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(selectedCustomerDetail.total_paid)}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0284c7' }}>{vnd(customerPaidOf(selectedCustomerDetail))}</div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Đã thanh toán</div>
                 </div>
                 <div style={statBoxStyle}>
@@ -5021,17 +5081,21 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                       </tr>
                     </thead>
                     <tbody>
-                      {customerDetailData.invoices.length === 0 ? (
+                      {getCustomerOrderRows().length === 0 ? (
                         <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
                       ) : (
-                        customerDetailData.invoices.map((inv) => (
+                        getCustomerOrderRows().map((inv) => (
                           <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                             <td onClick={() => viewCustInvoice(inv)} style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} title="Bấm để xem chi tiết">{inv.code}</td>
                             <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                             <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
                             <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount ?? 0)}</td>
                             <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt ?? 0)}</td>
-                            <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span></td>
+                            <td style={{ padding: '10px' }}>
+                              {String(inv.code || '').startsWith('DH')
+                                ? <span style={{ padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#d97706', fontSize: '11px', fontWeight: 'bold' }}>{inv.status || 'Đặt hàng'}</span>
+                                : <span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span>}
+                            </td>
                             <td style={{ padding: '10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                               <button onClick={() => viewCustInvoice(inv)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
                               <button onClick={() => editCustInvoice(inv)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
