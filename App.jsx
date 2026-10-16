@@ -45,6 +45,10 @@ const buildItemDetails = (cartObj, id) => [
   cartObj[id + '_note'] ? `Ghi chú: ${cartObj[id + '_note']}` : '',
 ].filter(Boolean).join(' | ');
 
+// Bỏ dấu tiếng Việt để tìm kiếm không cần gõ dấu
+const removeAccents = (s) =>
+  String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -608,6 +612,8 @@ function AppMain() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [activeProductTab, setActiveProductTab] = useState('info'); // 'info' hoặc 'card'
   const [stockCardList, setStockCardList] = useState([]);
+  const [productListSearch, setProductListSearch] = useState('');
+  const [showProductSuggest, setShowProductSuggest] = useState(false);
 
   // ===== States cho Nhà cung cấp & Nhập hàng =====
   const [suppliers, setSuppliers] = useState([]);
@@ -1532,6 +1538,25 @@ function AppMain() {
     }
   };
 
+  // Sắp xếp sản phẩm theo mã SKU A→Z (số trong mã được so sánh đúng thứ tự: SP2 trước SP10)
+const sortedProducts = useMemo(
+  () =>
+    [...(products || [])].sort((a, b) => {
+      const sa = (a.sku || '').trim();
+      const sb = (b.sku || '').trim();
+      if (!sa && !sb) return (a.name || '').localeCompare(b.name || '', 'vi');
+      if (!sa) return 1; // sản phẩm chưa có mã xuống cuối
+      if (!sb) return -1;
+      return sa.localeCompare(sb, 'vi', { numeric: true, sensitivity: 'base' });
+    }),
+  [products]
+);
+const productKeyword = removeAccents(productListSearch.trim());
+const visibleProducts = productKeyword
+  ? sortedProducts.filter((p) => removeAccents(p.sku).includes(productKeyword) || removeAccents(p.name).includes(productKeyword))
+  : sortedProducts;
+const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
+  
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
     (p.sku && p.sku.toLowerCase().includes(posProductKeyword.toLowerCase()))
@@ -2621,6 +2646,41 @@ function AppMain() {
               </div>
             </div>
 
+            {/* Ô tìm kiếm sản phẩm có gợi ý */}
+<div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
+  <input
+    placeholder="🔍 Tìm theo mã SP hoặc tên sản phẩm..."
+    value={productListSearch}
+    onChange={(e) => { setProductListSearch(e.target.value); setShowProductSuggest(true); }}
+    onFocus={() => setShowProductSuggest(true)}
+    onBlur={() => setTimeout(() => setShowProductSuggest(false), 150)}
+    style={{ ...inputStyle, margin: 0, paddingRight: productListSearch ? '36px' : '10px' }}
+  />
+  {productListSearch && (
+    <button
+      type="button"
+      onClick={() => setProductListSearch('')}
+      title="Xóa tìm kiếm"
+      style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+    >✕</button>
+  )}
+  {showProductSuggest && productSuggestions.length > 0 && (
+    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '260px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '4px' }}>
+      {productSuggestions.map((p) => (
+        <div
+          key={p.id}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { setProductListSearch(p.sku || p.name); setShowProductSuggest(false); }}
+          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', gap: '10px' }}
+        >
+          <span><b style={{ color: '#0284c7' }}>{p.sku || '(chưa có mã)'}</b> - {p.name}</span>
+          <small style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Tồn: {p.stock}</small>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+            
             <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -2636,7 +2696,10 @@ function AppMain() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(products || []).map((p) => (
+                  {visibleProducts.length === 0 && (
+  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Không tìm thấy sản phẩm nào.</td></tr>
+)}
+{visibleProducts.map((p) => (
                     <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       {/* Bấm vào SKU cũng mở popup chi tiết */}
                       <td
