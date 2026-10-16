@@ -711,6 +711,12 @@ function AppMain() {
   const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
   const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
   const [customerListSearch, setCustomerListSearch] = useState('');
+  const [cusPeriod, setCusPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
+  const [cusMonth, setCusMonth] = useState(() => todayLocal().slice(0, 7));
+  const [cusYear, setCusYear] = useState(() => todayLocal().slice(0, 4));
+  const [cusQuarter, setCusQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  const [cusFrom, setCusFrom] = useState('');
+  const [cusTo, setCusTo] = useState('');
   const [customerCashItems, setCustomerCashItems] = useState([]); // sổ thu chi, để dựng lịch sử thanh toán
   const [customerReturnList, setCustomerReturnList] = useState([]); // phiếu trả hàng bán của khách đang xem
   const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
@@ -1914,6 +1920,61 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
           (customerPhoneKeyword && String(c.phone || '').replace(/[\s.]/g, '').includes(customerPhoneKeyword))
       )
     : sortedCustomers;
+
+    // Khoảng ngày theo bộ lọc khách hàng (null = tất cả thời gian)
+  const cusRange = (() => {
+    const pad = (n) => String(n).padStart(2, '0');
+    if (cusPeriod === 'month' && cusMonth) {
+      const [y, m] = cusMonth.split('-');
+      return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+    }
+    if (cusPeriod === 'quarter' && cusYear) {
+      const sm = (Number(cusQuarter) - 1) * 3 + 1;
+      const em = sm + 2;
+      return [`${cusYear}-${pad(sm)}-01`, `${cusYear}-${pad(em)}-${pad(new Date(Number(cusYear), em, 0).getDate())}`];
+    }
+    if (cusPeriod === 'year' && cusYear) return [`${cusYear}-01-01`, `${cusYear}-12-31`];
+    if (cusPeriod === 'custom') return [cusFrom || '0000-00-00', cusTo || '9999-12-31'];
+    return null;
+  })();
+  const cusStart = cusRange ? cusRange[0] : '';
+  const cusEnd = cusRange ? cusRange[1] : '';
+
+  // Tổng mua / đã thanh toán / nợ của từng khách trong khoảng đã lọc (tính từ phiếu bán + tạm ứng đơn đặt hàng chưa xuất)
+  const customerStats = useMemo(() => {
+    const map = {};
+    const slot = (name) => map[name] || (map[name] = { total: 0, paid: 0, debt: 0 });
+    (invoicesList || []).forEach((inv) => {
+      const d = String(inv.created_at || '').slice(0, 10);
+      if (cusStart && (d < cusStart || d > cusEnd)) return;
+      const total = Number(inv.total) || 0;
+      const paid = Number(inv.paid_amount) || 0;
+      const debt = inv.debt !== undefined && inv.debt !== null ? Number(inv.debt) : total - paid;
+      const m = slot(inv.customer_name);
+      m.total += total; m.paid += paid; m.debt += debt;
+    });
+    (ordersList || []).forEach((o) => {
+      if (!isPendingOrder(o)) return;
+      const d = String(o.created_at || '').slice(0, 10);
+      if (cusStart && (d < cusStart || d > cusEnd)) return;
+      const paid = Number(o.paid_amount) || 0;
+      if (paid > 0) slot(o.customer_name).paid += paid;
+    });
+    return map;
+  }, [invoicesList, ordersList, cusStart, cusEnd]);
+
+  // Dòng hiển thị: không lọc thời gian thì dùng số của server, có lọc thì dùng số tính theo kỳ
+  const customerRows = visibleCustomers
+    .filter((c) => !cusRange || customerStats[c.name])
+    .map((c) => {
+      if (!cusRange) return { ...c, f_total: Number(c.total_purchased) || 0, f_paid: customerPaidOf(c), f_debt: Number(c.total_debt) || 0 };
+      const st = customerStats[c.name];
+      return { ...c, f_total: st.total, f_paid: st.paid, f_debt: st.debt };
+    });
+  const customerSums = customerRows.reduce(
+    (a, c) => ({ total: a.total + c.f_total, paid: a.paid + c.f_paid, debt: a.debt + c.f_debt }),
+    { total: 0, paid: 0, debt: 0 }
+  );
 
   // Mở popup xem / sửa từ trong popup khách hàng -> đóng popup khách hàng, đóng popup con là ra thẳng màn hình chính
   const customerChildOpen = !!(showDetailModal || showOrderModal || showCashModal || selectedCashItem);
@@ -3942,33 +4003,90 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         {currentView === 'customers' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({visibleCustomers.length}{customerKeyword ? `/${customers.length}` : ''})</h2>
+              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customerRows.length}{(customerKeyword || cusRange) ? `/${customers.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
                 <button onClick={() => { setEditingCustomer(null); setCustomerForm(EMPTY_CUSTOMER); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
               </div>
             </div>
 
-            {/* Ô tìm kiếm */}
-            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
-              <input
-                placeholder="🔍 Tìm theo tên khách, mã KH hoặc số điện thoại..."
-                value={customerListSearch}
-                onChange={(e) => setCustomerListSearch(e.target.value)}
-                style={{ ...inputStyle, margin: 0, paddingRight: customerListSearch ? '36px' : '10px' }}
-              />
-              {customerListSearch && (
-                <button
-                  type="button"
-                  onClick={() => setCustomerListSearch('')}
-                  title="Xóa tìm kiếm"
-                  style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
-                >✕</button>
-              )}
+            {/* Ô tìm kiếm + bộ lọc thời gian */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                <input
+                  placeholder="🔍 Tìm theo tên khách, mã KH hoặc số điện thoại..."
+                  value={customerListSearch}
+                  onChange={(e) => setCustomerListSearch(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, paddingRight: customerListSearch ? '36px' : '10px' }}
+                />
+                {customerListSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomerListSearch('')}
+                    title="Xóa tìm kiếm"
+                    style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                  >✕</button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+                <select value={cusPeriod} onChange={(e) => setCusPeriod(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="all">Tất cả thời gian</option>
+                  <option value="month">Theo tháng</option>
+                  <option value="quarter">Theo quý</option>
+                  <option value="year">Theo năm</option>
+                  <option value="custom">Khoảng ngày</option>
+                </select>
+
+                {cusPeriod === 'month' && (
+                  <input type="month" value={cusMonth} onChange={(e) => setCusMonth(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {cusPeriod === 'quarter' && (
+                  <>
+                    <select value={cusQuarter} onChange={(e) => setCusQuarter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                      <option value="1">Quý 1</option>
+                      <option value="2">Quý 2</option>
+                      <option value="3">Quý 3</option>
+                      <option value="4">Quý 4</option>
+                    </select>
+                    <input type="number" value={cusYear} onChange={(e) => setCusYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {cusPeriod === 'year' && (
+                  <input type="number" value={cusYear} onChange={(e) => setCusYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {cusPeriod === 'custom' && (
+                  <>
+                    <input type="date" value={cusFrom} onChange={(e) => setCusFrom(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                    <span>đến</span>
+                    <input type="date" value={cusTo} onChange={(e) => setCusTo(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {cusPeriod !== 'all' && (
+                  <button type="button" onClick={() => setCusPeriod('all')} style={{ padding: '7px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xóa lọc</button>
+                )}
+              </div>
+            </div>
+
+            {/* 3 ô tổng hợp theo bộ lọc */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ MUA</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(customerSums.total)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(customerSums.paid)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>CÒN NỢ</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626', marginTop: '4px' }}>{vnd(customerSums.debt)}</div>
+              </div>
             </div>
 
             {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
-            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 400px)', minHeight: '220px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
@@ -3979,18 +4097,18 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleCustomers.length === 0 ? (
-                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>{customerKeyword ? 'Không tìm thấy khách hàng nào.' : 'Chưa có khách hàng nào.'}</td></tr>
+                  {customerRows.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>{cusRange ? 'Không có phát sinh bán hàng trong khoảng thời gian này.' : (customerKeyword ? 'Không tìm thấy khách hàng nào.' : 'Chưa có khách hàng nào.')}</td></tr>
                   ) : (
-                    visibleCustomers.map((c) => (
+                    customerRows.map((c) => (
                       <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.code}</td>
                         <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.phone || '-'}</td>
                         <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{c.address || '-'}</td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(c.total_purchased)}</td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(customerPaidOf(c))}</td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(c.f_total)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(c.f_paid)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: c.f_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.f_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.f_debt)}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
                           <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
@@ -4003,7 +4121,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </div>
           </div>
         )}
-
+        
         {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
         {showViewPurchaseModal && selectedPurchaseOrder && (
           <div style={overlayStyle}>
