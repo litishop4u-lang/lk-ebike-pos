@@ -129,6 +129,13 @@ class ErrorBoundary extends Component {
 const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
+/* ===== Font + cỡ chữ đồng bộ toàn app ===== */
+.layout { font-size: 14px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
+.layout button, .layout input, .layout select, .layout textarea { font-size: inherit; }
+.layout h2 { font-size: 1.35rem; }
+.layout h3 { font-size: 1.1rem; }
+.layout h4 { font-size: 1rem; }
+
 /* ===== Màn hình Phiếu bán hàng + Đơn đặt hàng: vừa khít chiều cao màn hình ===== */
 .pos-page {
   display: flex; flex-direction: column; gap: 16px;
@@ -1697,6 +1704,30 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
       setShowSupplierModal(false);
     }
   }, [showViewPurchaseModal, showCreatePurchaseModal, showPrModal, prDetail, showCashModal, selectedCashItem]);
+
+    // Tìm NCC / KH liên quan tới 1 phiếu thu chi (dựa vào ô chứng từ liên quan)
+  const getCashPartner = (item) => {
+    const ref = String(item.reference_code || '').trim();
+    if (!ref) return null;
+    const asSup = (s) => (s ? { code: s.code, name: s.name, kind: 'ncc' } : null);
+    const asCus = (c) => (c ? { code: c.code, name: c.name, kind: 'kh' } : null);
+    const supById = (id) => (suppliers || []).find((s) => String(s.id) === String(id));
+    const cusByName = (n) => (customers || []).find((c) => c.name === n);
+
+    const direct = asSup((suppliers || []).find((s) => s.code === ref)) || asCus((customers || []).find((c) => c.code === ref));
+    if (direct) return direct;
+
+    const po = (purchaseOrders || []).find((p) => p.code === ref);
+    if (po) return asSup(supById(po.supplier_id));
+    const pr = (prData.list || []).find((r) => r.code === ref);
+    if (pr) return asSup(supById(pr.supplier_id));
+
+    const inv = (invoicesList || []).find((i) => i.code === ref) || (ordersList || []).find((o) => o.code === ref);
+    if (inv) return asCus((customers || []).find((c) => String(c.id) === String(inv.customer_id)) || cusByName(inv.customer_name));
+    const ro = (returnOrdersData.list || []).find((r) => r.code === ref);
+    if (ro) return asCus(cusByName(ro.customer_name));
+    return null;
+  };
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -2954,6 +2985,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
                     <th style={{ padding: '12px', textAlign: 'left' }}>Mã GD</th>
                     <th style={{ padding: '12px', textAlign: 'left' }}>Ngày</th>
+                    <th style={{ padding: '12px', textAlign: 'left' }}>Mã NCC / KH</th>
                     <th style={{ padding: '12px', textAlign: 'center' }}>Loại</th>
                     <th style={{ padding: '12px', textAlign: 'right' }}>Số Tiền</th>
                     <th style={{ padding: '12px', textAlign: 'left' }}>Danh Mục</th>
@@ -2972,6 +3004,18 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                       <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
                         <td style={{ padding: '12px' }}>{item.created_at ? item.created_at.slice(0, 10) : ''}</td>
+                        <td style={{ padding: '12px' }}>
+                          {(() => {
+                            const pt = getCashPartner(item);
+                            if (!pt) return <span style={{ color: '#94a3b8' }}>-</span>;
+                            return (
+                              <div title={pt.name}>
+                                <b style={{ color: pt.kind === 'ncc' ? '#7c3aed' : '#0284c7' }}>{pt.code}</b>
+                                <div style={{ fontSize: '11px', color: '#64748b' }}>{pt.name}</div>
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>
                           <span style={{
                             padding: '4px 10px',
@@ -4028,7 +4072,9 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
 
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
-                              {/* Chọn NCC khi là phiếu liên quan nhà cung cấp (lưu mã NCC vào ô chứng từ liên quan) */}
+              
+                            
+              {/* Chọn NCC khi là phiếu liên quan nhà cung cấp (lưu mã NCC vào ô chứng từ liên quan) */}
               {String(cashForm.category || '').includes('NCC') && (
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Nhà cung cấp:</label>
@@ -4042,6 +4088,22 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   </select>
                 </div>
               )}
+
+              {/* Phiếu liên quan khách hàng -> chọn KH (lưu mã KH vào ô chứng từ liên quan) */}
+              {/KH|khách/i.test(String(cashForm.category || '')) && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Khách hàng:</label>
+                  <select
+                    value={(customers || []).some((c) => c.code === cashForm.reference_code) ? cashForm.reference_code : ''}
+                    onChange={(e) => setCashForm({ ...cashForm, reference_code: e.target.value })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  >
+                    <option value="">-- Không chọn --</option>
+                    {(customers || []).map((c) => <option key={c.id} value={c.code}>{c.name} ({c.code})</option>)}
+                  </select>
+                </div>
+              )}
+                
                 <input
                   type="number"
                   placeholder="Nhập số tiền..."
