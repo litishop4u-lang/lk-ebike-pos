@@ -644,6 +644,8 @@ function AppMain() {
   const [supplierTab, setSupplierTab] = useState('info');
   const [supplierHistory, setSupplierHistory] = useState({ purchases: [], payments: [], returns: [] });
   const [editingSupplier, setEditingSupplier] = useState(null);
+  const [supplierCashItems, setSupplierCashItems] = useState([]); // sổ thu chi, dùng để dựng lịch sử thanh toán
+  const [supplierPrList, setSupplierPrList] = useState([]); // phiếu trả hàng nhập của NCC đang xem
 
   // ===== States cho Báo cáo Xuất - Nhập - Tồn =====
   const [reportItems, setReportItems] = useState([]);
@@ -1328,18 +1330,116 @@ function AppMain() {
   };
 
   // ===== Quản lý Nhà cung cấp =====
-  const openSupplierDetail = async (s) => {
+    const openSupplierDetail = async (s) => {
     setSelectedSupplier(s);
     setEditingSupplier(s);
     setSupplierForm({ code: s.code, name: s.name, phone: s.phone || '', address: s.address || '', status: s.status });
     setSupplierTab('info');
+    setSupplierCashItems([]);
+    setSupplierPrList([]);
     try {
       const hist = await api(`/api/suppliers/${s.id}/history`);
       setSupplierHistory(hist);
     } catch (e) {
       setSupplierHistory({ purchases: [], payments: [], returns: [] });
     }
+    // Lấy thêm sổ thu chi + phiếu trả hàng nhập để dựng tab thanh toán / trả hàng
+    try {
+      const cb = await api('/api/cash-book');
+      setSupplierCashItems(cb.items || []);
+    } catch (e) { /* bỏ qua */ }
+    try {
+      const pr = await api('/api/purchase-returns');
+      const list = Array.isArray(pr?.data?.list) ? pr.data.list : [];
+      setSupplierPrList(list.filter((r) => String(r.supplier_id) === String(s.id)));
+    } catch (e) { /* bỏ qua */ }
     setShowSupplierModal(true);
+  };
+
+  // ----- Hỗ trợ cho các tab lịch sử của NCC -----
+  const fmtDT = (v) => (v ? new Date(v).toLocaleString('vi-VN') : '---');
+  const smallBtn = (bg, color) => ({ background: bg, color, border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' });
+
+  // Mở form sửa phiếu thu chi (giống nút ✏️ trong màn hình Thu chi)
+  const openEditCash = (item) => {
+    setEditingCashId(item.id);
+    setCashForm({
+      type: item.type,
+      amount: item.amount,
+      category: item.category,
+      payment_method: item.payment_method || 'Chuyển khoản',
+      reference_code: item.reference_code || '',
+      note: item.note || '',
+      created_at: item.created_at ? item.created_at.slice(0, 10) : todayLocal(),
+    });
+    setShowCashModal(true);
+  };
+
+  // Đóng popup NCC rồi mở popup xem / sửa (để popup mới không bị che)
+  const viewPurchaseFromSupplier = async (p) => {
+    try {
+      const d = await api(`/api/purchase_orders/${p.id}`);
+      setSelectedPurchaseOrder(d);
+      setShowSupplierModal(false);
+      setShowViewPurchaseModal(true);
+    } catch (e) { setMsg({ type: 'err', text: e.message }); }
+  };
+  const editPurchaseFromSupplier = (p) => { setShowSupplierModal(false); openEditPurchase(p); };
+  const viewReturnFromSupplier = (r) => { setShowSupplierModal(false); handleViewPr(r); };
+  const editReturnFromSupplier = (r) => { setShowSupplierModal(false); handleEditPr(r); };
+
+  // Gom lịch sử thanh toán của NCC đang xem từ: sổ thu chi, tiền đã trả trên phiếu nhập, tiền đã thu lại trên phiếu trả
+  const getSupplierPaymentRows = () => {
+    if (!selectedSupplier) return [];
+    const sup = selectedSupplier;
+    const supName = removeAccents(sup.name);
+    const pos = supplierHistory.purchases || [];
+    const codes = new Set([...pos.map((p) => p.code), ...supplierPrList.map((r) => r.code)]);
+    const usedCodes = new Set();
+    const rows = [];
+
+    supplierCashItems.forEach((c) => {
+      const ref = c.reference_code || '';
+      const hit = codes.has(ref) || (ref && ref === sup.code) || (supName && c.note && removeAccents(c.note).includes(supName));
+      if (!hit) return;
+      if (codes.has(ref)) usedCodes.add(ref);
+      rows.push({ key: 'c' + c.id, date: c.created_at, code: c.code, type: c.type, amount: Number(c.amount) || 0, method: c.payment_method, note: c.note || c.reference_code || '', kind: 'cash', ref: c });
+    });
+
+    pos.forEach((p) => {
+      const full = (purchaseOrders || []).find((x) => x.id === p.id) || p;
+      const paid = Number(full.paid_amount) || 0;
+      if (paid > 0 && !usedCodes.has(p.code)) {
+        rows.push({ key: 'p' + p.id, date: full.created_at || p.created_at, code: p.code, type: 'OUT', amount: paid, method: full.payment_method || '', note: 'Thanh toán khi nhập hàng', kind: 'po', ref: p });
+      }
+    });
+
+    supplierPrList.forEach((r) => {
+      const got = Number(r.refund_received ?? r.received_amount) || 0;
+      if (got > 0 && !usedCodes.has(r.code)) {
+        rows.push({ key: 'r' + r.id, date: r.return_date, code: r.code, type: 'IN', amount: got, method: r.payment_method || '', note: 'Thu tiền hoàn từ NCC (trả hàng nhập)', kind: 'pr', ref: r });
+      }
+    });
+
+    (supplierHistory.payments || []).forEach((pay) => {
+      const amt = Number(pay.amount) || 0;
+      const d = String(pay.created_at || '').slice(0, 10);
+      if (rows.some((r) => r.amount === amt && String(r.date || '').slice(0, 10) === d)) return; // đã có rồi, bỏ trùng
+      rows.push({ key: 'h' + pay.id, date: pay.created_at, code: pay.code || `TT-${pay.id}`, type: 'OUT', amount: amt, method: pay.method || '', note: pay.note || '', kind: 'none', ref: null });
+    });
+
+    return rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  };
+
+  const viewPaymentRow = (r) => {
+    if (r.kind === 'cash') { setShowSupplierModal(false); setSelectedCashItem(r.ref); }
+    else if (r.kind === 'po') viewPurchaseFromSupplier(r.ref);
+    else if (r.kind === 'pr') viewReturnFromSupplier(r.ref);
+  };
+  const editPaymentRow = (r) => {
+    if (r.kind === 'cash') { setShowSupplierModal(false); openEditCash(r.ref); }
+    else if (r.kind === 'po') editPurchaseFromSupplier(r.ref);
+    else if (r.kind === 'pr') editReturnFromSupplier(r.ref);
   };
 
   const handleSaveSupplier = async (e) => {
@@ -3883,6 +3983,20 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
 
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
+                              {/* Chọn NCC khi là phiếu liên quan nhà cung cấp (lưu mã NCC vào ô chứng từ liên quan) */}
+              {String(cashForm.category || '').includes('NCC') && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Nhà cung cấp:</label>
+                  <select
+                    value={(suppliers || []).some((s) => s.code === cashForm.reference_code) ? cashForm.reference_code : ''}
+                    onChange={(e) => setCashForm({ ...cashForm, reference_code: e.target.value })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  >
+                    <option value="">-- Không chọn --</option>
+                    {(suppliers || []).map((s) => <option key={s.id} value={s.code}>{s.name} ({s.code})</option>)}
+                  </select>
+                </div>
+              )}
                 <input
                   type="number"
                   placeholder="Nhập số tiền..."
@@ -4421,22 +4535,102 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
 
                     {supplierTab === 'purchases' && (
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Mã phiếu</th><th style={{ padding: '8px' }}>Tổng tiền</th><th style={{ padding: '8px' }}>Ngày tạo</th></tr></thead>
-                        <tbody>{(supplierHistory.purchases || []).map((p) => (<tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px' }}>{p.code}</td><td style={{ padding: '8px' }}>{vnd(p.total)}</td><td style={{ padding: '8px' }}>{p.created_at}</td></tr>))}</tbody>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                            <th style={{ padding: '8px' }}>Mã phiếu</th>
+                            <th style={{ padding: '8px' }}>Tổng tiền</th>
+                            <th style={{ padding: '8px' }}>Ngày tạo</th>
+                            <th style={{ padding: '8px', textAlign: 'center' }}>Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(supplierHistory.purchases || []).length === 0 ? (
+                            <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu nhập nào.</td></tr>
+                          ) : (supplierHistory.purchases || []).map((p) => (
+                            <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td onClick={() => viewPurchaseFromSupplier(p)} style={{ padding: '8px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} title="Bấm để xem chi tiết">{p.code}</td>
+                              <td style={{ padding: '8px' }}>{vnd(p.total)}</td>
+                              <td style={{ padding: '8px' }}>{fmtDT(p.created_at)}</td>
+                              <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                <button onClick={() => viewPurchaseFromSupplier(p)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                                <button onClick={() => editPurchaseFromSupplier(p)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
                       </table>
                     )}
 
-                    {supplierTab === 'payments' && (
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Số tiền</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                        <tbody>{(supplierHistory.payments || []).map((pay) => (<tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#16a34a' }}>{vnd(pay.amount)}</td><td style={{ padding: '8px' }}>{pay.note || '---'}</td><td style={{ padding: '8px' }}>{pay.created_at}</td></tr>))}</tbody>
-                      </table>
-                    )}
+                    {supplierTab === 'payments' && (() => {
+                      const rows = getSupplierPaymentRows();
+                      return (
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                              <th style={{ padding: '8px' }}>Mã</th>
+                              <th style={{ padding: '8px' }}>Ngày</th>
+                              <th style={{ padding: '8px' }}>Loại</th>
+                              <th style={{ padding: '8px', textAlign: 'right' }}>Số tiền</th>
+                              <th style={{ padding: '8px' }}>Phương thức</th>
+                              <th style={{ padding: '8px' }}>Ghi chú</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Thao tác</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.length === 0 ? (
+                              <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán.</td></tr>
+                            ) : rows.map((r) => (
+                              <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <td style={{ padding: '8px', fontWeight: 'bold', color: '#7c3aed' }}>{r.code}</td>
+                                <td style={{ padding: '8px' }}>{r.date ? new Date(r.date).toLocaleDateString('vi-VN') : '---'}</td>
+                                <td style={{ padding: '8px' }}>
+                                  <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: r.type === 'IN' ? '#dcfce7' : '#fee2e2', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                                    {r.type === 'IN' ? 'Thu tiền hoàn' : 'Trả tiền hàng'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>{r.type === 'IN' ? '+' : '-'}{vnd(r.amount)}</td>
+                                <td style={{ padding: '8px' }}>{r.method || '---'}</td>
+                                <td style={{ padding: '8px', color: '#475569' }}>{r.note || '---'}</td>
+                                <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                  {r.kind === 'none' ? '---' : (
+                                    <>
+                                      <button onClick={() => viewPaymentRow(r)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                                      <button onClick={() => editPaymentRow(r)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                                    </>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
 
                     {supplierTab === 'returns' && (
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead><tr style={{ background: '#f8fafc', textAlign: 'left' }}><th style={{ padding: '8px' }}>Tổng trả</th><th style={{ padding: '8px' }}>Ghi chú</th><th style={{ padding: '8px' }}>Thời gian</th></tr></thead>
-                        <tbody>{(supplierHistory.returns || []).map((ret) => (<tr key={ret.id} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '8px', color: '#dc2626' }}>{vnd(ret.total)}</td><td style={{ padding: '8px' }}>{ret.note || '---'}</td><td style={{ padding: '8px' }}>{ret.created_at}</td></tr>))}</tbody>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                            <th style={{ padding: '8px' }}>Mã phiếu trả</th>
+                            <th style={{ padding: '8px', textAlign: 'right' }}>Tiền hàng</th>
+                            <th style={{ padding: '8px' }}>Thời gian trả</th>
+                            <th style={{ padding: '8px', textAlign: 'center' }}>Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {supplierPrList.length === 0 ? (
+                            <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nhập nào.</td></tr>
+                          ) : supplierPrList.map((r) => (
+                            <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td onClick={() => viewReturnFromSupplier(r)} style={{ padding: '8px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} title="Bấm để xem chi tiết">{r.code}</td>
+                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(r.total_amount)}</td>
+                              <td style={{ padding: '8px' }}>{r.return_date ? new Date(r.return_date).toLocaleDateString('vi-VN') : '---'}</td>
+                              <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                <button onClick={() => viewReturnFromSupplier(r)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                                <button onClick={() => editReturnFromSupplier(r)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
                       </table>
                     )}
                   </div>
