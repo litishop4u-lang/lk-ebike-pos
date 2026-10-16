@@ -129,6 +129,16 @@ class ErrorBoundary extends Component {
 const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
+/* ===== Đồng bộ font bảng + tiêu đề các màn hình (giống mục Nhà cung cấp) ===== */
+.main-content > div:not([style*="position: fixed"]) table { font-size: 13px !important; }
+.main-content > div:not([style*="position: fixed"]) table th,
+.main-content > div:not([style*="position: fixed"]) table td { padding: 10px 12px !important; }
+.main-content > div:not([style*="position: fixed"]) h2 { font-size: 1.35rem !important; }
+
+/* Bảng có thanh trượt: dòng tiêu đề đứng yên khi kéo */
+.scroll-table thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+.scroll-table td { word-break: break-word; }
+
 /* ===== Font + cỡ chữ đồng bộ toàn app ===== */
 .layout { font-size: 14px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
 .layout button, .layout input, .layout select, .layout textarea { font-size: inherit; }
@@ -664,6 +674,12 @@ function AppMain() {
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [supplierListSearch, setSupplierListSearch] = useState('');
+  const [supPeriod, setSupPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
+  const [supMonth, setSupMonth] = useState(() => todayLocal().slice(0, 7));
+  const [supYear, setSupYear] = useState(() => todayLocal().slice(0, 4));
+  const [supQuarter, setSupQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  const [supFrom, setSupFrom] = useState('');
+  const [supTo, setSupTo] = useState('');
 
   const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
@@ -1799,6 +1815,53 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
           (supplierPhoneKeyword && String(s.phone || '').replace(/[\s.]/g, '').includes(supplierPhoneKeyword))
       )
     : sortedSuppliers;
+
+      // Khoảng ngày theo bộ lọc (null = tất cả thời gian)
+  const supRange = (() => {
+    const pad = (n) => String(n).padStart(2, '0');
+    if (supPeriod === 'month' && supMonth) {
+      const [y, m] = supMonth.split('-');
+      return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+    }
+    if (supPeriod === 'quarter' && supYear) {
+      const sm = (Number(supQuarter) - 1) * 3 + 1;
+      const em = sm + 2;
+      return [`${supYear}-${pad(sm)}-01`, `${supYear}-${pad(em)}-${pad(new Date(Number(supYear), em, 0).getDate())}`];
+    }
+    if (supPeriod === 'year' && supYear) return [`${supYear}-01-01`, `${supYear}-12-31`];
+    if (supPeriod === 'custom') return [supFrom || '0000-00-00', supTo || '9999-12-31'];
+    return null;
+  })();
+  const rangeStart = supRange ? supRange[0] : '';
+  const rangeEnd = supRange ? supRange[1] : '';
+
+  // Tổng nhập / đã trả / nợ của từng NCC trong khoảng đã lọc (tính từ các phiếu nhập)
+  const supplierStats = useMemo(() => {
+    const map = {};
+    (purchaseOrders || []).forEach((po) => {
+      const d = String(po.created_at || '').slice(0, 10);
+      if (rangeStart && (d < rangeStart || d > rangeEnd)) return;
+      const total = Number(po.total) || 0;
+      const paid = Number(po.paid_amount) || 0;
+      const debt = po.debt !== undefined && po.debt !== null ? Number(po.debt) : total - paid;
+      const m = map[po.supplier_id] || (map[po.supplier_id] = { total: 0, paid: 0, debt: 0, count: 0 });
+      m.total += total; m.paid += paid; m.debt += debt; m.count += 1;
+    });
+    return map;
+  }, [purchaseOrders, rangeStart, rangeEnd]);
+
+  // Dòng hiển thị: không lọc thời gian thì dùng số của server, có lọc thì dùng số tính theo kỳ
+  const supplierRows = visibleSuppliers
+    .filter((s) => !supRange || supplierStats[s.id])
+    .map((s) => {
+      if (!supRange) return { ...s, f_total: Number(s.total_purchase) || 0, f_paid: Number(s.total_paid) || 0, f_debt: Number(s.total_debt) || 0 };
+      const st = supplierStats[s.id];
+      return { ...s, f_total: st.total, f_paid: st.paid, f_debt: st.debt };
+    });
+  const supplierSums = supplierRows.reduce(
+    (a, s) => ({ total: a.total + s.f_total, paid: a.paid + s.f_paid, debt: a.debt + s.f_debt }),
+    { total: 0, paid: 0, debt: 0 }
+  );
 
     // Mở popup xem / sửa phiếu từ trong popup nhà cung cấp -> đóng popup nhà cung cấp, đóng popup con là ra thẳng màn hình chính
   useEffect(() => {
@@ -3128,6 +3191,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               <div style={{ padding: '15px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold', fontSize: '15px', color: '#0f172a' }}>
                 Danh Sách Giao Dịch
               </div>
+              <div className="scroll-table" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 380px)', minHeight: '220px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
@@ -3227,6 +3291,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -3318,11 +3383,11 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
           </div>
         )}
 
-                {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
+        {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp ({visibleSuppliers.length}{supplierKeyword ? `/${suppliers.length}` : ''})</h2>
+              <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp ({supplierRows.length}{(supplierKeyword || supRange) ? `/${suppliers.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => { setImportText(''); setShowImportModal(true); }}
@@ -3339,26 +3404,83 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               </div>
             </div>
 
-            {/* Ô tìm kiếm */}
-            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
-              <input
-                placeholder="🔍 Tìm theo tên NCC, mã NCC hoặc số điện thoại..."
-                value={supplierListSearch}
-                onChange={(e) => setSupplierListSearch(e.target.value)}
-                style={{ ...inputStyle, margin: 0, paddingRight: supplierListSearch ? '36px' : '10px' }}
-              />
-              {supplierListSearch && (
-                <button
-                  type="button"
-                  onClick={() => setSupplierListSearch('')}
-                  title="Xóa tìm kiếm"
-                  style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
-                >✕</button>
-              )}
+            {/* Ô tìm kiếm + bộ lọc thời gian */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                <input
+                  placeholder="🔍 Tìm theo tên NCC, mã NCC hoặc số điện thoại..."
+                  value={supplierListSearch}
+                  onChange={(e) => setSupplierListSearch(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, paddingRight: supplierListSearch ? '36px' : '10px' }}
+                />
+                {supplierListSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSupplierListSearch('')}
+                    title="Xóa tìm kiếm"
+                    style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                  >✕</button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+                <select value={supPeriod} onChange={(e) => setSupPeriod(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="all">Tất cả thời gian</option>
+                  <option value="month">Theo tháng</option>
+                  <option value="quarter">Theo quý</option>
+                  <option value="year">Theo năm</option>
+                  <option value="custom">Khoảng ngày</option>
+                </select>
+
+                {supPeriod === 'month' && (
+                  <input type="month" value={supMonth} onChange={(e) => setSupMonth(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {supPeriod === 'quarter' && (
+                  <>
+                    <select value={supQuarter} onChange={(e) => setSupQuarter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                      <option value="1">Quý 1</option>
+                      <option value="2">Quý 2</option>
+                      <option value="3">Quý 3</option>
+                      <option value="4">Quý 4</option>
+                    </select>
+                    <input type="number" value={supYear} onChange={(e) => setSupYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {supPeriod === 'year' && (
+                  <input type="number" value={supYear} onChange={(e) => setSupYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {supPeriod === 'custom' && (
+                  <>
+                    <input type="date" value={supFrom} onChange={(e) => setSupFrom(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                    <span>đến</span>
+                    <input type="date" value={supTo} onChange={(e) => setSupTo(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {supPeriod !== 'all' && (
+                  <button type="button" onClick={() => setSupPeriod('all')} style={{ padding: '7px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xóa lọc</button>
+                )}
+              </div>
+            </div>
+
+            {/* 3 ô tổng hợp theo bộ lọc */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(supplierSums.total)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(supplierSums.paid)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>CÒN NỢ</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626', marginTop: '4px' }}>{vnd(supplierSums.debt)}</div>
+              </div>
             </div>
 
             {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
-            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 400px)', minHeight: '220px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
@@ -3368,17 +3490,17 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleSuppliers.length === 0 ? (
-                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Không tìm thấy nhà cung cấp nào.</td></tr>
-                  ) : visibleSuppliers.map((s) => (
+                  {supplierRows.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>{supRange ? 'Không có phát sinh nhập hàng trong khoảng thời gian này.' : 'Không tìm thấy nhà cung cấp nào.'}</td></tr>
+                  ) : supplierRows.map((s) => (
                     <tr key={s.id} onClick={() => openSupplierDetail(s)} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.code}</td>
                       <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.phone || '-'}</td>
                       <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{s.address || '-'}</td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(s.total_purchase)}</td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.total_debt)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(s.f_total)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(s.f_paid)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: s.f_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.f_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.f_debt)}</td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
                     </tr>
                   ))}
