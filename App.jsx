@@ -638,6 +638,7 @@ function AppMain() {
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+  const [supplierListSearch, setSupplierListSearch] = useState('');
 
   const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
@@ -1670,6 +1671,32 @@ const visibleProducts = productKeyword
   ? sortedProducts.filter((p) => removeAccents(p.sku).includes(productKeyword) || removeAccents(p.name).includes(productKeyword))
   : sortedProducts;
 const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
+
+    // Sắp xếp NCC theo mã A→Z (số trong mã so đúng thứ tự: NCC2 trước NCC10) + lọc theo tên / mã / SĐT
+  const sortedSuppliers = useMemo(
+    () =>
+      [...(suppliers || [])].sort((a, b) =>
+        (a.code || '').trim().localeCompare((b.code || '').trim(), 'vi', { numeric: true, sensitivity: 'base' })
+      ),
+    [suppliers]
+  );
+  const supplierKeyword = removeAccents(supplierListSearch.trim());
+  const supplierPhoneKeyword = supplierListSearch.trim().replace(/[\s.]/g, '');
+  const visibleSuppliers = supplierKeyword
+    ? sortedSuppliers.filter(
+        (s) =>
+          removeAccents(s.name).includes(supplierKeyword) ||
+          removeAccents(s.code).includes(supplierKeyword) ||
+          (supplierPhoneKeyword && String(s.phone || '').replace(/[\s.]/g, '').includes(supplierPhoneKeyword))
+      )
+    : sortedSuppliers;
+
+    // Mở popup xem / sửa phiếu từ trong popup nhà cung cấp -> đóng popup nhà cung cấp, đóng popup con là ra thẳng màn hình chính
+  useEffect(() => {
+    if (showViewPurchaseModal || showCreatePurchaseModal || showPrModal || prDetail || showCashModal || selectedCashItem) {
+      setShowSupplierModal(false);
+    }
+  }, [showViewPurchaseModal, showCreatePurchaseModal, showPrModal, prDetail, showCashModal, selectedCashItem]);
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -3099,11 +3126,11 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
           </div>
         )}
 
-        {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
+                {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0 }}>Quản lý Nhà cung cấp ({visibleSuppliers.length}{supplierKeyword ? `/${suppliers.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => { setImportText(''); setShowImportModal(true); }}
@@ -3120,34 +3147,52 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               </div>
             </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={cellStyle}>Mã NCC</th>
-                  <th style={cellStyle}>Tên NCC</th>
-                  <th style={cellStyle}>SĐT</th>
-                  <th style={cellStyle}>Địa chỉ</th>
-                  <th style={cellStyle}>Tổng giá trị nhập</th>
-                  <th style={cellStyle}>Đã thanh toán</th>
-                  <th style={cellStyle}>Công nợ</th>
-                  <th style={cellStyle}>Trạng thái</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(suppliers || []).map((s) => (
-                  <tr key={s.id} onClick={() => openSupplierDetail(s)} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                    <td style={cellStyle}>{s.code}</td>
-                    <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
-                    <td style={cellStyle}>{s.phone || '-'}</td>
-                    <td style={cellStyle}>{s.address || '-'}</td>
-                    <td style={cellStyle}>{vnd(s.total_purchase)}</td>
-                    <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(s.total_paid)}</td>
-                    <td style={{ ...cellStyle, color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.total_debt)}</td>
-                    <td style={cellStyle}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
+            {/* Ô tìm kiếm */}
+            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
+              <input
+                placeholder="🔍 Tìm theo tên NCC, mã NCC hoặc số điện thoại..."
+                value={supplierListSearch}
+                onChange={(e) => setSupplierListSearch(e.target.value)}
+                style={{ ...inputStyle, margin: 0, paddingRight: supplierListSearch ? '36px' : '10px' }}
+              />
+              {supplierListSearch && (
+                <button
+                  type="button"
+                  onClick={() => setSupplierListSearch('')}
+                  title="Xóa tìm kiếm"
+                  style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                >✕</button>
+              )}
+            </div>
+
+            {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
+            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left' }}>
+                    {['Mã NCC', 'Tên NCC', 'SĐT', 'Địa chỉ', 'Tổng giá trị nhập', 'Đã thanh toán', 'Công nợ', 'Trạng thái'].map((h) => (
+                      <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleSuppliers.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Không tìm thấy nhà cung cấp nào.</td></tr>
+                  ) : visibleSuppliers.map((s) => (
+                    <tr key={s.id} onClick={() => openSupplierDetail(s)} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.code}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7' }}>{s.name}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.phone || '-'}</td>
+                      <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{s.address || '-'}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(s.total_purchase)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(s.total_paid)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: s.total_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.total_debt)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
