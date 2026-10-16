@@ -693,6 +693,8 @@ function AppMain() {
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
   const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
   const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
+  const [customerCashItems, setCustomerCashItems] = useState([]); // sổ thu chi, để dựng lịch sử thanh toán
+  const [customerReturnList, setCustomerReturnList] = useState([]); // phiếu trả hàng bán của khách đang xem
   const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
 
   const [msg, setMsg] = useState(null);
@@ -1539,16 +1541,96 @@ function AppMain() {
     }
   };
 
-  const openCustomerDetail = async (c) => {
+    const openCustomerDetail = async (c) => {
     setSelectedCustomerDetail(c);
     setCustomerDetailTab('orders');
+    setCustomerCashItems([]);
+    setCustomerReturnList([]);
     try {
       const data = await api(`/api/customers/${c.id}/history`);
       setCustomerDetailData({ invoices: data.invoices || [], payments: data.payments || [] });
     } catch (e) {
       setCustomerDetailData({ invoices: [], payments: [] });
     }
+    try {
+      const cb = await api('/api/cash-book');
+      setCustomerCashItems(cb.items || []);
+    } catch (e) { /* bỏ qua */ }
+    try {
+      const ro = await api('/api/return-orders');
+      const list = Array.isArray(ro?.data?.list) ? ro.data.list : [];
+      setCustomerReturnList(list.filter((r) => r.customer_name === c.name));
+    } catch (e) { /* bỏ qua */ }
     setShowCustomerDetailModal(true);
+  };
+
+  // ----- Hỗ trợ cho các tab trong popup khách hàng -----
+  const isOrderCode = (code) => String(code || '').startsWith('DH');
+  const viewCustInvoice = (inv) => handleViewDetail(isOrderCode(inv.code) ? 'orders' : 'invoices', inv.id);
+  const editCustInvoice = (inv) => (isOrderCode(inv.code) ? handleEditOrder(inv) : handleEditInvoice(inv));
+
+  // Gom lịch sử thanh toán của khách từ: sổ thu chi, tiền đã trả trên phiếu bán, tạm ứng đơn đặt hàng, tiền hoàn trả hàng
+  const getCustomerPaymentRows = () => {
+    const cus = selectedCustomerDetail;
+    if (!cus) return [];
+    const cusName = removeAccents(cus.name);
+    const invs = customerDetailData.invoices || [];
+    const ords = (ordersList || []).filter((o) => o.customer_name === cus.name);
+    const rets = customerReturnList;
+    const codes = new Set([...invs.map((i) => i.code), ...ords.map((o) => o.code), ...rets.map((r) => r.code)]);
+    const usedCodes = new Set();
+    const rows = [];
+
+    customerCashItems.forEach((c) => {
+      const ref = c.reference_code || '';
+      const hit = codes.has(ref) || (ref && ref === cus.code) || (cusName.length >= 4 && c.note && removeAccents(c.note).includes(cusName));
+      if (!hit) return;
+      if (codes.has(ref)) usedCodes.add(ref);
+      rows.push({ key: 'c' + c.id, date: c.created_at, code: c.code, type: c.type, amount: Number(c.amount) || 0, method: c.payment_method, note: c.note || c.reference_code || '', kind: 'cash', ref: c });
+    });
+
+    invs.forEach((i) => {
+      const paid = Number(i.paid_amount) || 0;
+      if (paid > 0 && !usedCodes.has(i.code) && !isOrderCode(i.code)) {
+        rows.push({ key: 'i' + i.id, date: i.created_at, code: i.code, type: 'IN', amount: paid, method: i.payment_method || '', note: 'Thanh toán khi bán hàng', kind: 'inv', ref: i });
+      }
+    });
+
+    ords.forEach((o) => {
+      const paid = Number(o.paid_amount) || 0;
+      if (paid > 0 && !usedCodes.has(o.code)) {
+        rows.push({ key: 'o' + o.id, date: o.created_at, code: o.code, type: 'IN', amount: paid, method: o.payment_method || '', note: 'Tạm ứng đơn đặt hàng', kind: 'ord', ref: o });
+      }
+    });
+
+    rets.forEach((r) => {
+      const amt = Number(r.refund_amount) || 0;
+      if (amt > 0 && isDoneReturn(r.status) && !usedCodes.has(r.code)) {
+        rows.push({ key: 'r' + r.id, date: r.return_date, code: r.code, type: 'OUT', amount: amt, method: r.payment_method || '', note: 'Hoàn tiền trả hàng', kind: 'ret', ref: r });
+      }
+    });
+
+    (customerDetailData.payments || []).forEach((pay) => {
+      const amt = Number(pay.amount) || 0;
+      const d = String(pay.created_at || '').slice(0, 10);
+      if (rows.some((r) => r.amount === amt && String(r.date || '').slice(0, 10) === d)) return; // đã có rồi, bỏ trùng
+      rows.push({ key: 'h' + pay.id, date: pay.created_at, code: pay.code || `GD-${pay.id}`, type: 'IN', amount: amt, method: pay.method || '', note: pay.note || '', kind: 'none', ref: null });
+    });
+
+    return rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  };
+
+  const viewCustPaymentRow = (r) => {
+    if (r.kind === 'cash') setSelectedCashItem(r.ref);
+    else if (r.kind === 'inv') handleViewDetail('invoices', r.ref.id);
+    else if (r.kind === 'ord') handleViewDetail('orders', r.ref.id);
+    else if (r.kind === 'ret') { setShowCustomerDetailModal(false); setCurrentView('return-orders'); loadReturnOrders(); handleViewReturn(r.ref); }
+  };
+  const editCustPaymentRow = (r) => {
+    if (r.kind === 'cash') openEditCash(r.ref);
+    else if (r.kind === 'inv') handleEditInvoice(r.ref);
+    else if (r.kind === 'ord') handleEditOrder(r.ref);
+    else if (r.kind === 'ret') { setShowCustomerDetailModal(false); setCurrentView('return-orders'); loadReturnOrders(); handleEditReturn(r.ref); }
   };
 
   // ===== Phiếu nhập =====
@@ -1745,6 +1827,21 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     if (ro) return asCus(cusByName(ro.customer_name));
     return null;
   };
+
+    // Sắp xếp khách hàng theo mã A→Z (số trong mã so đúng thứ tự: KH2 trước KH10)
+  const sortedCustomers = useMemo(
+    () =>
+      [...(customers || [])].sort((a, b) =>
+        (a.code || '').trim().localeCompare((b.code || '').trim(), 'vi', { numeric: true, sensitivity: 'base' })
+      ),
+    [customers]
+  );
+
+  // Mở popup xem / sửa từ trong popup khách hàng -> đóng popup khách hàng, đóng popup con là ra thẳng màn hình chính
+  const customerChildOpen = !!(showDetailModal || showOrderModal || showCashModal || selectedCashItem);
+  useEffect(() => {
+    if (customerChildOpen) setShowCustomerDetailModal(false);
+  }, [customerChildOpen]);
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -3713,7 +3810,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 {customers.length === 0 ? (
                   <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có khách hàng nào.</td></tr>
                 ) : (
-                  customers.map((c) => (
+                  sortedCustomers.map((c) => (
                     <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       <td style={cellStyle}>{c.code}</td>
                       <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
@@ -4876,7 +4973,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         )}
 
         {/* POPUP THỐNG KÊ CHI TIẾT KHÁCH HÀNG (2 TAB) */}
-        {showCustomerDetailModal && selectedCustomerDetail && (
+        {showCustomerDetailModal && !customerChildOpen && selectedCustomerDetail && (
           <div style={overlayStyle}>
             <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
@@ -4920,20 +5017,25 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                         <th style={{ padding: '10px' }}>Đã TT</th>
                         <th style={{ padding: '10px' }}>Còn nợ</th>
                         <th style={{ padding: '10px' }}>Trạng thái</th>
+                        <th style={{ padding: '10px', textAlign: 'center' }}>Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
                       {customerDetailData.invoices.length === 0 ? (
-                        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</td></tr>
                       ) : (
                         customerDetailData.invoices.map((inv) => (
                           <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
+                            <td onClick={() => viewCustInvoice(inv)} style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} title="Bấm để xem chi tiết">{inv.code}</td>
                             <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                             <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
                             <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(inv.paid_amount ?? 0)}</td>
                             <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(inv.debt ?? 0)}</td>
                             <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '11px', fontWeight: 'bold' }}>Hoàn thành</span></td>
+                            <td style={{ padding: '10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              <button onClick={() => viewCustInvoice(inv)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                              <button onClick={() => editCustInvoice(inv)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -4942,37 +5044,54 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 </div>
               )}
 
-              {customerDetailTab === 'payments' && (
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  <h4>Lịch sử giao dịch thanh toán</h4>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                        <th style={{ padding: '10px' }}>Mã GD</th>
-                        <th style={{ padding: '10px' }}>Ngày</th>
-                        <th style={{ padding: '10px' }}>Số tiền</th>
-                        <th style={{ padding: '10px' }}>Phương thức</th>
-                        <th style={{ padding: '10px' }}>Nội dung</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {customerDetailData.payments.length === 0 ? (
-                        <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
-                      ) : (
-                        customerDetailData.payments.map((pay) => (
-                          <tr key={pay.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '10px', fontWeight: 'bold' }}>{pay.code || `GD-${pay.id}`}</td>
-                            <td style={{ padding: '10px' }}>{pay.created_at ? new Date(pay.created_at).toLocaleDateString('vi-VN') : '---'}</td>
-                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#16a34a' }}>{vnd(pay.amount)}</td>
-                            <td style={{ padding: '10px' }}>{pay.method || 'Tiền mặt'}</td>
-                            <td style={{ padding: '10px' }}>{pay.note || 'Thanh toán đơn hàng'}</td>
+
+              {customerDetailTab === 'payments' && (() => {
+                const rows = getCustomerPaymentRows();
+                return (
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <h4>Lịch sử giao dịch thanh toán</h4>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                          <th style={{ padding: '10px' }}>Mã</th>
+                          <th style={{ padding: '10px' }}>Ngày</th>
+                          <th style={{ padding: '10px' }}>Loại</th>
+                          <th style={{ padding: '10px', textAlign: 'right' }}>Số tiền</th>
+                          <th style={{ padding: '10px' }}>Phương thức</th>
+                          <th style={{ padding: '10px' }}>Nội dung</th>
+                          <th style={{ padding: '10px', textAlign: 'center' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.length === 0 ? (
+                          <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
+                        ) : rows.map((r) => (
+                          <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#7c3aed' }}>{r.code}</td>
+                            <td style={{ padding: '10px' }}>{r.date ? new Date(r.date).toLocaleDateString('vi-VN') : '---'}</td>
+                            <td style={{ padding: '10px' }}>
+                              <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: r.type === 'IN' ? '#dcfce7' : '#fee2e2', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                                {r.type === 'IN' ? 'Thu tiền khách' : 'Hoàn tiền khách'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>{r.type === 'IN' ? '+' : '-'}{vnd(r.amount)}</td>
+                            <td style={{ padding: '10px' }}>{r.method || '---'}</td>
+                            <td style={{ padding: '10px', color: '#475569' }}>{r.note || '---'}</td>
+                            <td style={{ padding: '10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              {r.kind === 'none' ? '---' : (
+                                <>
+                                  <button onClick={() => viewCustPaymentRow(r)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                                  <button onClick={() => editCustPaymentRow(r)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                                </>
+                              )}
+                            </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
                 <button onClick={() => setShowCustomerDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
