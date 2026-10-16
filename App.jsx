@@ -1983,13 +1983,14 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
   }, [customerChildOpen]);
 
     // Đơn đặt hàng chưa xuất bán (để tính tạm ứng, tránh cộng trùng khi đã chuyển thành phiếu bán)
-  const isPendingOrder = (o) => !o.status || /pending|chờ|đang/i.test(String(o.status));
+    function isPendingOrder(o) { return !o.status || /pending|chờ|đang/i.test(String(o.status)); }
   // Tổng đã thanh toán của khách = số server tính (phiếu bán) + tạm ứng các đơn đặt hàng chưa xuất bán
-  const customerPaidOf = (c) =>
-    (Number(c.total_paid) || 0) +
-    (ordersList || [])
-      .filter((o) => o.customer_name === c.name && isPendingOrder(o))
-      .reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
+    function customerPaidOf(c) {
+    return (Number(c.total_paid) || 0) +
+      (ordersList || [])
+        .filter((o) => o.customer_name === c.name && isPendingOrder(o))
+        .reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
+  }
   // Phiếu bán + đơn đặt hàng của khách đang xem (cho tab Đơn hàng)
   const getCustomerOrderRows = () => {
     const cus = selectedCustomerDetail;
