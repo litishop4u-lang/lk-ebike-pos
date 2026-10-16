@@ -225,6 +225,7 @@ function AppMain() {
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
   const [posProductKeyword, setPosProductKeyword] = useState('');
+  const [showPosSuggest, setShowPosSuggest] = useState(false);
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
@@ -965,6 +966,19 @@ function AppMain() {
           }
         }
         r = await api(`/api/${modalOrderType}`, { method: 'POST', body: JSON.stringify(body) });
+                // Fix: đơn đặt hàng mới tạo chưa lưu tạm ứng -> cập nhật lại chính đơn vừa tạo để lưu
+        if (modalOrderType === 'orders' && (Number(paidAmount) || 0) > 0) {
+          try {
+            let newId = r.id;
+            if (!newId) {
+              const fresh = await api('/api/orders');
+              newId = (asArray(fresh).find((o) => o.code === r.code) || {}).id;
+            }
+            if (newId) await api(`/api/orders/${newId}`, { method: 'PUT', body: JSON.stringify(body) });
+          } catch (e) {
+            console.error('Không lưu được tạm ứng cho đơn mới:', e);
+          }
+        }
         setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công!` });
       }
 
@@ -3965,43 +3979,59 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 <button onClick={() => { setShowOrderModal(false); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); }} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', flex: 1, overflowY: 'auto' }}>
-                {/* ===== Cột trái: chọn sản phẩm ===== */}
-                <div>
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                    <input
-                      placeholder="Gõ mã hoặc tên sản phẩm..."
-                      value={posProductKeyword}
-                      onChange={(e) => setPosProductKeyword(e.target.value)}
-                      style={{ ...inputStyle, margin: 0 }}
-                    />
-                    <button
-                      onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
-                      title="Thêm sản phẩm mới"
-                      style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                    >+</button>
-                  </div>
-                  <div className="pos-product-list" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-                    {filteredPosProducts.map((p) => {
-                      const isOutOfStock = p.stock <= 0;
-                      return (
-                        <div
-                          key={p.id}
-                          onClick={() => add(p)}
-                          style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isOutOfStock ? '#fffbeb' : '#fff' }}
-                        >
-                          <div>
-                            <strong style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</strong><br />
-                            <small style={{ color: isOutOfStock ? '#dc2626' : '#64748b' }}>
-                              {isOutOfStock ? (modalOrderType === 'invoices' ? 'Hết hàng' : 'Hết (Cho phép đặt)') : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
-                            </small>
-                          </div>
-                          <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(p.price)}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', flex: 1, overflowY: 'auto' }}>
+               {/* ===== Ô tìm sản phẩm có gợi ý ===== */}
+<div style={{ position: 'relative' }}>
+  <div style={{ display: 'flex', gap: '10px' }}>
+    <input
+      placeholder="🔍 Gõ mã hoặc tên sản phẩm để thêm vào phiếu..."
+      value={posProductKeyword}
+      onChange={(e) => { setPosProductKeyword(e.target.value); setShowPosSuggest(true); }}
+      onFocus={() => setShowPosSuggest(true)}
+      onBlur={() => setTimeout(() => setShowPosSuggest(false), 150)}
+      style={{ ...inputStyle, margin: 0 }}
+    />
+    <button
+      onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
+      title="Thêm sản phẩm mới"
+      style={{ padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+    >+</button>
+  </div>
+
+  {showPosSuggest && posProductKeyword.trim() && (() => {
+    const k = removeAccents(posProductKeyword.trim());
+    const list = (products || []).filter((p) =>
+      removeAccents(p.sku).includes(k) || removeAccents(p.name).includes(k)
+    ).slice(0, 10);
+    return (
+      <div style={{ position: 'absolute', top: '100%', left: 0, right: '52px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 30, marginTop: '4px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)' }}>
+        {list.length === 0 ? (
+          <div style={{ padding: '12px', color: '#94a3b8', textAlign: 'center' }}>Không tìm thấy sản phẩm nào.</div>
+        ) : list.map((p) => {
+          const out = p.stock <= 0;
+          return (
+            <div
+              key={p.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { add(p); setPosProductKeyword(''); setShowPosSuggest(false); }}
+              style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', background: out ? '#fffbeb' : '#fff' }}
+            >
+              <div>
+                <b style={{ color: '#0f172a' }}>{p.sku ? `${p.sku} - ` : ''}{p.name}</b><br />
+                <small style={{ color: out ? '#dc2626' : '#64748b' }}>
+                  {out ? (modalOrderType === 'invoices' ? 'Hết hàng' : 'Hết (Cho phép đặt)') : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
+                </small>
+              </div>
+              <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#7c3aed', whiteSpace: 'nowrap' }}>
+                {vnd(p.price)} <span style={{ color: '#0284c7' }}>+ Thêm</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  })()}
+</div>
 
                 {/* ===== Cột phải: thông tin đơn + giỏ hàng ===== */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
