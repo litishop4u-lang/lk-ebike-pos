@@ -694,6 +694,7 @@ function AppMain() {
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState(null);
   const [customerDetailData, setCustomerDetailData] = useState({ invoices: [], payments: [] });
   const [customerDetailTab, setCustomerDetailTab] = useState('orders'); // 'orders' | 'payments'
+  const [customerListSearch, setCustomerListSearch] = useState('');
   const [customerCashItems, setCustomerCashItems] = useState([]); // sổ thu chi, để dựng lịch sử thanh toán
   const [customerReturnList, setCustomerReturnList] = useState([]); // phiếu trả hàng bán của khách đang xem
   const [showCustomerDetailModal, setShowCustomerDetailModal] = useState(false);
@@ -1838,6 +1839,18 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
       ),
     [customers]
   );
+
+    // Lọc khách hàng theo tên / mã KH / SĐT (gõ không dấu cũng tìm được)
+  const customerKeyword = removeAccents(customerListSearch.trim());
+  const customerPhoneKeyword = customerListSearch.trim().replace(/[\s.]/g, '');
+  const visibleCustomers = customerKeyword
+    ? sortedCustomers.filter(
+        (c) =>
+          removeAccents(c.name).includes(customerKeyword) ||
+          removeAccents(c.code).includes(customerKeyword) ||
+          (customerPhoneKeyword && String(c.phone || '').replace(/[\s.]/g, '').includes(customerPhoneKeyword))
+      )
+    : sortedCustomers;
 
   // Mở popup xem / sửa từ trong popup khách hàng -> đóng popup khách hàng, đóng popup con là ra thẳng màn hình chính
   const customerChildOpen = !!(showDetailModal || showOrderModal || showCashModal || selectedCashItem);
@@ -3806,49 +3819,66 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         {/* 5. MÀN HÌNH QUẢN LÝ KHÁCH HÀNG */}
         {currentView === 'customers' && (
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({customers.length})</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0 }}>Quản lý Khách hàng ({visibleCustomers.length}{customerKeyword ? `/${customers.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={() => { setCustomerImportText(''); setShowCustomerImportModal(true); }} style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📁 Nhập Excel / Dán dữ liệu</button>
                 <button onClick={() => { setEditingCustomer(null); setCustomerForm(EMPTY_CUSTOMER); setShowCustomerModal(true); }} style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm khách hàng</button>
               </div>
             </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={cellStyle}>Mã KH</th>
-                  <th style={cellStyle}>Tên khách hàng</th>
-                  <th style={cellStyle}>Số điện thoại</th>
-                  <th style={cellStyle}>Địa chỉ</th>
-                  <th style={cellStyle}>Tổng mua</th>
-                  <th style={cellStyle}>Đã thanh toán</th>
-                  <th style={cellStyle}>Công nợ</th>
-                  <th style={{ ...cellStyle, textAlign: 'center' }}>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customers.length === 0 ? (
-                  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có khách hàng nào.</td></tr>
-                ) : (
-                  sortedCustomers.map((c) => (
-                    <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={cellStyle}>{c.code}</td>
-                      <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
-                      <td style={cellStyle}>{c.phone || '-'}</td>
-                      <td style={cellStyle}>{c.address || '-'}</td>
-                      <td style={cellStyle}>{vnd(c.total_purchased)}</td>
-                      <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(customerPaidOf(c))}</td>
-                      <td style={{ ...cellStyle, color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
-                      <td style={{ ...cellStyle, textAlign: 'center' }}>
-                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
-                        <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+            {/* Ô tìm kiếm */}
+            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
+              <input
+                placeholder="🔍 Tìm theo tên khách, mã KH hoặc số điện thoại..."
+                value={customerListSearch}
+                onChange={(e) => setCustomerListSearch(e.target.value)}
+                style={{ ...inputStyle, margin: 0, paddingRight: customerListSearch ? '36px' : '10px' }}
+              />
+              {customerListSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCustomerListSearch('')}
+                  title="Xóa tìm kiếm"
+                  style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                >✕</button>
+              )}
+            </div>
+
+            {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
+            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left' }}>
+                    {['Mã KH', 'Tên khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tổng mua', 'Đã thanh toán', 'Công nợ'].map((h) => (
+                      <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                    <th style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1, whiteSpace: 'nowrap', textAlign: 'center' }}>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleCustomers.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>{customerKeyword ? 'Không tìm thấy khách hàng nào.' : 'Chưa có khách hàng nào.'}</td></tr>
+                  ) : (
+                    visibleCustomers.map((c) => (
+                      <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.code}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.phone || '-'}</td>
+                        <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{c.address || '-'}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(c.total_purchased)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(customerPaidOf(c))}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: c.total_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.total_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.total_debt)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
+                          <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
