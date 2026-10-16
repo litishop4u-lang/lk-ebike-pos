@@ -200,6 +200,23 @@ const RESPONSIVE_CSS = `
   .main-content div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
   .main-content div[style*="grid-template-columns"] > * { min-width: 0; }
   .main-content input, .main-content select, .main-content textarea { max-width: 100%; }
+
+    /* ===== Báo cáo X-N-T trên điện thoại ===== */
+  /* 4 ô KPI: 2 ô mỗi dòng, gọn hơn */
+  .main-content div.report-kpis[style] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+  .report-kpis > div { padding: 12px !important; }
+  .report-kpis > div > span { font-size: 10px !important; line-height: 1.3; display: block; }
+  .report-kpis > div > div { font-size: 15px !important; margin-top: 6px !important; word-break: break-word; }
+
+  /* Thanh lọc: ô tìm kiếm + bộ chọn thời gian vừa khít màn hình */
+  .report-filter { padding: 10px !important; gap: 8px !important; }
+  .report-filter > input { flex: 1 1 100% !important; min-width: 0 !important; width: 100% !important; padding: 7px 10px !important; font-size: 14px !important; }
+  .report-filter-range { flex: 1 1 100% !important; flex-wrap: nowrap !important; gap: 6px !important; }
+  .report-filter-range > span:first-child { font-size: 12px !important; white-space: nowrap; }
+  .report-filter-range select,
+  .report-filter-range input { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; padding: 6px 8px !important; font-size: 13px !important; }
+  /* Nút Lọc dữ liệu nhỏ lại */
+  .report-filter > button { padding: 7px 18px !important; font-size: 13px !important; }
 }
   /* Đồng nhất font (áp dụng cả máy tính và điện thoại) */
 .layout, .layout button, .layout input, .layout select, .layout textarea {
@@ -3338,7 +3355,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </div>
 
             {/* Các Thẻ Tổng Quan */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+            <div className="report-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị tồn đầu kỳ</span>
                 <div style={{ fontSize: '22px', fontWeight: '900', color: '#7c3aed', marginTop: '8px' }}>{vnd(reportSummary.totalOpeningVal)}</div>
@@ -3358,7 +3375,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </div>
 
             {/* Thanh Bộ Lọc Thời Gian Chi Tiết */}
-            <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', flexWrap: 'wrap' }}>
+            <div className="report-filter" style={{ background: '#fff', padding: '15px', borderRadius: '10px', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', flexWrap: 'wrap' }}>
               <input
                 placeholder="🔍 Tìm mã hoặc tên sản phẩm..."
                 value={reportSearch}
@@ -3367,7 +3384,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none' }}
               />
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="report-filter-range" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xem theo:</span>
                 <select
                   value={reportType}
