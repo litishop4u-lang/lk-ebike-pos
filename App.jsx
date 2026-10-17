@@ -4249,6 +4249,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                     ))
                   )}
                 </tbody>
+                </table>  
               </FillHeight>
             </div>
           </div>
