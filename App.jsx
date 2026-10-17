@@ -2567,7 +2567,7 @@ const goView = (view) => {
 
             {/* Bảng Danh sách Đơn Đặt Hàng */}
             <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? /${ordersList.length} : ''})</h3>
+             <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
