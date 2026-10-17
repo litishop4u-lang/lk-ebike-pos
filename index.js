@@ -17,6 +17,19 @@ class HttpError extends Error {
 // ===== Helpers =====
 const genCode = (prefix) =>
   `${prefix}-${Date.now().toString(36).toUpperCase()}${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+
+// Sinh mã dạng PREFIX-MMYYNN: MM = tháng, YY = 2 số cuối năm (theo ngày lập phiếu), NN = số thứ tự trong tháng.
+// Mỗi loại phiếu đếm riêng; qua 99 phiếu/tháng thì số thứ tự tự dài ra (BH-1026100).
+async function nextCode(db, table, prefix, dateInput) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(dateInput || ''));
+  const [y, mo] = m ? [m[1], m[2]] : new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 7).split('-');
+  const head = `${prefix}-${mo}${y.slice(2)}`;
+  const row = await db.prepare(
+    `SELECT MAX(CAST(SUBSTR(code, ?) AS INTEGER)) AS m FROM ${table} WHERE code LIKE ?`
+  ).bind(head.length + 1, head + '%').first();
+  return head + String((Number(row?.m) || 0) + 1).padStart(2, '0');
+}
+
 const str = (v) => String(v ?? '').trim();
 const money = (v) => Math.max(0, Number(v) || 0);
 const isUnique = (e) => /UNIQUE/i.test(String(e?.message));
@@ -387,8 +400,8 @@ async function createInvoice(db, b) {
   const total = sumTotal(lines);
   const paid_amount = Math.min(money(b.paid_amount), total);
   const debt = total - paid_amount;
-  const code = genCode('BH');
   const created_at = isoDate(b.created_at);
+  const code = await nextCode(db, 'invoices', 'BH', created_at);
   const payment_method = str(b.payment_method) || 'Tiền mặt';
 
   const stmts = [
@@ -418,13 +431,14 @@ async function createOrder(db, b) {
   await loadProducts(db, lines, { checkStock: false }); // đơn đặt hàng: không trừ kho
 
   const total = sumTotal(lines);
-  const code = genCode('DH');
+  const paid = Math.min(money(b.paid_amount), total);
   const created_at = isoDate(b.created_at);
+  const code = await nextCode(db, 'orders', 'DH', created_at);
 
   await db.batch([
     ensureCustomer(db, customer_name, customer_phone, address),
-    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, created_at, status) VALUES (?,?,?,?,?,?)')
-      .bind(code, customer_name, customer_phone, total, created_at, 'Pending'),
+    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, status) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(code, customer_name, customer_phone, total, paid, total - paid, str(b.payment_method) || 'Tiền mặt', created_at, 'Pending'),
     ...lines.map((l) =>
       db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?,?)')
         .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total, l.chassis_color)),
@@ -653,7 +667,7 @@ export default {
         // 👉 TỰ ĐỘNG SINH PHIẾU THU NẾU HÓA ĐƠN CÓ THANH TOÁN (paid_amount > 0)
         const paidAmount = Number(payload.paid_amount) || 0;
         if (paidAmount > 0 && r && r.code) {
-          const cashCode = 'PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+          const cashCode = await nextCode(db, 'cash_books', 'PT', payload.created_at);
           const customerName = payload.customer_name || 'Khách hàng';
           const paymentMethod = payload.payment_method || 'Chuyển khoản';
           const noteText = `Thu tiền bán hàng từ khách ${customerName} theo hóa đơn ${r.code}`;
@@ -822,7 +836,7 @@ export default {
             db.prepare(`
               INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
               VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
-            `).bind(genCode('PT'), paid_amount, payment_method, oldInv.code, noteText, created_at)
+              `).bind(await nextCode(db, 'cash_books', 'PT', created_at), paid_amount, payment_method, oldInv.code, noteText, created_at)
           );
         }
 
@@ -866,7 +880,7 @@ export default {
         const body = await request.json();
         const { invoice_code, customer_name, return_date, reason, refund_amount } = body;
         const statusText = str(body.status) || 'Hoàn Thành';
-        const code = str(body.code) || ('PTB-' + Date.now());
+        const code = str(body.code) || await nextCode(db, 'return_orders', 'PTB', return_date);
 
         // Chuẩn hoá danh sách hàng trả (phải có sản phẩm để cộng kho và lên báo cáo)
         const lines = normalizeReturnLines(body.items);
@@ -913,8 +927,8 @@ export default {
               db.prepare(`
                 INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
                 VALUES (?, 'OUT', ?, 'Chi hoàn trả khách hàng', ?, ?, ?, ?)
-              `).bind(
-                genCode('TC'),
+                `).bind(
+                await nextCode(db, 'cash_books', 'TC', retDate),
                 cashRefund,
                 str(body.payment_method) || 'Tiền mặt',
                 code,
@@ -996,7 +1010,7 @@ export default {
                 INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
                 VALUES (?, 'OUT', ?, 'Chi hoàn trả khách hàng', ?, ?, ?, ?)
               `).bind(
-                genCode('TC'), cashRefund, str(body.payment_method) || 'Tiền mặt', old.code,
+                await nextCode(db, 'cash_books', 'TC', cashDate), cashRefund, str(body.payment_method) || 'Tiền mặt', old.code,
                 `Hoàn tiền trả hàng cho khách ${custName} theo phiếu trả ${old.code}${invoiceCode ? ' (HĐ ' + invoiceCode + ')' : ''} (Đã cập nhật)`,
                 cashDate
               )
@@ -1056,7 +1070,7 @@ export default {
         const category = str(b.category) || 'Khác';
         if (amount <= 0) throw new HttpError(400, 'Số tiền giao dịch phải lớn hơn 0');
 
-        const code = genCode(type === 'IN' ? 'PT' : 'TC');
+        const code = await nextCode(db, 'cash_books', type === 'IN' ? 'PT' : 'TC', b.created_at);
         await db.prepare(`
           INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1145,8 +1159,8 @@ export default {
         const ids = await loadProducts(db, lines, { checkStock: done }); // trả NCC thì phải đủ tồn kho
 
         const total = lines.reduce((s, l) => s + l.quantity * l.price, 0);
-        const code = genCode('RTN');
         const retDate = str(b.return_date) || new Date().toISOString().slice(0, 10);
+        const code = await nextCode(db, 'purchase_return_orders', 'RTN', retDate);
         const payMethod = str(b.payment_method) || 'Tiền mặt';
 
         // [FIX] Số tiền đã thu lại từ NCC (không vượt quá tổng giá trị hàng trả). Chỉ ghi nhận khi phiếu đã hoàn thành.
@@ -1173,8 +1187,8 @@ export default {
               db.prepare(`
                 INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
                 VALUES (?, 'IN', ?, 'Thu hoàn tiền NCC', ?, ?, ?, ?)
-              `).bind(
-                genCode('PT'),
+                `).bind(
+                await nextCode(db, 'cash_books', 'PT', retDate),
                 received,
                 payMethod,
                 code,
@@ -1261,7 +1275,7 @@ export default {
               db.prepare(`
                 INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
                 VALUES (?, 'IN', ?, 'Thu hoàn tiền NCC', ?, ?, ?, ?)
-              `).bind(genCode('PT'), received, payMethod, old.code,
+                `).bind(await nextCode(db, 'cash_books', 'PT', cashDate), received, payMethod, old.code,
                       `Thu hoàn tiền trả hàng nhập từ ${sup.name} theo phiếu ${old.code} (Đã cập nhật)`, cashDate)
             );
           }
@@ -1402,7 +1416,7 @@ export default {
       if (pathname === '/api/purchase_orders' && method === 'POST') {
         const reqData = await request.json();
         const po = await buildPurchase(db, reqData);
-        const code = genCode('PN');
+        const code = await nextCode(db, 'purchase_orders', 'PN', reqData.created_at);
 
         // Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
         const customDate = reqData.created_at || new Date().toISOString();
@@ -1428,7 +1442,7 @@ export default {
             db.prepare(`
               INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
               VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
-            `).bind(genCode('TC'), po.paid_amount, po.payment_method || 'Chuyển khoản', code, noteText, customDate)
+              `).bind(await nextCode(db, 'cash_books', 'TC', customDate), po.paid_amount, po.payment_method || 'Chuyển khoản', code, noteText, customDate)
           );
         }
 
