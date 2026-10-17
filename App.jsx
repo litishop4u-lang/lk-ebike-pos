@@ -296,7 +296,7 @@ function AppMain() {
       if (res && res.success) {
         const d = res.data || {};
         setReturnOrdersData({
-          list: sortDesc(Array.isArray(d.list) ? d.list : [], 'return_date'),,
+          list: sortDesc(Array.isArray(d.list) ? d.list : [], 'return_date'),
           stats: { ...EMPTY_RETURN_DATA.stats, ...(d.stats || {}) },
         });
       }
