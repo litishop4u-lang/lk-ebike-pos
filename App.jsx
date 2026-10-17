@@ -308,7 +308,6 @@ const RESPONSIVE_CSS = `
 export default function App() {
   return (
     <ErrorBoundary>
-      <style>{RESPONSIVE_CSS}</style>
       <AppMain />
     </ErrorBoundary>
   );
@@ -859,7 +858,7 @@ function AppMain() {
       const now = new Date();
 
       if (reportType === 'day') {
-        const d = reportValue || now.toISOString().slice(0, 10);
+        const d = reportValue || nowLocalISO().slice(0, 10);
         start = d;
         end = d;
       } else if (reportType === 'month') {
@@ -4203,10 +4202,9 @@ const goView = (view) => {
                 )}
                 {reportType === 'quarter' && (
                   <select value={reportValue} onChange={(e) => setReportValue(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
-                    <option value="2026-Q1">Quý 1 / 2026</option>
-                    <option value="2026-Q2">Quý 2 / 2026</option>
-                    <option value="2026-Q3">Quý 3 / 2026</option>
-                    <option value="2026-Q4">Quý 4 / 2026</option>
+                    {[new Date().getFullYear(), new Date().getFullYear() - 1].flatMap((y) =>
+                      [1, 2, 3, 4].map((q) => <option key={`${y}-Q${q}`} value={`${y}-Q${q}`}>Quý {q} / {y}</option>)
+                    )}
                   </select>
                 )}
                 {reportType === 'year' && (
@@ -5198,6 +5196,7 @@ const goView = (view) => {
               
                             
               {/* Chọn NCC khi là phiếu liên quan nhà cung cấp (lưu mã NCC vào ô chứng từ liên quan) */}
+                            {/* Chọn NCC / KH tùy danh mục (lưu mã vào ô chứng từ liên quan) */}
               {String(cashForm.category || '').includes('NCC') && (
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Nhà cung cấp:</label>
@@ -5212,8 +5211,7 @@ const goView = (view) => {
                 </div>
               )}
 
-              {/* Phiếu liên quan khách hàng -> chọn KH (lưu mã KH vào ô chứng từ liên quan) */}
-              {/KH|khách/i.test(String(cashForm.category || '')) && (
+              {['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(cashForm.category) && (
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Khách hàng:</label>
                   <select
@@ -5226,7 +5224,9 @@ const goView = (view) => {
                   </select>
                 </div>
               )}
-                
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
                 <input
                   type="number"
                   placeholder="Nhập số tiền..."
