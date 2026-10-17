@@ -4604,115 +4604,127 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         )}
 
         {/* POPUP TẠO / SỬA PHIẾU BẢO HÀNH */}
-        {showWarrantyModal && warrantyForm && (
-          <div style={overlayStyle}>
-            <div style={{ background: '#fff', width: '900px', maxHeight: '92vh', borderRadius: '12px', padding: '24px', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
-                <h3 style={{ margin: 0, color: '#16a34a' }}>{editingWarrantyId ? '✏️ Sửa phiếu bảo hành' : '🛡️ Tạo phiếu bảo hành'}</h3>
-                <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-              </div>
+{showWarrantyModal && warrantyForm && (
+  <div style={overlayStyle}>
+    <div style={{ background: '#fff', width: '760px', maxHeight: '92vh', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', fontSize: '13px' }}>
+      <div style={{ padding: '0 14px', height: '40px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0' }}>
+        <h3 style={{ margin: 0, fontSize: '15px', color: '#16a34a' }}>{editingWarrantyId ? '✏️ Sửa phiếu bảo hành' : '🛡️ Tạo phiếu bảo hành'}</h3>
+        <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+      </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                <div>
-                  <label style={labelStyle}>Mã phiếu bảo hành:</label>
-                  <input value={warrantyForm.code} onChange={(e) => setWarrantyForm({ ...warrantyForm, code: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Mã phiếu bán hàng liên quan:</label>
-                  <select value={warrantyForm.invoice_code} onChange={(e) => handleSelectWarrantyInvoice(e.target.value)} style={{ ...inputStyle, margin: 0, background: '#fff' }}>
-                    <option value="">-- Chọn phiếu bán hàng --</option>
-                    {warrantyForm.invoice_code && !(invoicesList || []).some((i) => i.code === warrantyForm.invoice_code) && (
-                      <option value={warrantyForm.invoice_code}>{warrantyForm.invoice_code}</option>
-                    )}
-                    {(invoicesList || []).map((i) => (
-                      <option key={i.id} value={i.code}>{i.code} - {i.customer_name || 'Khách lẻ'} ({vnd(i.total)})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Tên khách hàng *:</label>
-                  <input value={warrantyForm.customer_name} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_name: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Số điện thoại:</label>
-                  <input value={warrantyForm.customer_phone} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_phone: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-                </div>
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={labelStyle}>Địa chỉ:</label>
-                  <input value={warrantyForm.address} onChange={(e) => setWarrantyForm({ ...warrantyForm, address: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-                </div>
-              </div>
+      <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px' }}>
-                <div>
-                  <label style={labelStyle}>Ngày mua hàng:</label>
-                  <input type="date" value={warrantyForm.purchase_date} onChange={(e) => setWarrantyForm({ ...warrantyForm, purchase_date: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Thời gian bảo hành:</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input type="number" min="1" value={warrantyForm.duration} onChange={(e) => setWarrantyForm({ ...warrantyForm, duration: e.target.value })} style={{ ...inputStyle, margin: 0, flex: 1 }} />
-                    <select value={warrantyForm.unit} onChange={(e) => setWarrantyForm({ ...warrantyForm, unit: e.target.value })} style={{ ...inputStyle, margin: 0, width: '90px', background: '#fff' }}>
-                      <option value="month">Tháng</option>
-                      <option value="year">Năm</option>
-                      <option value="day">Ngày</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label style={labelStyle}>Ngày hết hạn bảo hành:</label>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#16a34a', marginTop: '10px' }}>
-                    {fmtDMY(addWarrantyDuration(warrantyForm.purchase_date, warrantyForm.duration, warrantyForm.unit))}
-                  </div>
-                </div>
-              </div>
+        {/* Thông tin phiếu + khách hàng */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 10px' }}>
+          <div>
+            <label style={cLabel}>Mã phiếu bảo hành</label>
+            <input value={warrantyForm.code} onChange={(e) => setWarrantyForm({ ...warrantyForm, code: e.target.value })} style={cInput} />
+          </div>
+          <div>
+            <label style={cLabel}>Mã phiếu bán hàng liên quan</label>
+            <select value={warrantyForm.invoice_code} onChange={(e) => handleSelectWarrantyInvoice(e.target.value)} style={{ ...cInput, background: '#fff' }}>
+              <option value="">-- Chọn phiếu bán hàng --</option>
+              {warrantyForm.invoice_code && !(invoicesList || []).some((i) => i.code === warrantyForm.invoice_code) && (
+                <option value={warrantyForm.invoice_code}>{warrantyForm.invoice_code}</option>
+              )}
+              {(invoicesList || []).map((i) => (
+                <option key={i.id} value={i.code}>{i.code} - {i.customer_name || 'Khách lẻ'} ({vnd(i.total)})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={cLabel}>Tên khách hàng *</label>
+            <input value={warrantyForm.customer_name} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_name: e.target.value })} style={cInput} />
+          </div>
+          <div>
+            <label style={cLabel}>Số điện thoại</label>
+            <input value={warrantyForm.customer_phone} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_phone: e.target.value })} style={cInput} />
+          </div>
+          <div style={{ gridColumn: 'span 2' }}>
+            <label style={cLabel}>Địa chỉ</label>
+            <input value={warrantyForm.address} onChange={(e) => setWarrantyForm({ ...warrantyForm, address: e.target.value })} style={cInput} />
+          </div>
+        </div>
 
-              <h4 style={{ margin: '0 0 8px 0' }}>Sản phẩm được bảo hành <span style={{ fontWeight: 'normal', fontSize: '12px', color: '#64748b' }}>(bấm ✕ để bỏ sản phẩm không bảo hành)</span></h4>
-              <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'auto', marginBottom: '15px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-                      <th style={{ padding: '8px 12px' }}>Mã SP</th>
-                      <th style={{ padding: '8px 12px' }}>Tên sản phẩm</th>
-                      <th style={{ padding: '8px 12px', width: '80px' }}>SL</th>
-                      <th style={{ padding: '8px 12px' }}>Số khung / số sườn / ghi chú</th>
-                      <th style={{ padding: '8px 12px', width: '50px', textAlign: 'center' }}>Bỏ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {warrantyForm.items.length === 0 ? (
-                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có sản phẩm. Hãy chọn phiếu bán hàng ở trên.</td></tr>
-                    ) : warrantyForm.items.map((it, idx) => (
-                      <tr key={idx} style={{ borderTop: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px 12px' }}>{it.sku}</td>
-                        <td style={{ padding: '8px 12px', fontWeight: '500' }}>{it.name}</td>
-                        <td style={{ padding: '8px 12px' }}>
-                          <input type="number" min="1" value={it.quantity} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, quantity: Math.max(1, Number(e.target.value) || 1) } : x)) })} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
-                        </td>
-                        <td style={{ padding: '8px 12px' }}>
-                          <input value={it.detail || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, detail: e.target.value } : x)) })} style={{ ...inputStyle, margin: 0, padding: '6px' }} />
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                          <button onClick={() => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.filter((_, i) => i !== idx) })} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ marginBottom: '15px' }}>
-                <label style={labelStyle}>Ghi chú / điều kiện bảo hành:</label>
-                <textarea rows="2" value={warrantyForm.note || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, note: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
-                <button onClick={saveWarranty} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>{editingWarrantyId ? 'Cập nhật phiếu' : 'Lưu phiếu bảo hành'}</button>
-              </div>
+        {/* Ngày mua + thời hạn + ngày hết hạn */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px 10px' }}>
+          <div>
+            <label style={cLabel}>Ngày mua hàng</label>
+            <input type="date" value={warrantyForm.purchase_date} onChange={(e) => setWarrantyForm({ ...warrantyForm, purchase_date: e.target.value })} style={cInput} />
+          </div>
+          <div>
+            <label style={cLabel}>Thời gian bảo hành</label>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input type="number" min="1" value={warrantyForm.duration} onChange={(e) => setWarrantyForm({ ...warrantyForm, duration: e.target.value })} style={{ ...cInput, flex: 1, minWidth: 0 }} />
+              <select value={warrantyForm.unit} onChange={(e) => setWarrantyForm({ ...warrantyForm, unit: e.target.value })} style={{ ...cInput, width: '80px', flexShrink: 0, background: '#fff' }}>
+                <option value="month">Tháng</option>
+                <option value="year">Năm</option>
+                <option value="day">Ngày</option>
+              </select>
             </div>
           </div>
-        )}
+          <div>
+            <label style={cLabel}>Ngày hết hạn bảo hành</label>
+            <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#16a34a', lineHeight: '30px' }}>
+              {fmtDMY(addWarrantyDuration(warrantyForm.purchase_date, warrantyForm.duration, warrantyForm.unit))}
+            </div>
+          </div>
+        </div>
+
+        {/* Sản phẩm được bảo hành */}
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700, margin: '2px 0 4px 0' }}>
+            Sản phẩm được bảo hành <span style={{ fontWeight: 'normal', fontSize: '11px', color: '#64748b' }}>(bấm ✕ để bỏ sản phẩm không bảo hành)</span>
+          </div>
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'auto', maxHeight: '200px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                  <th style={cTh}>Mã SP</th>
+                  <th style={cTh}>Tên sản phẩm</th>
+                  <th style={{ ...cTh, width: '64px' }}>SL</th>
+                  <th style={cTh}>Số khung / số sườn / ghi chú</th>
+                  <th style={{ ...cTh, width: '40px', textAlign: 'center' }}>Bỏ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {warrantyForm.items.length === 0 ? (
+                  <tr><td colSpan="5" style={{ ...cTd, textAlign: 'center', padding: '16px', color: '#94a3b8' }}>Chưa có sản phẩm. Hãy chọn phiếu bán hàng ở trên.</td></tr>
+                ) : warrantyForm.items.map((it, idx) => (
+                  <tr key={idx} style={{ borderTop: '1px solid #eef0f5' }}>
+                    <td style={cTd}>{it.sku}</td>
+                    <td style={{ ...cTd, fontWeight: 500 }}>{it.name}</td>
+                    <td style={cTd}>
+                      <input type="number" min="1" value={it.quantity} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, quantity: Math.max(1, Number(e.target.value) || 1) } : x)) })} style={{ ...cCell, width: '52px', textAlign: 'center' }} />
+                    </td>
+                    <td style={cTd}>
+                      <input value={it.detail || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, detail: e.target.value } : x)) })} style={{ ...cCell, width: '100%', textAlign: 'left' }} />
+                    </td>
+                    <td style={{ ...cTd, textAlign: 'center' }}>
+                      <button onClick={() => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.filter((_, i) => i !== idx) })} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', width: '24px', height: '24px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Ghi chú */}
+        <div>
+          <label style={cLabel}>Ghi chú / điều kiện bảo hành</label>
+          <textarea rows="2" value={warrantyForm.note || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, note: e.target.value })} style={{ ...cInput, height: 'auto', padding: '6px 8px', resize: 'vertical', fontFamily: 'inherit' }} />
+        </div>
+
+        {/* Nút hành động */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ height: '32px', padding: '0 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>Hủy</button>
+          <button onClick={saveWarranty} style={{ height: '32px', padding: '0 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>{editingWarrantyId ? 'Cập nhật phiếu' : 'Lưu phiếu bảo hành'}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
         {/* POPUP XEM CHI TIẾT PHIẾU BẢO HÀNH */}
         {warrantyDetail && (() => {
