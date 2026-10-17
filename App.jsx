@@ -5142,10 +5142,10 @@ const goView = (view) => {
   </div>
 )}
 
-        {/* POPUP TẠO PHIẾU THU / CHI */}
+                {/* POPUP TẠO PHIẾU THU / CHI */}
         {showCashModal && (
           <div style={overlayStyle}>
-            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px' }}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '500px', maxHeight: '92vh', overflowY: 'auto', boxSizing: 'border-box' }}>
               <h3 style={{ marginTop: 0, color: '#0f172a' }}>{editingCashId ? 'Chỉnh Sửa Phiếu Thu / Chi' : 'Tạo Phiếu Thu / Chi Mới'}</h3>
 
               <div style={{ marginBottom: '12px' }}>
@@ -5154,7 +5154,6 @@ const goView = (view) => {
                   value={cashForm.type}
                   onChange={(e) => {
                     const t = e.target.value;
-                    // Đổi loại thì đặt lại danh mục mặc định cho đúng loại
                     setCashForm({ ...cashForm, type: t, category: t === 'OUT' ? 'Mua hàng / Trả nợ NCC' : 'Bán hàng / Thu nợ KH' });
                   }}
                   style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
@@ -5191,12 +5190,7 @@ const goView = (view) => {
                 </select>
               </div>
 
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
-              
-                            
-              {/* Chọn NCC khi là phiếu liên quan nhà cung cấp (lưu mã NCC vào ô chứng từ liên quan) */}
-                            {/* Chọn NCC / KH tùy danh mục (lưu mã vào ô chứng từ liên quan) */}
+              {/* Chọn NCC khi danh mục liên quan nhà cung cấp */}
               {String(cashForm.category || '').includes('NCC') && (
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Nhà cung cấp:</label>
@@ -5211,6 +5205,7 @@ const goView = (view) => {
                 </div>
               )}
 
+              {/* Chọn KH khi danh mục liên quan khách hàng */}
               {['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(cashForm.category) && (
                 <div style={{ marginBottom: '12px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Khách hàng:</label>
@@ -5256,16 +5251,7 @@ const goView = (view) => {
                   type="date"
                   value={cashForm.created_at ? cashForm.created_at.slice(0, 10) : todayLocal()}
                   onChange={(e) => setCashForm({ ...cashForm, created_at: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                    background: '#fff'
-                  }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', outline: 'none', background: '#fff' }}
                 />
               </div>
 
@@ -5309,7 +5295,7 @@ const goView = (view) => {
             </div>
           </div>
         )}
-
+        
         {/* POPUP TẠO / SỬA PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG (zIndex 900 để các popup thêm SP/KH hiện lên trên) */}
 {showOrderModal && (
   <div style={{ ...overlayStyle, zIndex: 900 }}>
