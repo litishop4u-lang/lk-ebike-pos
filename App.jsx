@@ -2203,6 +2203,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     if (!f) return;
     if (!String(f.code || '').trim()) return alert('Vui lòng nhập mã phiếu bảo hành!');
     if (warranties.some((w) => w.code === f.code.trim() && w.id !== editingWarrantyId)) return alert('Mã phiếu bảo hành này đã tồn tại!');
+    if (f.invoice_code && warranties.some((w) => w.invoice_code === f.invoice_code && w.id !== editingWarrantyId)) return alert(`Phiếu bán hàng ${f.invoice_code} đã có phiếu bảo hành, không thể tạo thêm!`);
     if (!String(f.customer_name || '').trim()) return alert('Vui lòng nhập tên khách hàng!');
     if (!f.items || f.items.length === 0) return alert('Phiếu bảo hành cần ít nhất 1 sản phẩm!');
     if (!(Number(f.duration) > 0)) return alert('Vui lòng nhập thời gian bảo hành!');
@@ -2305,6 +2306,10 @@ const goView = (view) => {
   if (view === 'profit-loss-report') loadProfitLossReport();
   // 'cash-book' và 'inventory-report' đã tự tải qua useEffect theo currentView
 };
+
+  // Mã các phiếu bán hàng đã có phiếu bảo hành (để làm mờ nút tạo bảo hành)
+  const warrantiedInvoices = new Set((warranties || []).map((w) => w.invoice_code).filter(Boolean));
+  
   return (
         <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
       <style>{RESPONSIVE_CSS}</style>
@@ -2398,7 +2403,22 @@ const goView = (view) => {
                         <td style={{ padding: '10px', color: inv.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(inv.debt)}</td>
                         <td style={{ padding: '10px' }}>{inv.payment_method || 'Tiền mặt'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
-                          <button onClick={() => { openWarrantyModal({ invoice_code: inv.code }); handleSelectWarrantyInvoice(inv.code); }} title="Tạo phiếu bảo hành" style={{ background: '#dcfce7', color: '#16a34a', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🛡️</button>
+                         {(() => {
+                          const hasWarranty = warrantiedInvoices.has(inv.code);
+                          return (
+                            <button
+                              disabled={hasWarranty}
+                              onClick={() => { openWarrantyModal({ invoice_code: inv.code }); handleSelectWarrantyInvoice(inv.code); }}
+                              title={hasWarranty ? 'Phiếu bán hàng này đã có phiếu bảo hành' : 'Tạo phiếu bảo hành'}
+                              style={{
+                                background: '#dcfce7', color: '#16a34a', border: 'none', padding: '4px 6px', borderRadius: '4px', marginRight: '4px',
+                                cursor: hasWarranty ? 'not-allowed' : 'pointer',
+                                opacity: hasWarranty ? 0.35 : 1,
+                                filter: hasWarranty ? 'grayscale(1)' : 'none',
+                              }}
+                            >🛡️</button>
+                          );
+                        })()}
                           <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
                           <button onClick={() => handleEditInvoice(inv)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
