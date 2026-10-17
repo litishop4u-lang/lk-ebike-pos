@@ -85,6 +85,40 @@ function FillHeight({ children, bottom = 50, min = 220, className = '', style })
   );
 }
 
+// ===== Phiếu bảo hành =====
+const addWarrantyDuration = (dateStr, amount, unit) => {
+  const n = Number(amount) || 0;
+  if (!dateStr || n <= 0) return '';
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  if (!y) return '';
+  let dt;
+  if (unit === 'day') {
+    dt = new Date(y, m - 1, d + n);
+  } else {
+    const months = unit === 'year' ? n * 12 : n;
+    const lastDay = new Date(y, m - 1 + months + 1, 0).getDate(); // tránh tràn ngày (31/1 + 1 tháng)
+    dt = new Date(y, m - 1 + months, Math.min(d, lastDay));
+  }
+  const p = (x) => String(x).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+};
+const fmtDMY = (s) => (s ? String(s).slice(0, 10).split('-').reverse().join('/') : '---');
+const warrantyStatus = (expiry) => {
+  if (!expiry) return { key: 'none', text: '---', bg: '#f1f5f9', color: '#64748b', days: null };
+  const days = Math.ceil((new Date(expiry + 'T23:59:59') - new Date()) / 86400000);
+  if (days < 0) return { key: 'expired', text: 'Hết hạn', bg: '#fee2e2', color: '#dc2626', days };
+  if (days <= 30) return { key: 'soon', text: `Sắp hết hạn (${days} ngày)`, bg: '#fef3c7', color: '#d97706', days };
+  return { key: 'valid', text: 'Còn hạn', bg: '#dcfce7', color: '#16a34a', days };
+};
+const newWarrantyCode = (list) => {
+  const max = (list || []).reduce((mx, w) => {
+    const m = /^PBH(\d+)$/.exec(w.code || '');
+    return m ? Math.max(mx, Number(m[1])) : mx;
+  }, 0);
+  return 'PBH' + String(max + 1).padStart(5, '0');
+};
+const UNIT_LABEL = { month: 'tháng', year: 'năm', day: 'ngày' };
+const nowLocalISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString();
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -700,13 +734,13 @@ function AppMain() {
   const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
   const [showViewPurchaseModal, setShowViewPurchaseModal] = useState(false);
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
-  const [importDate, setImportDate] = useState(() => new Date().toISOString().slice(0, 16));
+  const [importDate, setImportDate] = useState(() => nowLocalISO().slice(0, 16));
 
   const [purchaseForm, setPurchaseForm] = useState({
     supplier_id: '',
     payment_method: 'cash',
     paid_amount: '',
-    created_at: new Date().toISOString().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
+    created_at: nowLocalISO().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
   });
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
@@ -734,7 +768,7 @@ function AppMain() {
   const reportReqRef = useRef(0); // đánh số mỗi lần gọi để bỏ qua kết quả cũ trả về chậm
 
   const [reportType, setReportType] = useState('month'); // 'day', 'month', 'quarter', 'year', 'custom'
-  const [reportValue, setReportValue] = useState(new Date().toISOString().slice(0, 7)); // ví dụ: '2026-10'
+  const [reportValue, setReportValue] = useState(nowLocalISO().slice(0, 7)); // ví dụ: '2026-10'
   const [reportStartDate, setReportStartDate] = useState('');
   const [reportEndDate, setReportEndDate] = useState('');
 
@@ -761,6 +795,15 @@ function AppMain() {
 
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [warranties, setWarranties] = useState(() => {
+  try { const v = JSON.parse(localStorage.getItem('warranties') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+});
+  const [showWarrantyModal, setShowWarrantyModal] = useState(false);
+  const [warrantyForm, setWarrantyForm] = useState(null);
+  const [editingWarrantyId, setEditingWarrantyId] = useState(null);
+  const [warrantyDetail, setWarrantyDetail] = useState(null);
+  const [warrantySearch, setWarrantySearch] = useState('');
+  const [warrantyFilter, setWarrantyFilter] = useState('all'); // all | valid | soon | expired
 
   // ===== States cho Thu chi (Sổ quỹ) =====
   const [showCashModal, setShowCashModal] = useState(false);
@@ -790,7 +833,7 @@ function AppMain() {
   };
 
   useEffect(() => {
-    if (currentView === 'cash-book') loadCashBook();
+    if (currentView === 'cash-book') { loadCashBook(); loadPurchaseReturns(); loadReturnOrders(); }
   }, [currentView]);
 
   const loadInventoryReport = async () => {
@@ -1041,6 +1084,7 @@ function AppMain() {
       };
 
       let r;
+      let warrantyDraft = null;
       if (modalOrderType === 'orders' && editingOrderId) {
         // Nếu đang sửa đơn đặt hàng
         r = await api(`/api/orders/${editingOrderId}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -1079,6 +1123,21 @@ function AppMain() {
           }
         }
         setMsg({ type: 'ok', text: `Tạo ${modalOrderType === 'invoices' ? 'phiếu bán hàng' : 'đơn đặt hàng'} ${r.code} thành công!` });
+
+          if (modalOrderType === 'invoices') {
+          // Lấy sẵn dữ liệu trước khi giỏ hàng bị xóa
+          warrantyDraft = {
+            invoice_code: r.code || '',
+            customer_name: posCustomer.name,
+            customer_phone: posCustomer.phone || '',
+            address: posCustomer.address || '',
+            purchase_date: orderDate,
+            items: cartLines.map((l) => ({
+              product_id: l.id, sku: l.sku || '', name: l.name, quantity: l.quantity, detail: buildItemDetails(cart, l.id),
+            })),
+          };
+        }
+        
       }
 
       setCart({});
@@ -1090,6 +1149,12 @@ function AppMain() {
       setEditingInvoiceOriginalQty({});
       setShowOrderModal(false);
       loadData();
+        if (warrantyDraft) {
+        const draft = warrantyDraft;
+        setTimeout(() => {
+        if (window.confirm('Bạn có muốn tạo phiếu bảo hành cho phiếu bán hàng này không?')) openWarrantyModal(draft);
+        }, 150);
+      }
     } catch (e) {
       alert('Lỗi: ' + e.message);
     } finally {
@@ -1722,7 +1787,7 @@ function AppMain() {
       supplier_id: '',
       payment_method: 'Tiền mặt',
       paid_amount: 0,
-      created_at: new Date().toISOString().slice(0, 16) // Khởi tạo ngày giờ hiện tại
+      created_at: nowLocalISO().slice(0, 16) // Khởi tạo ngày giờ hiện tại
     });
     setSupplierSearchKeyword('');
     setProductSearchKeyword('');
@@ -1738,7 +1803,7 @@ function AppMain() {
         payment_method: details.payment_method || 'Tiền mặt',
         paid_amount: details.paid_amount || 0,
         // Nạp ngày nhập cũ vào form để khi lưu không bị ghi đè thành ngày hiện tại
-        created_at: details.created_at ? details.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16),
+        created_at: details.created_at ? details.created_at.slice(0, 16) : nowLocalISO().slice(0, 16),
       });
       setPurchaseItems((details.items || []).map((i) => ({
         product_id: i.product_id,
@@ -1914,15 +1979,13 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     { total: 0, paid: 0, debt: 0 }
   );
 
-    // Mở popup xem / sửa phiếu từ trong popup nhà cung cấp -> đóng popup nhà cung cấp, đóng popup con là ra thẳng màn hình chính
+    const anyChildOpen = !!(showViewPurchaseModal || showCreatePurchaseModal || showPrModal || prDetail || showCashModal || selectedCashItem);
   useEffect(() => {
-    if (showViewPurchaseModal || showCreatePurchaseModal || showPrModal || prDetail || showCashModal || selectedCashItem) {
-      setShowSupplierModal(false);
-    }
-  }, [showViewPurchaseModal, showCreatePurchaseModal, showPrModal, prDetail, showCashModal, selectedCashItem]);
+    if (anyChildOpen) setShowSupplierModal(false);
+  }, [anyChildOpen]);
 
     // Tìm NCC / KH liên quan tới 1 phiếu thu chi (dựa vào ô chứng từ liên quan)
-  const getCashPartner = (item) => {
+    const getCashPartner = (item) => {
     const ref = String(item.reference_code || '').trim();
     if (!ref) return null;
     const asSup = (s) => (s ? { code: s.code, name: s.name, kind: 'ncc' } : null);
@@ -2088,6 +2151,93 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
   };
 
   useEffect(() => { if (!showOrderModal) setDepositFromOrder(0); }, [showOrderModal]);
+
+    // ----- Phiếu bảo hành -----
+  useEffect(() => {
+    try { localStorage.setItem('warranties', JSON.stringify(warranties)); } catch (e) { /* bỏ qua */ }
+  }, [warranties]);
+
+  const openWarrantyModal = (draft) => {
+    setEditingWarrantyId(null);
+    setWarrantyForm({
+      code: newWarrantyCode(warranties),
+      invoice_code: '', customer_name: '', customer_phone: '', address: '',
+      purchase_date: todayLocal(), duration: 12, unit: 'month', note: '', items: [],
+      ...(draft || {}),
+    });
+    setShowWarrantyModal(true);
+  };
+
+  // Chọn phiếu bán -> tự nạp khách hàng, ngày mua và sản phẩm
+  const handleSelectWarrantyInvoice = async (code) => {
+    const inv = (invoicesList || []).find((i) => i.code === code);
+    if (!inv) { setWarrantyForm((f) => ({ ...f, invoice_code: code })); return; }
+    try {
+      const d = await api(`/api/invoices/${inv.id}`);
+      setWarrantyForm((f) => ({
+        ...f,
+        invoice_code: inv.code,
+        customer_name: d.customer_name || '',
+        customer_phone: d.customer_phone || '',
+        address: d.address || '',
+        purchase_date: d.created_at ? String(d.created_at).slice(0, 10) : f.purchase_date,
+        items: (d.items || []).map((it) => ({
+          product_id: it.product_id, sku: it.sku || '', name: it.product_name || it.name || '',
+          quantity: Number(it.quantity) || 1, detail: it.chassis_color || '',
+        })),
+      }));
+    } catch (e) {
+      alert('Lỗi tải phiếu bán: ' + e.message);
+    }
+  };
+
+  const saveWarranty = () => {
+    const f = warrantyForm;
+    if (!f) return;
+    if (!String(f.code || '').trim()) return alert('Vui lòng nhập mã phiếu bảo hành!');
+    if (warranties.some((w) => w.code === f.code.trim() && w.id !== editingWarrantyId)) return alert('Mã phiếu bảo hành này đã tồn tại!');
+    if (!String(f.customer_name || '').trim()) return alert('Vui lòng nhập tên khách hàng!');
+    if (!f.items || f.items.length === 0) return alert('Phiếu bảo hành cần ít nhất 1 sản phẩm!');
+    if (!(Number(f.duration) > 0)) return alert('Vui lòng nhập thời gian bảo hành!');
+    const rec = {
+      ...f,
+      code: f.code.trim(),
+      duration: Number(f.duration),
+      expiry_date: addWarrantyDuration(f.purchase_date, f.duration, f.unit),
+    };
+    if (editingWarrantyId) {
+      setWarranties((list) => list.map((w) => (w.id === editingWarrantyId ? { ...w, ...rec } : w)));
+      setMsg({ type: 'ok', text: `Đã cập nhật phiếu bảo hành ${rec.code}` });
+    } else {
+      setWarranties((list) => [{ ...rec, id: 'w' + Date.now(), created_at: nowLocalISO() }, ...list]);
+      setMsg({ type: 'ok', text: `Đã tạo phiếu bảo hành ${rec.code}` });
+    }
+    setShowWarrantyModal(false);
+    setEditingWarrantyId(null);
+  };
+
+  const editWarranty = (w) => {
+    setEditingWarrantyId(w.id);
+    setWarrantyForm({ ...w, items: (w.items || []).map((x) => ({ ...x })) });
+    setShowWarrantyModal(true);
+  };
+
+  const deleteWarranty = (w) => {
+    if (!confirm(`Xóa phiếu bảo hành ${w.code}?`)) return;
+    setWarranties((list) => list.filter((x) => x.id !== w.id));
+    setMsg({ type: 'ok', text: `Đã xóa phiếu bảo hành ${w.code}` });
+  };
+
+  const wKeyword = removeAccents(warrantySearch.trim());
+  const visibleWarranties = sortDesc(warranties).filter((w) => {
+    if (warrantyFilter !== 'all' && warrantyStatus(w.expiry_date).key !== warrantyFilter) return false;
+    if (!wKeyword) return true;
+    const hay = removeAccents([
+      w.code, w.invoice_code, w.customer_name, w.customer_phone, w.address,
+      ...(w.items || []).map((i) => `${i.name} ${i.sku} ${i.detail || ''}`),
+    ].join(' '));
+    return hay.includes(wKeyword);
+  });
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -2163,6 +2313,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
           <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>🚚 Nhà cung cấp</button></li>
           <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>📥 Nhập hàng</button></li>
           <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>👥 Khách hàng</button></li>
+          <li><button onClick={() => setCurrentView('warranties')} style={navBtnStyle(currentView === 'warranties')}>🛡️ Phiếu bảo hành</button></li>
           <li>
             <button
               onClick={() => setCurrentView('cash-book')}
@@ -2283,6 +2434,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                         <td style={{ padding: '10px', color: inv.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(inv.debt)}</td>
                         <td style={{ padding: '10px' }}>{inv.payment_method || 'Tiền mặt'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <button onClick={() => { openWarrantyModal({ invoice_code: inv.code }); handleSelectWarrantyInvoice(inv.code); }} title="Tạo phiếu bảo hành" style={{ background: '#dcfce7', color: '#16a34a', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🛡️</button>
                           <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
                           <button onClick={() => handleEditInvoice(inv)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
@@ -3836,8 +3988,8 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   value={reportType}
                   onChange={(e) => {
                     setReportType(e.target.value);
-                    if (e.target.value === 'day') setReportValue(new Date().toISOString().slice(0, 10));
-                    else if (e.target.value === 'month') setReportValue(new Date().toISOString().slice(0, 7));
+                    if (e.target.value === 'day') setReportValue(nowLocalISO().slice(0, 10));
+                    else if (e.target.value === 'month') setReportValue(nowLocalISO().slice(0, 7));
                     else if (e.target.value === 'year') setReportValue(String(new Date().getFullYear()));
                     else if (e.target.value === 'quarter') setReportValue(`${new Date().getFullYear()}-Q1`);
                   }}
@@ -4253,6 +4405,233 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               </FillHeight>
             </div>
         )}
+
+                {/* MÀN HÌNH PHIẾU BẢO HÀNH */}
+        {currentView === 'warranties' && (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0 }}>Phiếu bảo hành ({visibleWarranties.length}{(wKeyword || warrantyFilter !== 'all') ? `/${warranties.length}` : ''})</h2>
+              <button onClick={() => openWarrantyModal()} style={{ padding: '10px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Tạo phiếu bảo hành</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                <input
+                  placeholder="🔍 Tìm theo mã BH, mã phiếu bán, khách, SĐT, sản phẩm, số khung..."
+                  value={warrantySearch}
+                  onChange={(e) => setWarrantySearch(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, paddingRight: warrantySearch ? '36px' : '10px' }}
+                />
+                {warrantySearch && (
+                  <button type="button" onClick={() => setWarrantySearch('')} title="Xóa tìm kiếm" style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+                )}
+              </div>
+              <select value={warrantyFilter} onChange={(e) => setWarrantyFilter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                <option value="all">Tất cả tình trạng</option>
+                <option value="valid">Còn hạn</option>
+                <option value="soon">Sắp hết hạn (≤ 30 ngày)</option>
+                <option value="expired">Hết hạn</option>
+              </select>
+            </div>
+
+            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left' }}>
+                    {['Mã BH', 'Mã phiếu bán', 'Khách hàng', 'Sản phẩm', 'Ngày mua', 'Thời hạn', 'Ngày hết hạn', 'Tình trạng'].map((h) => (
+                      <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                    <th style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'center' }}>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleWarranties.length === 0 ? (
+                    <tr><td colSpan="9" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{warranties.length === 0 ? 'Chưa có phiếu bảo hành nào.' : 'Không tìm thấy phiếu bảo hành phù hợp.'}</td></tr>
+                  ) : visibleWarranties.map((w) => {
+                    const st = warrantyStatus(w.expiry_date);
+                    return (
+                      <tr key={w.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td onClick={() => setWarrantyDetail(w)} style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed', cursor: 'pointer', whiteSpace: 'nowrap' }}>{w.code}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#0284c7' }}>{w.invoice_code || '-'}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <b>{w.customer_name}</b>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>{w.customer_phone || ''}</div>
+                        </td>
+                        <td style={{ padding: '10px 12px', maxWidth: '260px' }}>
+                          {(w.items || []).map((it, i) => <div key={i}>{it.name} <span style={{ color: '#64748b' }}>x{it.quantity}</span></div>)}
+                        </td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{fmtDMY(w.purchase_date)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{w.duration} {UNIT_LABEL[w.unit] || ''}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontWeight: 'bold' }}>{fmtDMY(w.expiry_date)}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                          <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: st.bg, color: st.color }}>{st.text}</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <button onClick={() => setWarrantyDetail(w)} title="Xem" style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+                          <button onClick={() => editWarranty(w)} title="Sửa" style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+                          <button onClick={() => deleteWarranty(w)} title="Xóa" style={smallBtn('#fee2e2', '#dc2626')}>🗑️</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </FillHeight>
+          </div>
+        )}
+
+        {/* POPUP TẠO / SỬA PHIẾU BẢO HÀNH */}
+        {showWarrantyModal && warrantyForm && (
+          <div style={overlayStyle}>
+            <div style={{ background: '#fff', width: '900px', maxHeight: '92vh', borderRadius: '12px', padding: '24px', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, color: '#16a34a' }}>{editingWarrantyId ? '✏️ Sửa phiếu bảo hành' : '🛡️ Tạo phiếu bảo hành'}</h3>
+                <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                <div>
+                  <label style={labelStyle}>Mã phiếu bảo hành:</label>
+                  <input value={warrantyForm.code} onChange={(e) => setWarrantyForm({ ...warrantyForm, code: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Mã phiếu bán hàng liên quan:</label>
+                  <select value={warrantyForm.invoice_code} onChange={(e) => handleSelectWarrantyInvoice(e.target.value)} style={{ ...inputStyle, margin: 0, background: '#fff' }}>
+                    <option value="">-- Chọn phiếu bán hàng --</option>
+                    {warrantyForm.invoice_code && !(invoicesList || []).some((i) => i.code === warrantyForm.invoice_code) && (
+                      <option value={warrantyForm.invoice_code}>{warrantyForm.invoice_code}</option>
+                    )}
+                    {(invoicesList || []).map((i) => (
+                      <option key={i.id} value={i.code}>{i.code} - {i.customer_name || 'Khách lẻ'} ({vnd(i.total)})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Tên khách hàng *:</label>
+                  <input value={warrantyForm.customer_name} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_name: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Số điện thoại:</label>
+                  <input value={warrantyForm.customer_phone} onChange={(e) => setWarrantyForm({ ...warrantyForm, customer_phone: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={labelStyle}>Địa chỉ:</label>
+                  <input value={warrantyForm.address} onChange={(e) => setWarrantyForm({ ...warrantyForm, address: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px' }}>
+                <div>
+                  <label style={labelStyle}>Ngày mua hàng:</label>
+                  <input type="date" value={warrantyForm.purchase_date} onChange={(e) => setWarrantyForm({ ...warrantyForm, purchase_date: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Thời gian bảo hành:</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input type="number" min="1" value={warrantyForm.duration} onChange={(e) => setWarrantyForm({ ...warrantyForm, duration: e.target.value })} style={{ ...inputStyle, margin: 0, flex: 1 }} />
+                    <select value={warrantyForm.unit} onChange={(e) => setWarrantyForm({ ...warrantyForm, unit: e.target.value })} style={{ ...inputStyle, margin: 0, width: '90px', background: '#fff' }}>
+                      <option value="month">Tháng</option>
+                      <option value="year">Năm</option>
+                      <option value="day">Ngày</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ngày hết hạn bảo hành:</label>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#16a34a', marginTop: '10px' }}>
+                    {fmtDMY(addWarrantyDuration(warrantyForm.purchase_date, warrantyForm.duration, warrantyForm.unit))}
+                  </div>
+                </div>
+              </div>
+
+              <h4 style={{ margin: '0 0 8px 0' }}>Sản phẩm được bảo hành <span style={{ fontWeight: 'normal', fontSize: '12px', color: '#64748b' }}>(bấm ✕ để bỏ sản phẩm không bảo hành)</span></h4>
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'auto', marginBottom: '15px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                      <th style={{ padding: '8px 12px' }}>Mã SP</th>
+                      <th style={{ padding: '8px 12px' }}>Tên sản phẩm</th>
+                      <th style={{ padding: '8px 12px', width: '80px' }}>SL</th>
+                      <th style={{ padding: '8px 12px' }}>Số khung / số sườn / ghi chú</th>
+                      <th style={{ padding: '8px 12px', width: '50px', textAlign: 'center' }}>Bỏ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warrantyForm.items.length === 0 ? (
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có sản phẩm. Hãy chọn phiếu bán hàng ở trên.</td></tr>
+                    ) : warrantyForm.items.map((it, idx) => (
+                      <tr key={idx} style={{ borderTop: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px' }}>{it.sku}</td>
+                        <td style={{ padding: '8px 12px', fontWeight: '500' }}>{it.name}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" min="1" value={it.quantity} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, quantity: Math.max(1, Number(e.target.value) || 1) } : x)) })} style={{ width: '60px', padding: '6px', textAlign: 'center' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input value={it.detail || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.map((x, i) => (i === idx ? { ...x, detail: e.target.value } : x)) })} style={{ ...inputStyle, margin: 0, padding: '6px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                          <button onClick={() => setWarrantyForm({ ...warrantyForm, items: warrantyForm.items.filter((_, i) => i !== idx) })} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <label style={labelStyle}>Ghi chú / điều kiện bảo hành:</label>
+                <textarea rows="2" value={warrantyForm.note || ''} onChange={(e) => setWarrantyForm({ ...warrantyForm, note: e.target.value })} style={{ ...inputStyle, margin: 0 }} />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button onClick={() => { setShowWarrantyModal(false); setEditingWarrantyId(null); }} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
+                <button onClick={saveWarranty} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>{editingWarrantyId ? 'Cập nhật phiếu' : 'Lưu phiếu bảo hành'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP XEM CHI TIẾT PHIẾU BẢO HÀNH */}
+        {warrantyDetail && (() => {
+          const w = warrantyDetail;
+          const st = warrantyStatus(w.expiry_date);
+          return (
+            <div style={overlayStyle}>
+              <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto', boxSizing: 'border-box' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h3 style={{ margin: 0, color: '#16a34a' }}>Phiếu bảo hành: {w.code}</h3>
+                  <button onClick={() => setWarrantyDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px', lineHeight: 1.8 }}>
+                  <div><b>Phiếu bán hàng:</b> {w.invoice_code || '---'}</div>
+                  <div><b>Khách hàng:</b> {w.customer_name} ({w.customer_phone || 'Chưa có SĐT'})</div>
+                  <div><b>Địa chỉ:</b> {w.address || '---'}</div>
+                  <div><b>Ngày mua:</b> {fmtDMY(w.purchase_date)} &nbsp;|&nbsp; <b>Thời hạn:</b> {w.duration} {UNIT_LABEL[w.unit] || ''}</div>
+                  <div><b>Ngày hết hạn:</b> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmtDMY(w.expiry_date)}</span> &nbsp;
+                    <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: st.bg, color: st.color }}>{st.text}</span>
+                  </div>
+                  {w.note ? <div><b>Ghi chú:</b> {w.note}</div> : null}
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr style={{ background: '#f1f5f9', textAlign: 'left' }}><th style={{ padding: '8px' }}>Sản phẩm</th><th style={{ padding: '8px' }}>SL</th><th style={{ padding: '8px' }}>Số khung / số sườn / ghi chú</th></tr></thead>
+                  <tbody>
+                    {(w.items || []).map((it, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '8px' }}>{it.sku ? `${it.sku} - ` : ''}{it.name}</td>
+                        <td style={{ padding: '8px' }}>{it.quantity}</td>
+                        <td style={{ padding: '8px', color: '#7c3aed', fontStyle: 'italic' }}>{it.detail || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px' }}>
+                  <button onClick={() => { setWarrantyDetail(null); editWarranty(w); }} style={{ padding: '8px 16px', background: '#fef3c7', color: '#d97706', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>✏️ Sửa</button>
+                  <button onClick={() => setWarrantyDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         
         {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
         {showViewPurchaseModal && selectedPurchaseOrder && (
@@ -4441,7 +4820,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                     <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Ngày nhập hàng:</label>
                     <input
                       type="datetime-local"
-                      value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : new Date().toISOString().slice(0, 16)}
+                      value={purchaseForm.created_at ? purchaseForm.created_at.slice(0, 16) : nowLocalISO().slice(0, 16)}
                       onChange={(e) => setPurchaseForm({ ...purchaseForm, created_at: e.target.value })}
                       style={{ ...inputStyle, width: '100%' }}
                     />
@@ -5176,7 +5555,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         )}
 
         {/* MODAL NHÀ CUNG CẤP */}
-        {showSupplierModal && (
+        {showSupplierModal && !anyChildOpen && (
           <div style={overlayStyle}>
             <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div style={{ padding: '20px', background: '#1e293b', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
