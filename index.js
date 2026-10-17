@@ -1468,31 +1468,57 @@ export default {
 
       // PUT: trước đây Worker KHÔNG có route này nên nút "Sửa phiếu nhập" không lưu được gì
       if (is(/^\/api\/purchase_orders\/\d+$/, 'PUT')) {
-        const id = idOf(pathname);
-        const existing = await db.prepare('SELECT id FROM purchase_orders WHERE id = ?').bind(id).first();
-        if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
+  const id = idOf(pathname);
+  // Lấy thêm mã phiếu (code) để tìm đúng phiếu chi trong Sổ quỹ
+  const existing = await db.prepare('SELECT id, code FROM purchase_orders WHERE id = ?').bind(id).first();
+  if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
 
-        const reqData = await request.json();
-        const po = await buildPurchase(db, reqData);
-        const customDate = reqData.created_at || new Date().toISOString();
+  const reqData = await request.json();
+  const po = await buildPurchase(db, reqData);
+  const customDate = reqData.created_at || new Date().toISOString();
 
-        const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
-        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
+  const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
+  const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
 
-        await runBatch(db, [
-          ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
-          db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
-          // Cập nhật thêm created_at vào câu lệnh UPDATE
-          db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-            .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
-          ...po.lines.map((l) =>
-            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
-              .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
-          ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
-          stockGuard(db, ids),
-        ], 'Không thể sửa phiếu...');
-        return json({ success: true }, 200, origin);
-      }
+  const stmts = [
+    ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
+    db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+    db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+      .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
+    ...po.lines.map((l) =>
+      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
+        .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
+    ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+
+    // Đồng bộ Sổ quỹ: xóa phiếu chi cũ của phiếu nhập này (chỉ phiếu chi thanh toán tiền hàng)
+    db.prepare("DELETE FROM cash_books WHERE reference_code = ? AND type = 'OUT' AND category = 'Mua hàng / Trả nợ NCC'")
+      .bind(existing.code),
+  ];
+
+  // Tạo lại phiếu chi theo ngày và số tiền mới (nếu có thanh toán)
+  if (Number(po.paid_amount) > 0) {
+    const sup = await db.prepare('SELECT name FROM suppliers WHERE id = ?').bind(po.supplier_id).first();
+    const supName = sup ? sup.name : 'Nhà cung cấp';
+    stmts.push(
+      db.prepare(`
+        INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+        VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
+      `).bind(
+        genCode('TC'),
+        po.paid_amount,
+        po.payment_method || 'Chuyển khoản',
+        existing.code,
+        `Thanh toán tiền mua hàng cho ${supName} theo phiếu ${existing.code} (Đã cập nhật)`,
+        customDate
+      )
+    );
+  }
+
+  stmts.push(stockGuard(db, ids));
+
+  await runBatch(db, stmts, 'Không thể sửa phiếu: một số hàng đã bán nên tồn kho không đủ để hoàn lại');
+  return json({ success: true, code: existing.code }, 200, origin);
+}
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
