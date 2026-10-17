@@ -340,6 +340,14 @@ function AppMain() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
   const [activeChassisProduct, setActiveChassisProduct] = useState(null);
+  // Tìm kiếm + lọc thời gian cho màn hình Tạo đơn hàng
+  const [posSearch, setPosSearch] = useState('');
+  const [posPeriod, setPosPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
+  const [posMonth, setPosMonth] = useState(() => todayLocal().slice(0, 7));
+  const [posYear, setPosYear] = useState(() => todayLocal().slice(0, 4));
+  const [posQuarter, setPosQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  const [posFrom, setPosFrom] = useState('');
+  const [posTo, setPosTo] = useState('');
 
   const [returnOrdersData, setReturnOrdersData] = useState(EMPTY_RETURN_DATA);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -2298,6 +2306,51 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     (c.phone && c.phone.includes(customerSearch)) ||
     (c.code || '').toLowerCase().includes(customerSearch.toLowerCase())
   );
+
+  // ----- Màn hình Tạo đơn hàng: lọc theo thời gian + từ khóa, tính KPI -----
+const posRange = (() => {
+  const pad = (n) => String(n).padStart(2, '0');
+  if (posPeriod === 'month' && posMonth) {
+    const [y, m] = posMonth.split('-');
+    return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+  }
+  if (posPeriod === 'quarter' && posYear) {
+    const sm = (Number(posQuarter) - 1) * 3 + 1;
+    const em = sm + 2;
+    return [`${posYear}-${pad(sm)}-01`, `${posYear}-${pad(em)}-${pad(new Date(Number(posYear), em, 0).getDate())}`];
+  }
+  if (posPeriod === 'year' && posYear) return [`${posYear}-01-01`, `${posYear}-12-31`];
+  if (posPeriod === 'custom') return [posFrom || '0000-00-00', posTo || '9999-12-31'];
+  return null;
+})();
+
+const posKeyword = removeAccents(posSearch.trim());
+const posPhoneKeyword = posSearch.trim().replace(/[\s.]/g, '');
+
+// Dùng chung cho cả phiếu bán hàng và đơn đặt hàng: khớp tên KH, mã KH, SĐT, mã phiếu/đơn
+const matchPosDoc = (doc) => {
+  if (posRange) {
+    const d = String(doc.created_at || '').slice(0, 10);
+    if (d < posRange[0] || d > posRange[1]) return false;
+  }
+  if (!posKeyword) return true;
+  const cus = (customers || []).find((c) => c.name === doc.customer_name);
+  return (
+    removeAccents(doc.code).includes(posKeyword) ||
+    removeAccents(doc.customer_name).includes(posKeyword) ||
+    removeAccents(cus && cus.code).includes(posKeyword) ||
+    (posPhoneKeyword && String(doc.customer_phone || (cus && cus.phone) || '').replace(/[\s.]/g, '').includes(posPhoneKeyword))
+  );
+};
+
+const visibleInvoices = (invoicesList || []).filter(matchPosDoc);
+const visibleOrders = (ordersList || []).filter(matchPosDoc);
+const posFiltering = !!(posRange || posKeyword);
+const posSums = {
+  invoiceTotal: visibleInvoices.reduce((s, i) => s + (Number(i.total) || 0), 0),
+  orderTotal: visibleOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
+};
+  
   // Chuyển màn hình từ menu trái (gộp các lệnh tải dữ liệu riêng của từng mục)
 const goView = (view) => {
   setCurrentView(view);
@@ -2373,9 +2426,90 @@ const goView = (view) => {
               </div>
             </div>
 
+            {/* Tìm kiếm + lọc thời gian + KPI */}
+<div style={{ flexShrink: 0 }}>
+  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '12px' }}>
+    <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+      <input
+        placeholder="🔍 Tìm theo tên KH, mã KH, SĐT hoặc mã phiếu..."
+        value={posSearch}
+        onChange={(e) => setPosSearch(e.target.value)}
+        style={{ ...inputStyle, margin: 0, paddingRight: posSearch ? '36px' : '10px' }}
+      />
+      {posSearch && (
+        <button
+          type="button"
+          onClick={() => setPosSearch('')}
+          title="Xóa tìm kiếm"
+          style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+        >✕</button>
+      )}
+    </div>
+
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+      <select value={posPeriod} onChange={(e) => setPosPeriod(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+        <option value="all">Tất cả thời gian</option>
+        <option value="month">Theo tháng</option>
+        <option value="quarter">Theo quý</option>
+        <option value="year">Theo năm</option>
+        <option value="custom">Khoảng ngày</option>
+      </select>
+
+      {posPeriod === 'month' && (
+        <input type="month" value={posMonth} onChange={(e) => setPosMonth(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+      )}
+      {posPeriod === 'quarter' && (
+        <>
+          <select value={posQuarter} onChange={(e) => setPosQuarter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+            <option value="1">Quý 1</option>
+            <option value="2">Quý 2</option>
+            <option value="3">Quý 3</option>
+            <option value="4">Quý 4</option>
+          </select>
+          <input type="number" value={posYear} onChange={(e) => setPosYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+        </>
+      )}
+      {posPeriod === 'year' && (
+        <input type="number" value={posYear} onChange={(e) => setPosYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+      )}
+      {posPeriod === 'custom' && (
+        <>
+          <input type="date" value={posFrom} onChange={(e) => setPosFrom(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+          <span>đến</span>
+          <input type="date" value={posTo} onChange={(e) => setPosTo(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+        </>
+      )}
+      {posPeriod !== 'all' && (
+        <button type="button" onClick={() => setPosPeriod('all')} style={{ padding: '7px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xóa lọc</button>
+      )}
+    </div>
+  </div>
+
+  {/* 4 ô KPI */}
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }}>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ BÁN</div>
+      <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(posSums.invoiceTotal)}</div>
+    </div>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ ĐẶT HÀNG</div>
+      <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(posSums.orderTotal)}</div>
+    </div>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #0284c7' }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG PHIẾU BÁN</div>
+      <div style={{ fontSize: '18px', fontWeight: '900', color: '#0284c7', marginTop: '4px' }}>{visibleInvoices.length}</div>
+    </div>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #d97706' }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐƠN ĐẶT HÀNG</div>
+      <div style={{ fontSize: '18px', fontWeight: '900', color: '#d97706', marginTop: '4px' }}>{visibleOrders.length}</div>
+    </div>
+  </div>
+</div>
+
             {/* Bảng Danh sách Phiếu Bán Hàng */}
            <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({invoicesList.length})</h3>
+              <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({visibleInvoices.length}{posFiltering ? `/${invoicesList.length}` : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -2390,10 +2524,10 @@ const goView = (view) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoicesList.length === 0 ? (
-                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có phiếu bán hàng nào.</td></tr>
+                  {visibleInvoices.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>{posFiltering ? 'Không tìm thấy phiếu bán hàng phù hợp.' : 'Chưa có phiếu bán hàng nào.'}</td></tr>
                   ) : (
-                    invoicesList.map((inv) => (
+                    visibleInvoices.map((inv) => (
                       <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
                         <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
@@ -2433,7 +2567,7 @@ const goView = (view) => {
 
             {/* Bảng Danh sách Đơn Đặt Hàng */}
             <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({ordersList.length})</h3>
+              <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? /${ordersList.length} : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -2448,10 +2582,10 @@ const goView = (view) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {ordersList.length === 0 ? (
-                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>Chưa có đơn đặt hàng nào.</td></tr>
+                  {visibleOrders.length === 0 ? (
+                    <tr><td colSpan="8" style={{ textAlign: 'center', padding: '15px', color: '#94a3b8' }}>{posFiltering ? 'Không tìm thấy đơn đặt hàng phù hợp.' : 'Chưa có đơn đặt hàng nào.'}</td></tr>
                   ) : (
-                    ordersList.map(ord => (
+                    visibleOrders.map(ord => (
                       <tr key={ord.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px', fontWeight: 'bold', color: '#7c3aed' }}>{ord.code}</td>
                         <td style={{ padding: '10px' }}>{ord.created_at ? new Date(ord.created_at).toLocaleDateString('vi-VN') : '---'}</td>
