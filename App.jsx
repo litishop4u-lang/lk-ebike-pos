@@ -49,6 +49,21 @@ const buildItemDetails = (cartObj, id) => [
 const removeAccents = (s) =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
 
+// Sắp xếp danh sách theo thời gian mới nhất lên đầu; cùng thời điểm thì phiếu tạo sau (id lớn hơn) đứng trước
+const sortDesc = (list, key = 'created_at') => {
+  const ts = (x) => {
+    const t = new Date(x?.[key] || x?.created_at || 0).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  return [...(list || [])].sort((a, b) => {
+    const d = ts(b) - ts(a);
+    if (d !== 0) return d;
+    const ia = Number(a?.id), ib = Number(b?.id);
+    if (!Number.isNaN(ia) && !Number.isNaN(ib)) return ib - ia;
+    return String(b?.id ?? '').localeCompare(String(a?.id ?? ''));
+  });
+};
+
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -281,7 +296,7 @@ function AppMain() {
       if (res && res.success) {
         const d = res.data || {};
         setReturnOrdersData({
-          list: Array.isArray(d.list) ? d.list : [],
+          list: sortDesc(Array.isArray(d.list) ? d.list : [], 'return_date'),,
           stats: { ...EMPTY_RETURN_DATA.stats, ...(d.stats || {}) },
         });
       }
@@ -474,7 +489,7 @@ function AppMain() {
       if (res && res.success) {
         const d = res.data || {};
         setPrData({
-          list: Array.isArray(d.list) ? d.list : [],
+          list: sortDesc(Array.isArray(d.list) ? d.list : [], 'return_date'),
           stats: { total: 0, totalAmount: 0, completed: 0, ...(d.stats || {}) },
         });
       }
@@ -736,7 +751,7 @@ function AppMain() {
     try {
       const res = await api('/api/cash-book');
       if (res && res.success) {
-        setCashItems(res.items || []);
+        setCashItems(sortDesc(res.items || []));
         setCashSummary(res.summary || { totalIn: 0, totalOut: 0, netProfit: 0, balance: 0 });
       }
     } catch (e) {
@@ -876,10 +891,10 @@ function AppMain() {
   const loadData = () => {
     api('/api/products').then((d) => setProducts(asArray(d))).catch((e) => setMsg({ type: 'err', text: e.message }));
     api('/api/suppliers').then((d) => setSuppliers(asArray(d))).catch(() => {});
-    api('/api/purchase_orders').then((d) => setPurchaseOrders(asArray(d))).catch(() => {});
+    api('/api/purchase_orders').then((d) => setPurchaseOrders(sortDesc(asArray(d)))).catch(() => {});
     api('/api/customers').then((d) => setCustomers(asArray(d))).catch(() => {});
-    api('/api/invoices').then((d) => setInvoicesList(asArray(d))).catch(() => {});
-    api('/api/orders').then((d) => setOrdersList(asArray(d))).catch(() => {});
+    api('/api/invoices').then((d) => setInvoicesList(sortDesc(asArray(d)))).catch(() => {});
+    api('/api/orders').then((d) => setOrdersList(sortDesc(asArray(d)))).catch(() => {});
   };
 
   useEffect(() => { loadData(); }, []);
@@ -1391,7 +1406,7 @@ function AppMain() {
     setSupplierPrList([]);
     try {
       const hist = await api(`/api/suppliers/${s.id}/history`);
-      setSupplierHistory(hist);
+      setSupplierHistory({ ...hist, purchases: sortDesc(hist.purchases || []) });
     } catch (e) {
       setSupplierHistory({ purchases: [], payments: [], returns: [] });
     }
