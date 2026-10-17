@@ -752,6 +752,13 @@ function AppMain() {
   const [supQuarter, setSupQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
   const [supFrom, setSupFrom] = useState('');
   const [supTo, setSupTo] = useState('');
+  const [purSearch, setPurSearch] = useState('');
+  const [purPeriod, setPurPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
+  const [purMonth, setPurMonth] = useState(() => todayLocal().slice(0, 7));
+  const [purYear, setPurYear] = useState(() => todayLocal().slice(0, 4));
+  const [purQuarter, setPurQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  const [purFrom, setPurFrom] = useState('');
+  const [purTo, setPurTo] = useState('');
 
   const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
@@ -2238,6 +2245,47 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     ].join(' '));
     return hay.includes(wKeyword);
   });
+
+    // ----- Màn hình Nhập hàng: tìm kiếm + lọc thời gian + KPI -----
+  const purRange = (() => {
+    const pad = (n) => String(n).padStart(2, '0');
+    if (purPeriod === 'month' && purMonth) {
+      const [y, m] = purMonth.split('-');
+      return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+    }
+    if (purPeriod === 'quarter' && purYear) {
+      const sm = (Number(purQuarter) - 1) * 3 + 1;
+      const em = sm + 2;
+      return [`${purYear}-${pad(sm)}-01`, `${purYear}-${pad(em)}-${pad(new Date(Number(purYear), em, 0).getDate())}`];
+    }
+    if (purPeriod === 'year' && purYear) return [`${purYear}-01-01`, `${purYear}-12-31`];
+    if (purPeriod === 'custom') return [purFrom || '0000-00-00', purTo || '9999-12-31'];
+    return null;
+  })();
+
+  const purKeyword = removeAccents(purSearch.trim());
+  const purPhoneKeyword = purSearch.trim().replace(/[\s.]/g, '');
+  const visiblePurchases = (purchaseOrders || []).filter((po) => {
+    if (purRange) {
+      const d = String(po.created_at || '').slice(0, 10);
+      if (d < purRange[0] || d > purRange[1]) return false;
+    }
+    if (!purKeyword) return true;
+    const sup = (suppliers || []).find((s) => String(s.id) === String(po.supplier_id));
+    return (
+      removeAccents(po.supplier_name || (sup && sup.name)).includes(purKeyword) ||
+      removeAccents(sup && sup.code).includes(purKeyword) ||
+      removeAccents(po.code).includes(purKeyword) ||
+      (purPhoneKeyword && String((sup && sup.phone) || '').replace(/[\s.]/g, '').includes(purPhoneKeyword))
+    );
+  });
+  const purFiltering = !!(purRange || purKeyword);
+  const purSums = visiblePurchases.reduce((a, po) => {
+    const total = Number(po.total) || 0;
+    const paid = Number(po.paid_amount) || 0;
+    const debt = po.debt !== undefined && po.debt !== null ? Number(po.debt) : total - paid;
+    return { total: a.total + total, paid: a.paid + paid, debt: a.debt + debt };
+  }, { total: 0, paid: 0, debt: 0 });
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -3856,14 +3904,89 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         {/* 4. MÀN HÌNH QUẢN LÝ NHẬP HÀNG */}
         {currentView === 'purchases' && (
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Nhập Hàng</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0 }}>Quản lý Nhập Hàng ({visiblePurchases.length}{purFiltering ? `/${purchaseOrders.length}` : ''})</h2>
               <button
                 onClick={openCreatePurchase}
                 style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 + Tạo Phiếu Nhập
               </button>
+            </div>
+
+            {/* Ô tìm kiếm + bộ lọc thời gian */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                <input
+                  placeholder="🔍 Tìm theo tên NCC, mã NCC, mã phiếu nhập..."
+                  value={purSearch}
+                  onChange={(e) => setPurSearch(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, paddingRight: purSearch ? '36px' : '10px' }}
+                />
+                {purSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPurSearch('')}
+                    title="Xóa tìm kiếm"
+                    style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                  >✕</button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+                <select value={purPeriod} onChange={(e) => setPurPeriod(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="all">Tất cả thời gian</option>
+                  <option value="month">Theo tháng</option>
+                  <option value="quarter">Theo quý</option>
+                  <option value="year">Theo năm</option>
+                  <option value="custom">Khoảng ngày</option>
+                </select>
+
+                {purPeriod === 'month' && (
+                  <input type="month" value={purMonth} onChange={(e) => setPurMonth(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {purPeriod === 'quarter' && (
+                  <>
+                    <select value={purQuarter} onChange={(e) => setPurQuarter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                      <option value="1">Quý 1</option>
+                      <option value="2">Quý 2</option>
+                      <option value="3">Quý 3</option>
+                      <option value="4">Quý 4</option>
+                    </select>
+                    <input type="number" value={purYear} onChange={(e) => setPurYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {purPeriod === 'year' && (
+                  <input type="number" value={purYear} onChange={(e) => setPurYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {purPeriod === 'custom' && (
+                  <>
+                    <input type="date" value={purFrom} onChange={(e) => setPurFrom(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                    <span>đến</span>
+                    <input type="date" value={purTo} onChange={(e) => setPurTo(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {purPeriod !== 'all' && (
+                  <button type="button" onClick={() => setPurPeriod('all')} style={{ padding: '7px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xóa lọc</button>
+                )}
+              </div>
+            </div>
+
+            {/* 3 ô tổng hợp theo bộ lọc */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(purSums.total)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(purSums.paid)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>CÒN NỢ</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626', marginTop: '4px' }}>{vnd(purSums.debt)}</div>
+              </div>
             </div>
 
             <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
@@ -3881,10 +4004,10 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 </tr>
               </thead>
               <tbody>
-                {purchaseOrders.length === 0 ? (
-                  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu nhập hàng nào.</td></tr>
+                {visiblePurchases.length === 0 ? (
+                  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>{purFiltering ? 'Không tìm thấy phiếu nhập nào phù hợp.' : 'Chưa có phiếu nhập hàng nào.'}</td></tr>
                 ) : (
-                  purchaseOrders.map((po) => {
+                  visiblePurchases.map((po) => {
                     const totalAmt = Number(po.total) || 0;
                     const paidAmt = Number(po.paid_amount) || 0;
                     const debtAmt = po.debt !== undefined && po.debt !== null ? Number(po.debt) : (totalAmt - paidAmt);
@@ -3935,7 +4058,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </FillHeight>
           </div>
         )}
-
+        
         {/* 📊 MÀN HÌNH BÁO CÁO XUẤT - NHẬP - TỒN KHO */}
         {currentView === 'inventory-report' && (
           <div style={{ padding: '10px' }}>
