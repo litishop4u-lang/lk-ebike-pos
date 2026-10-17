@@ -746,6 +746,13 @@ function AppMain() {
   const [cashForm, setCashForm] = useState(newCashForm);
   const [editingCashId, setEditingCashId] = useState(null);
   const [selectedCashItem, setSelectedCashItem] = useState(null);
+  const [cashSearch, setCashSearch] = useState('');
+  const [cashPeriod, setCashPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
+  const [cashMonth, setCashMonth] = useState(() => todayLocal().slice(0, 7));
+  const [cashYear, setCashYear] = useState(() => todayLocal().slice(0, 4));
+  const [cashQuarter, setCashQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  const [cashFrom, setCashFrom] = useState('');
+  const [cashTo, setCashTo] = useState('');
 
   const loadCashBook = async () => {
     try {
@@ -1914,6 +1921,48 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     if (ro) return asCus(cusByName(ro.customer_name));
     return null;
   };
+
+      // Khoảng ngày theo bộ lọc Thu chi (null = tất cả thời gian)
+  const cashRange = (() => {
+    const pad = (n) => String(n).padStart(2, '0');
+    if (cashPeriod === 'month' && cashMonth) {
+      const [y, m] = cashMonth.split('-');
+      return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+    }
+    if (cashPeriod === 'quarter' && cashYear) {
+      const sm = (Number(cashQuarter) - 1) * 3 + 1;
+      const em = sm + 2;
+      return [`${cashYear}-${pad(sm)}-01`, `${cashYear}-${pad(em)}-${pad(new Date(Number(cashYear), em, 0).getDate())}`];
+    }
+    if (cashPeriod === 'year' && cashYear) return [`${cashYear}-01-01`, `${cashYear}-12-31`];
+    if (cashPeriod === 'custom') return [cashFrom || '0000-00-00', cashTo || '9999-12-31'];
+    return null;
+  })();
+
+  // Lọc phiếu: theo thời gian + từ khóa (mã GD, mã/tên NCC-KH, chứng từ, danh mục, ghi chú)
+  const cashKeyword = removeAccents(cashSearch.trim());
+  const visibleCashItems = (cashItems || []).filter((item) => {
+    if (cashRange) {
+      const d = String(item.created_at || '').slice(0, 10);
+      if (d < cashRange[0] || d > cashRange[1]) return false;
+    }
+    if (!cashKeyword) return true;
+    const pt = getCashPartner(item);
+    const hay = removeAccents(
+      [item.code, item.reference_code, item.category, item.note, item.payment_method, pt ? pt.code : '', pt ? pt.name : ''].join(' ')
+    );
+    return hay.includes(cashKeyword);
+  });
+
+  // 4 ô KPI: không lọc thì dùng số của server; có lọc thì tính theo các phiếu đang hiện
+  const cashFiltering = !!(cashRange || cashKeyword);
+  const cashSums = cashFiltering
+    ? (() => {
+        const tin = visibleCashItems.filter((i) => i.type === 'IN').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+        const tout = visibleCashItems.filter((i) => i.type !== 'IN').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+        return { totalIn: tin, totalOut: tout, netProfit: tin - tout, balance: Number(cashSummary.balance) || 0 };
+      })()
+    : cashSummary;
 
     // Sắp xếp khách hàng theo mã A→Z (số trong mã so đúng thứ tự: KH2 trước KH10)
   const sortedCustomers = useMemo(
@@ -3209,8 +3258,8 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         {/* MÀN HÌNH QUẢN LÝ THU CHI */}
         {currentView === 'cash-book' && (
           <div style={{ padding: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi ({visibleCashItems.length}{cashFiltering ? `/${cashItems.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => { setEditingCashId(null); setCashForm(newCashForm()); setShowCashModal(true); }}
@@ -3224,150 +3273,192 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               </div>
             </div>
 
-            {/* Các thẻ tổng quan chuẩn mẫu */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
-              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #16a34a' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#16a34a', fontWeight: 'bold' }}>Tổng Thu</span>
-                  <span style={{ background: '#dcfce7', color: '#16a34a', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>+</span>
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#16a34a', marginTop: '10px' }}>{vnd(cashSummary.totalIn || 0)}</div>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Trong kỳ</span>
+            {/* Ô tìm kiếm + bộ lọc thời gian */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                <input
+                  placeholder="🔍 Tìm theo mã NCC / KH, mã phiếu, nội dung..."
+                  value={cashSearch}
+                  onChange={(e) => setCashSearch(e.target.value)}
+                  style={{ ...inputStyle, margin: 0, paddingRight: cashSearch ? '36px' : '10px' }}
+                />
+                {cashSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCashSearch('')}
+                    title="Xóa tìm kiếm"
+                    style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                  >✕</button>
+                )}
               </div>
 
-              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #dc2626' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>Tổng Chi</span>
-                  <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>-</span>
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#dc2626', marginTop: '10px' }}>{vnd(cashSummary.totalOut || 0)}</div>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Trong kỳ</span>
-              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+                <select value={cashPeriod} onChange={(e) => setCashPeriod(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="all">Tất cả thời gian</option>
+                  <option value="month">Theo tháng</option>
+                  <option value="quarter">Theo quý</option>
+                  <option value="year">Theo năm</option>
+                  <option value="custom">Khoảng ngày</option>
+                </select>
 
-              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #2563eb' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#2563eb', fontWeight: 'bold' }}>Lợi Nhuận Ròng</span>
-                  <span style={{ background: '#dbeafe', color: '#2563eb', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>↗</span>
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#2563eb', marginTop: '10px' }}>{vnd(cashSummary.netProfit || 0)}</div>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Thu - Chi</span>
-              </div>
-
-              <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderLeft: '4px solid #7c3aed' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#7c3aed', fontWeight: 'bold' }}>Số Dư</span>
-                  <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: '50%', fontWeight: 'bold' }}>$</span>
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#7c3aed', marginTop: '10px' }}>{vnd(cashSummary.balance || 0)}</div>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Tích lũy</span>
+                {cashPeriod === 'month' && (
+                  <input type="month" value={cashMonth} onChange={(e) => setCashMonth(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {cashPeriod === 'quarter' && (
+                  <>
+                    <select value={cashQuarter} onChange={(e) => setCashQuarter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                      <option value="1">Quý 1</option>
+                      <option value="2">Quý 2</option>
+                      <option value="3">Quý 3</option>
+                      <option value="4">Quý 4</option>
+                    </select>
+                    <input type="number" value={cashYear} onChange={(e) => setCashYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {cashPeriod === 'year' && (
+                  <input type="number" value={cashYear} onChange={(e) => setCashYear(e.target.value)} style={{ width: '80px', padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                )}
+                {cashPeriod === 'custom' && (
+                  <>
+                    <input type="date" value={cashFrom} onChange={(e) => setCashFrom(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                    <span>đến</span>
+                    <input type="date" value={cashTo} onChange={(e) => setCashTo(e.target.value)} style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+                  </>
+                )}
+                {cashPeriod !== 'all' && (
+                  <button type="button" onClick={() => setCashPeriod('all')} style={{ padding: '7px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xóa lọc</button>
+                )}
               </div>
             </div>
 
-            {/* Bảng Danh Sách Giao Dịch Thu Chi */}
+            {/* 4 ô KPI (cỡ chữ giống mục Nhà cung cấp) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG THU</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(cashSums.totalIn || 0)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG CHI</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626', marginTop: '4px' }}>{vnd(cashSums.totalOut || 0)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #2563eb' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>LỢI NHUẬN RÒNG (THU - CHI)</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#2563eb', marginTop: '4px' }}>{vnd(cashSums.netProfit || 0)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>SỐ DƯ (TÍCH LŨY)</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(cashSums.balance || 0)}</div>
+              </div>
+            </div>
+
+            {/* Bảng danh sách giao dịch: vừa màn hình, dài quá thì có thanh trượt */}
             <div style={{ background: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold', fontSize: '15px', color: '#0f172a' }}>
+              <div style={{ padding: '12px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>
                 Danh Sách Giao Dịch
               </div>
-              <div className="scroll-table" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 380px)', minHeight: '220px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Mã GD</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Ngày</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Mã NCC / KH</th>
-                    <th style={{ padding: '12px', textAlign: 'center' }}>Loại</th>
-                    <th style={{ padding: '12px', textAlign: 'right' }}>Số Tiền</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Danh Mục</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Phương Thức TT</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Ghi Chú</th>
-                    <th style={{ padding: '12px', textAlign: 'center' }}>Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(!cashItems || cashItems.length === 0) ? (
-                    <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>Chưa có giao dịch thu chi nào.</td>
+              <div className="scroll-table" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 420px)', minHeight: '220px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Mã GD</th>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Ngày</th>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Mã NCC / KH</th>
+                      <th style={{ padding: '12px', textAlign: 'center' }}>Loại</th>
+                      <th style={{ padding: '12px', textAlign: 'right' }}>Số Tiền</th>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Danh Mục</th>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Phương Thức TT</th>
+                      <th style={{ padding: '12px', textAlign: 'left' }}>Ghi Chú</th>
+                      <th style={{ padding: '12px', textAlign: 'center' }}>Thao Tác</th>
                     </tr>
-                  ) : (
-                    cashItems.map((item) => (
-                      <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
-                        <td style={{ padding: '12px' }}>{item.created_at ? item.created_at.slice(0, 10) : ''}</td>
-                        <td style={{ padding: '12px' }}>
-                          {(() => {
-                            const pt = getCashPartner(item);
-                            if (!pt) return <span style={{ color: '#94a3b8' }}>-</span>;
-                            return (
-                              <div title={pt.name}>
-                                <b style={{ color: pt.kind === 'ncc' ? '#7c3aed' : '#0284c7' }}>{pt.code}</b>
-                                <div style={{ fontSize: '11px', color: '#64748b' }}>{pt.name}</div>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <span style={{
-                            padding: '4px 10px',
-                            borderRadius: '20px',
-                            fontSize: '11px',
-                            fontWeight: 'bold',
-                            background: item.type === 'IN' ? '#dcfce7' : '#fee2e2',
-                            color: item.type === 'IN' ? '#16a34a' : '#dc2626'
-                          }}>
-                            {item.type === 'IN' ? 'Thu' : 'Chi'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: item.type === 'IN' ? '#16a34a' : '#dc2626' }}>
-                          {item.type === 'IN' ? '+' : '-'}{vnd(item.amount)}
-                        </td>
-                        <td style={{ padding: '12px', fontWeight: '500' }}>{item.category}</td>
-                        <td style={{ padding: '12px' }}>{item.payment_method}</td>
-                        <td style={{ padding: '12px', color: '#475569' }}>{item.note || item.reference_code}</td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
-                            <button
-                              onClick={() => setSelectedCashItem(item)}
-                              style={{ background: '#dbeafe', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
-                              title="Xem chi tiết"
-                            >👁️</button>
-                            <button
-                              onClick={() => {
-                                setEditingCashId(item.id);
-                                setCashForm({
-                                  type: item.type,
-                                  amount: item.amount,
-                                  category: item.category,
-                                  payment_method: item.payment_method || 'Chuyển khoản',
-                                  reference_code: item.reference_code || '',
-                                  note: item.note || '',
-                                  created_at: item.created_at ? item.created_at.slice(0, 10) : todayLocal()
-                                });
-                                setShowCashModal(true);
-                              }}
-                              style={{ background: '#fef3c7', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#d97706' }}
-                              title="Chỉnh sửa"
-                            >✏️</button>
-                            <button
-                              onClick={async () => {
-                                if (confirm('Bạn có chắc muốn xóa giao dịch này?')) {
-                                  try {
-                                    await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
-                                    loadCashBook();
-                                  } catch (err) {
-                                    alert('Lỗi: ' + err.message);
-                                  }
-                                }
-                              }}
-                              style={{ background: '#fee2e2', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
-                              title="Xóa"
-                            >🗑️</button>
-                          </div>
+                  </thead>
+                  <tbody>
+                    {visibleCashItems.length === 0 ? (
+                      <tr>
+                        <td colSpan="9" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+                          {cashFiltering ? 'Không tìm thấy giao dịch nào phù hợp.' : 'Chưa có giao dịch thu chi nào.'}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      visibleCashItems.map((item) => (
+                        <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '12px', fontWeight: 'bold', color: '#7c3aed' }}>{item.code}</td>
+                          <td style={{ padding: '12px' }}>{item.created_at ? item.created_at.slice(0, 10) : ''}</td>
+                          <td style={{ padding: '12px' }}>
+                            {(() => {
+                              const pt = getCashPartner(item);
+                              if (!pt) return <span style={{ color: '#94a3b8' }}>-</span>;
+                              return (
+                                <div title={pt.name}>
+                                  <b style={{ color: pt.kind === 'ncc' ? '#7c3aed' : '#0284c7' }}>{pt.code}</b>
+                                  <div style={{ fontSize: '11px', color: '#64748b' }}>{pt.name}</div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <span style={{
+                              padding: '4px 10px',
+                              borderRadius: '20px',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              background: item.type === 'IN' ? '#dcfce7' : '#fee2e2',
+                              color: item.type === 'IN' ? '#16a34a' : '#dc2626'
+                            }}>
+                              {item.type === 'IN' ? 'Thu' : 'Chi'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', whiteSpace: 'nowrap', color: item.type === 'IN' ? '#16a34a' : '#dc2626' }}>
+                            {item.type === 'IN' ? '+' : '-'}{vnd(item.amount)}
+                          </td>
+                          <td style={{ padding: '12px', fontWeight: '500' }}>{item.category}</td>
+                          <td style={{ padding: '12px' }}>{item.payment_method}</td>
+                          <td style={{ padding: '12px', color: '#475569' }}>{item.note || item.reference_code}</td>
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                              <button
+                                onClick={() => setSelectedCashItem(item)}
+                                style={{ background: '#dbeafe', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
+                                title="Xem chi tiết"
+                              >👁️</button>
+                              <button
+                                onClick={() => {
+                                  setEditingCashId(item.id);
+                                  setCashForm({
+                                    type: item.type,
+                                    amount: item.amount,
+                                    category: item.category,
+                                    payment_method: item.payment_method || 'Chuyển khoản',
+                                    reference_code: item.reference_code || '',
+                                    note: item.note || '',
+                                    created_at: item.created_at ? item.created_at.slice(0, 10) : todayLocal()
+                                  });
+                                  setShowCashModal(true);
+                                }}
+                                style={{ background: '#fef3c7', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#d97706' }}
+                                title="Chỉnh sửa"
+                              >✏️</button>
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Bạn có chắc muốn xóa giao dịch này?')) {
+                                    try {
+                                      await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
+                                      loadCashBook();
+                                    } catch (err) {
+                                      alert('Lỗi: ' + err.message);
+                                    }
+                                  }
+                                }}
+                                style={{ background: '#fee2e2', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
+                                title="Xóa"
+                              >🗑️</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
