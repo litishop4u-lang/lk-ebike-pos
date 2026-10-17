@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
 // Làm tròn về số nguyên đồng để không hiện số lẻ kiểu 35.331.754,667 ₫
@@ -63,6 +63,27 @@ const sortDesc = (list, key = 'created_at') => {
     return String(b?.id ?? '').localeCompare(String(a?.id ?? ''));
   });
 };
+
+// Khung bảng tự dài đến sát đáy màn hình; dữ liệu dài hơn thì có thanh trượt
+function FillHeight({ children, bottom = 50, min = 220, className = '', style }) {
+  const ref = useRef(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    el.style.maxHeight = Math.max(min, window.innerHeight - top - bottom) + 'px';
+  };
+  useLayoutEffect(fit); // đo lại mỗi lần giao diện vẽ lại
+  useEffect(() => {
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
+  return (
+    <div ref={ref} className={`scroll-table ${className}`} style={{ overflow: 'auto', ...style }}>
+      {children}
+    </div>
+  );
+}
 
 async function api(path, options) {
   const res = await fetch(API + path, {
@@ -152,7 +173,9 @@ const RESPONSIVE_CSS = `
 
 /* Bảng có thanh trượt: dòng tiêu đề đứng yên khi kéo */
 .scroll-table thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
-.scroll-table td { word-break: break-word; }
+.scroll-table td span { white-space: nowrap; }
+.scroll-table tbody td:first-child { white-space: nowrap; }
+.cash-table tbody td:nth-child(2) { white-space: nowrap; }
 
 /* ===== Font + cỡ chữ đồng bộ toàn app ===== */
 .layout { font-size: 14px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
@@ -3357,7 +3380,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               <div style={{ padding: '12px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>
                 Danh Sách Giao Dịch
               </div>
-              <div className="scroll-table" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 420px)', minHeight: '220px' }}>
+              <FillHeight className="cash-table" bottom={40}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
@@ -3459,7 +3482,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                     )}
                   </tbody>
                 </table>
-              </div>
+              </FillHeight>
             </div>
           </div>
         )}
@@ -3648,7 +3671,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </div>
 
             {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
-            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 400px)', minHeight: '220px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
@@ -3674,7 +3697,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                   ))}
                 </tbody>
               </table>
-            </div>
+            </FillHeight>
           </div>
         )}
 
@@ -3691,6 +3714,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
               </button>
             </div>
 
+            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -3756,6 +3780,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 )}
               </tbody>
             </table>
+            </FillHeight>
           </div>
         )}
 
@@ -4193,7 +4218,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
             </div>
 
             {/* Bảng vừa chiều ngang màn hình; dài quá thì có thanh trượt */}
-            <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 400px)', minHeight: '220px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
@@ -4224,7 +4249,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                     ))
                   )}
                 </tbody>
-              </table>
+              </FillHeight>
             </div>
           </div>
         )}
