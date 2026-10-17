@@ -2297,7 +2297,14 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     (c.phone && c.phone.includes(customerSearch)) ||
     (c.code || '').toLowerCase().includes(customerSearch.toLowerCase())
   );
-
+  // Chuyển màn hình từ menu trái (gộp các lệnh tải dữ liệu riêng của từng mục)
+const goView = (view) => {
+  setCurrentView(view);
+  if (view === 'return-orders') loadReturnOrders();
+  if (view === 'purchase-returns') loadPurchaseReturns();
+  if (view === 'profit-loss-report') loadProfitLossReport();
+  // 'cash-book' và 'inventory-report' đã tự tải qua useEffect theo currentView
+};
   return (
         <div className="layout" style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
       <style>{RESPONSIVE_CSS}</style>
@@ -2312,120 +2319,29 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
       <div className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`} onClick={() => setSidebarOpen(false)} />
 
       {/* Thanh menu bên trái */}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
-        <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
-        <ul
-          onClick={(e) => { if (e.target.closest('button')) setSidebarOpen(false); }} /* chọn mục xong tự ẩn menu */
-          style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}
-        >
-          <li><button onClick={() => setCurrentView('pos')} style={navBtnStyle(currentView === 'pos')}>📦 Tạo đơn hàng</button></li>
-          <li>
-            <button
-              onClick={() => {
-                setCurrentView('return-orders');
-                loadReturnOrders();
-              }}
-              style={{
-                width: '100%',
-                padding: '12px 15px',
-                textAlign: 'left',
-                background: currentView === 'return-orders' ? '#7c3aed' : 'transparent',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                marginBottom: '5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}
-            >
-              📦 Trả Hàng Bán
-            </button>
-          </li>
-          <li>
-            <button
-              onClick={() => { setCurrentView('purchase-returns'); loadPurchaseReturns(); }}
-              style={{
-                width: '100%', padding: '12px 15px', textAlign: 'left',
-                background: currentView === 'purchase-returns' ? '#7c3aed' : 'transparent',
-                color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer',
-                fontWeight: '500', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
-              }}
-            >
-              ↩️ Trả Hàng Nhập
-            </button>
-          </li>
-          <li><button onClick={() => setCurrentView('products')} style={navBtnStyle(currentView === 'products')}>🏷️ Sản phẩm</button></li>
-          <li><button onClick={() => setCurrentView('suppliers')} style={navBtnStyle(currentView === 'suppliers')}>🚚 Nhà cung cấp</button></li>
-          <li><button onClick={() => setCurrentView('purchases')} style={navBtnStyle(currentView === 'purchases')}>📥 Nhập hàng</button></li>
-          <li><button onClick={() => setCurrentView('customers')} style={navBtnStyle(currentView === 'customers')}>👥 Khách hàng</button></li>
-          <li><button onClick={() => setCurrentView('warranties')} style={navBtnStyle(currentView === 'warranties')}>🛡️ Phiếu bảo hành</button></li>
-          <li>
-            <button
-              onClick={() => setCurrentView('cash-book')}
-              style={{
-                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'cash-book' ? '#7c3aed' : 'transparent',
-                color: '#fff',
-                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
-              }}
-            >
-              💰 Thu Chi
-            </button>
-          </li>
+<aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
+  <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
 
-          <li>
+  <nav onClick={(e) => { if (e.target.closest('button')) setSidebarOpen(false); }} /* chọn mục xong tự ẩn menu trên điện thoại */>
+    {MENU_GROUPS.map((group, gi) => (
+      <div key={group.title}>
+        {gi > 0 && <hr style={menuDividerStyle} />}
+        <div style={menuGroupTitleStyle}>{group.title}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {group.items.map((it) => (
             <button
-              onClick={() => {
-                setCurrentView('profit-loss-report');
-                loadProfitLossReport(); // Gọi hàm tải dữ liệu khi bấm vào
-              }}
-              style={{
-                width: '100%', // SỬA: trước đây là 100vw làm tràn sidebar
-                padding: '12px 15px',
-                textAlign: 'left',
-                background: currentView === 'profit-loss-report' ? '#7c3aed' : 'transparent',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                marginBottom: '5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}
+              key={it.view}
+              onClick={() => goView(it.view)}
+              style={menuBtnStyle(currentView === it.view)}
             >
-              📊 Báo Cáo KQ Kinh Doanh
+              {it.label}
             </button>
-          </li>
-          <li>
-            <button
-              onClick={() => setCurrentView('settings')}
-              style={{
-                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'settings' ? '#7c3aed' : 'transparent',
-                color: '#fff', /* Đảm bảo luôn là màu trắng (#fff) */
-                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
-              }}
-            >
-              ⚙️ Cài đặt Doanh Nghiệp
-            </button>
-          </li>
-          <li>
-            <button
-              onClick={() => setCurrentView('inventory-report')}
-              style={{
-                width: '100%', textAlign: 'left', padding: '12px 16px', background: currentView === 'inventory-report' ? '#7c3aed' : 'transparent',
-                color: '#fff', /* Đảm bảo luôn là màu trắng (#fff) */
-                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '10px'
-              }}
-            >
-              📊 Báo Cáo X - N - T
-            </button>
-          </li>
-        </ul>
-      </aside>
+          ))}
+        </div>
+      </div>
+    ))}
+  </nav>
+</aside>
 
       {/* Nội dung chính bên phải */}
       <main className="main-content" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
@@ -6153,6 +6069,51 @@ const cardStyle = { background: '#fff', padding: '20px', borderRadius: '8px', bo
 const cellStyle = { padding: '12px' };
 const statBoxStyle = { background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' };
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
+// ===== Cấu hình menu trái theo nhóm =====
+const MENU_GROUPS = [
+  {
+    title: 'Bán hàng',
+    items: [
+      { view: 'pos', label: '📦 Tạo đơn hàng' },
+      { view: 'return-orders', label: '↩️ Trả hàng bán' },
+      { view: 'customers', label: '👥 Khách hàng' },
+      { view: 'warranties', label: '🛡️ Phiếu bảo hành' },
+    ],
+  },
+  {
+    title: 'Kho hàng',
+    items: [
+      { view: 'products', label: '🏷️ Sản phẩm' },
+      { view: 'purchases', label: '📥 Nhập hàng' },
+      { view: 'purchase-returns', label: '↩️ Trả hàng nhập' },
+      { view: 'suppliers', label: '🚚 Nhà cung cấp' },
+    ],
+  },
+  {
+    title: 'Báo cáo',
+    items: [
+      { view: 'cash-book', label: '💰 Thu chi' },
+      { view: 'profit-loss-report', label: '📊 Báo cáo KQ kinh doanh' },
+      { view: 'inventory-report', label: '📊 Báo cáo X - N - T' },
+    ],
+  },
+  {
+    title: 'Hệ thống',
+    items: [
+      { view: 'settings', label: '⚙️ Cài đặt doanh nghiệp' },
+    ],
+  },
+];
+
+const menuGroupTitleStyle = { fontSize: '13px', fontWeight: 800, color: '#e2e8f0', margin: '0 0 6px 8px' };
+const menuDividerStyle = { border: 0, borderTop: '1px solid #475569', margin: '14px 0' };
+const menuBtnStyle = (active) => ({
+  width: '100%', padding: '9px 14px', textAlign: 'left',
+  background: active ? '#7c3aed' : 'transparent', color: '#fff',
+  border: 'none', borderRadius: '8px', cursor: 'pointer',
+  fontSize: '14px', fontWeight: active ? 'bold' : 'normal',
+  display: 'flex', alignItems: 'center', gap: '10px',
+});
 // ===== Style gọn riêng cho popup Phiếu nhập (13px, đồng bộ bảng danh mục nhập hàng) =====
 const cInput = { width: '100%', height: '30px', padding: '0 8px', margin: 0, fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '5px', boxSizing: 'border-box' };
 const cLabel = { display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '3px', color: '#374151' };
