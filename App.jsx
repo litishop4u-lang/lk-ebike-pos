@@ -4252,7 +4252,6 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
                 </table>  
               </FillHeight>
             </div>
-          </div>
         )}
         
         {/* POPUP XEM CHI TIẾT PHIẾU NHẬP */}
