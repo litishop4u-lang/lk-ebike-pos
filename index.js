@@ -1841,6 +1841,68 @@ if (is(/^\/api\/warranties\/\d+$/, 'DELETE')) {
   return json({ success: true }, 200, origin);
 }
 
+      // ===== DASHBOARD =====
+if (pathname === '/api/reports/dashboard' && method === 'GET') {
+  await ensureReturnSchema(db);
+  const u = new URL(request.url);
+  const startDate = dateOnly(u.searchParams.get('startDate'));
+  const endDate = dateOnly(u.searchParams.get('endDate'));
+  const topStart = dateOnly(u.searchParams.get('topStart')) || startDate; // kỳ xếp hạng top SP / top KH
+  if (!startDate || !endDate) throw new HttpError(400, 'Thiếu khoảng ngày');
+
+  // Doanh thu + số đơn theo từng ngày
+  const daily = (await db.prepare(`
+    SELECT date(created_at) AS d, COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
+    FROM invoices WHERE date(created_at) >= ? AND date(created_at) <= ?
+    GROUP BY date(created_at)
+  `).bind(startDate, endDate).all()).results || [];
+  const revenue = daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0);
+  const orders = daily.reduce((s, r) => s + (Number(r.orders) || 0), 0);
+
+  // Lợi nhuận = doanh thu - tiền hàng trả lại - giá vốn (cùng cách tính với báo cáo Kết quả kinh doanh)
+  const retRes = await db.prepare(`
+    SELECT COALESCE(SUM(refund_amount), 0) AS refunded FROM return_orders
+    WHERE date(return_date) >= ? AND date(return_date) <= ?
+      AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
+  `).bind(startDate, endDate).first();
+  const returnDeductions = Number(retRes?.refunded) || 0;
+  const invReport = await buildInventoryReport(db, startDate, endDate);
+  let cogs = 0;
+  for (const r of invReport) cogs += (r.soldQty - r.returnedQty) * r.avgCost;
+  const profit = Math.round(revenue - returnDeductions - Math.max(0, cogs));
+
+  // Đơn hàng gần nhất
+  const recent = (await db.prepare(
+    'SELECT id, code, customer_name, total, paid_amount, debt, created_at FROM invoices ORDER BY created_at DESC, id DESC LIMIT 8'
+  ).all()).results || [];
+
+  // Top 10 sản phẩm bán chạy (theo số lượng)
+  const topProducts = (await db.prepare(`
+    SELECT ii.product_id AS id, COALESCE(p.sku, '') AS sku, COALESCE(p.name, 'Sản phẩm đã xóa') AS name,
+           SUM(ii.quantity) AS qty, SUM(ii.total) AS revenue
+    FROM invoice_items ii
+    JOIN invoices i ON ii.invoice_id = i.id
+    LEFT JOIN products p ON ii.product_id = p.id
+    WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
+    GROUP BY ii.product_id
+    ORDER BY qty DESC, revenue DESC
+    LIMIT 10
+  `).bind(topStart, endDate).all()).results || [];
+
+  // Top 10 khách mua nhiều nhất (theo giá trị, bỏ "Khách lẻ")
+  const topCustomers = (await db.prepare(`
+    SELECT customer_name AS name, COUNT(*) AS orders, COALESCE(SUM(total), 0) AS total
+    FROM invoices
+    WHERE date(created_at) >= ? AND date(created_at) <= ?
+      AND customer_name NOT LIKE 'Khách lẻ%'
+    GROUP BY customer_name
+    ORDER BY total DESC
+    LIMIT 10
+  `).bind(topStart, endDate).all()).results || [];
+
+  return json({ success: true, data: { revenue, profit, orders, daily, recent, topProducts, topCustomers } }, 200, origin);
+}
+      
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
       if (pathname.startsWith('/api/')) return json({ error: 'Không tìm thấy API' }, 404, origin);
