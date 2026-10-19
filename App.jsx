@@ -1081,7 +1081,9 @@ useEffect(() => {
   // ===== Dashboard =====
 const EMPTY_DASH = { revenue: 0, profit: 0, orders: 0, daily: [], recent: [], topProducts: [], topCustomers: [] };
 const [dash, setDash] = useState(EMPTY_DASH);
-const [dashTop, setDashTop] = useState('30'); // kỳ xếp hạng top: '7' | '30' | 'all'
+const [dashTop, setDashTop] = useState('30'); // kỳ xếp hạng: '7' | '30' | 'year' | 'all'
+const [dashYear, setDashYear] = useState(() => todayLocal().slice(0, 4));
+const [dashSort, setDashSort] = useState('value'); // 'value' = theo giá trị | 'qty' = theo số lượng
 const [dashLoading, setDashLoading] = useState(false);
 
 const loadDashboard = async () => {
@@ -1089,8 +1091,12 @@ const loadDashboard = async () => {
   try {
     const start = dayOffsetLocal(6);
     const end = dayOffsetLocal(0);
-    const topStart = dashTop === 'all' ? '2000-01-01' : dayOffsetLocal(Number(dashTop) - 1);
-    const res = await api(`/api/reports/dashboard?startDate=${start}&endDate=${end}&topStart=${topStart}`);
+    let topStart;
+    let topEnd = end;
+    if (dashTop === 'all') topStart = '2000-01-01';
+    else if (dashTop === 'year') { topStart = `${dashYear}-01-01`; topEnd = `${dashYear}-12-31`; }
+    else topStart = dayOffsetLocal(Number(dashTop) - 1);
+    const res = await api(`/api/reports/dashboard?startDate=${start}&endDate=${end}&topStart=${topStart}&topEnd=${topEnd}&sort=${dashSort}`);
     if (res && res.success) setDash({ ...EMPTY_DASH, ...(res.data || {}) });
   } catch (e) {
     setMsg({ type: 'err', text: 'Không tải được dashboard: ' + e.message });
@@ -1100,8 +1106,10 @@ const loadDashboard = async () => {
 };
 
 useEffect(() => {
-  if (currentView === 'dashboard') loadDashboard();
-}, [currentView, dashTop]);
+  if (currentView !== 'dashboard') return;
+  if (dashTop === 'year' && String(dashYear).length !== 4) return; // chờ gõ đủ 4 số năm
+  loadDashboard();
+}, [currentView, dashTop, dashYear, dashSort]);
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
@@ -2672,15 +2680,25 @@ const goView = (view) => {
         </div>
       </div>
 
-      {/* Chọn kỳ xếp hạng */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xếp hạng theo:</span>
-        <select value={dashTop} onChange={(e) => setDashTop(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
-          <option value="7">7 ngày qua</option>
-          <option value="30">30 ngày qua</option>
-          <option value="all">Tất cả thời gian</option>
-        </select>
-      </div>
+     {/* Chọn tiêu chí + kỳ xếp hạng */}
+<div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+  <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xếp hạng theo:</span>
+  <select value={dashSort} onChange={(e) => setDashSort(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+    <option value="value">Giá trị</option>
+    <option value="qty">Số lượng sản phẩm</option>
+  </select>
+
+  <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569', marginLeft: '6px' }}>Thời gian:</span>
+  <select value={dashTop} onChange={(e) => setDashTop(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+    <option value="7">7 ngày qua</option>
+    <option value="30">30 ngày qua</option>
+    <option value="year">Theo năm</option>
+    <option value="all">Tất cả thời gian</option>
+  </select>
+  {dashTop === 'year' && (
+    <input type="number" value={dashYear} onChange={(e) => setDashYear(e.target.value)} style={{ width: '80px', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+  )}
+</div>
 
       {/* Top 10 sản phẩm + top 10 khách hàng */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
@@ -2696,9 +2714,13 @@ const goView = (view) => {
                 <div style={{ fontSize: '11px', color: '#64748b' }}>{p.sku || '---'}</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#7c3aed' }}>{Number(p.qty) || 0} cái</div>
-                <div style={{ fontSize: '11px', color: '#16a34a' }}>{vnd(p.revenue)}</div>
-              </div>
+  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#7c3aed' : '#16a34a' }}>
+    {dashSort === 'qty' ? `${Number(p.qty) || 0} cái` : vnd(p.revenue)}
+  </div>
+  <div style={{ fontSize: '11px', color: '#64748b' }}>
+    {dashSort === 'qty' ? vnd(p.revenue) : `${Number(p.qty) || 0} cái`}
+  </div>
+</div>
             </div>
           ))}
         </div>
@@ -2714,7 +2736,14 @@ const goView = (view) => {
                 <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
                 <div style={{ fontSize: '11px', color: '#64748b' }}>{Number(c.orders) || 0} đơn</div>
               </div>
-              <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#16a34a', flexShrink: 0 }}>{vnd(c.total)}</div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#7c3aed' : '#16a34a' }}>
+    {dashSort === 'qty' ? `${Number(c.qty) || 0} sp` : vnd(c.total)}
+  </div>
+  <div style={{ fontSize: '11px', color: '#64748b' }}>
+    {dashSort === 'qty' ? vnd(c.total) : `${Number(c.qty) || 0} sp`}
+  </div>
+</div>
             </div>
           ))}
         </div>
