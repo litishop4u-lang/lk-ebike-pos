@@ -42,6 +42,46 @@ const idOf = (pathname) => Number(pathname.split('/')[3]);
 const dateOnly = (v) => String(v || '').slice(0, 10);
 // Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
 const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
+// ===== Phiếu bảo hành (lưu trên D1 để dùng chung giữa máy tính và điện thoại) =====
+let warrantyReady = false;
+async function ensureWarrantySchema(db) {
+  if (warrantyReady) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS warranties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    invoice_code TEXT,
+    customer_name TEXT,
+    customer_phone TEXT,
+    address TEXT,
+    purchase_date TEXT,
+    duration INTEGER,
+    unit TEXT,
+    expiry_date TEXT,
+    note TEXT,
+    items TEXT,
+    created_at TEXT
+  )`).run();
+  warrantyReady = true;
+}
+
+const wRow = (r) => {
+  let items = [];
+  try { items = JSON.parse(r.items || '[]'); } catch (e) { /* bỏ qua */ }
+  return { ...r, items: Array.isArray(items) ? items : [] };
+};
+
+// Kiểm tra dữ liệu và trả về mảng giá trị theo đúng thứ tự cột
+const warrantyFields = (b) => {
+  const code = str(b.code);
+  const customer_name = str(b.customer_name);
+  if (!code) throw new HttpError(400, 'Thiếu mã phiếu bảo hành');
+  if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
+  return [
+    code, str(b.invoice_code), customer_name, str(b.customer_phone), str(b.address),
+    str(b.purchase_date), Number(b.duration) || 0, str(b.unit) || 'month', str(b.expiry_date), str(b.note),
+    JSON.stringify(Array.isArray(b.items) ? b.items : []),
+  ];
+};
 
 async function hasTable(db, name) {
   return !!(await db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").bind(name).first());
@@ -1755,6 +1795,51 @@ export default {
           }
         }, 200, origin);
       }
+
+      // ===== PHIẾU BẢO HÀNH =====
+if (pathname === '/api/warranties' && method === 'GET') {
+  await ensureWarrantySchema(db);
+  const { results } = await db.prepare('SELECT * FROM warranties ORDER BY created_at DESC, id DESC').all();
+  return json((results || []).map(wRow), 200, origin);
+}
+
+if (pathname === '/api/warranties' && method === 'POST') {
+  await ensureWarrantySchema(db);
+  const b = await request.json();
+  const vals = warrantyFields(b);
+  try {
+    const r = await db.prepare(
+      `INSERT INTO warranties (code, invoice_code, customer_name, customer_phone, address, purchase_date, duration, unit, expiry_date, note, items, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(...vals, isoDate(b.created_at)).run();
+    return json({ success: true, id: r.meta?.last_row_id }, 201, origin);
+  } catch (err) {
+    if (isUnique(err)) throw new HttpError(400, 'Mã phiếu bảo hành đã tồn tại');
+    throw err;
+  }
+}
+
+if (is(/^\/api\/warranties\/\d+$/, 'PUT')) {
+  await ensureWarrantySchema(db);
+  const id = idOf(pathname);
+  const vals = warrantyFields(await request.json());
+  try {
+    const r = await db.prepare(
+      `UPDATE warranties SET code=?, invoice_code=?, customer_name=?, customer_phone=?, address=?, purchase_date=?, duration=?, unit=?, expiry_date=?, note=?, items=? WHERE id=?`
+    ).bind(...vals, id).run();
+    if (!r.meta?.changes) throw new HttpError(404, 'Không tìm thấy phiếu bảo hành');
+  } catch (err) {
+    if (isUnique(err)) throw new HttpError(400, 'Mã phiếu bảo hành đã tồn tại');
+    throw err;
+  }
+  return json({ success: true }, 200, origin);
+}
+
+if (is(/^\/api\/warranties\/\d+$/, 'DELETE')) {
+  await ensureWarrantySchema(db);
+  await db.prepare('DELETE FROM warranties WHERE id = ?').bind(idOf(pathname)).run();
+  return json({ success: true }, 200, origin);
+}
 
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
