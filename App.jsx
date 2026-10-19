@@ -8,6 +8,12 @@ const num = (s) => Number(String(s ?? '').replace(/[.,\s₫]/g, '')) || 0;
 const splitRow = (l) => l.split(/\t|;/).map((x) => x.trim().replace(/^["']|["']$/g, ''));
 // Ngày hôm nay theo GIỜ ĐỊA PHƯƠNG (toISOString dùng UTC nên 0h-7h sáng VN sẽ ra ngày hôm qua)
 const todayLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+// Ngày cách hôm nay n ngày (giờ địa phương), dạng YYYY-MM-DD
+const dayOffsetLocal = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
 
 // Tách chuỗi "Số khung: A | Số sườn: B | Màu: C | Ghi chú: D" thành từng trường để nạp lại vào giỏ hàng khi sửa phiếu
 const parseItemDetails = (str) => {
@@ -173,6 +179,58 @@ const newReturnForm = () => ({
 // refund_received = số tiền thực tế đã thu lại từ NCC (sẽ tự sinh phiếu thu trong Sổ quỹ)
 // refund_touched = người dùng đã tự sửa số tiền thu lại (nếu chưa thì tự = tổng giá trị hàng trả)
 const newPrForm = () => ({ supplier_id: '', supplier_name: '', purchase_code: '', return_date: todayLocal(), reason: PR_REASONS[0], status: PR_DONE, items: [], refund_received: 0, refund_touched: false, payment_method: 'Tiền mặt' });
+
+// ===== Biểu đồ doanh thu (SVG thuần, không cần cài thư viện) =====
+const shortMoney = (v) => {
+  const n = Number(v) || 0;
+  if (n >= 1e9) return `${+(n / 1e9).toFixed(1)} tỷ`;
+  if (n >= 1e6) return `${+(n / 1e6).toFixed(1)}tr`;
+  if (n >= 1e3) return `${+(n / 1e3).toFixed(0)}k`;
+  return String(Math.round(n));
+};
+const WEEKDAY = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+function SalesChart({ data }) {
+  const W = 520, H = 250, L = 50, R = 18, T = 14, B = 40;
+  const n = data.length;
+  const maxVal = Math.max(...data.map((d) => d.revenue), 100000);
+  const rough = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= rough);
+  const top = step * 4;
+  const x = (i) => L + (n > 1 ? (i * (W - L - R)) / (n - 1) : 0);
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  const line = data.map((d, i) => `${i ? 'L' : 'M'}${x(i)},${y(d.revenue)}`).join(' ');
+  const area = `${line} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      {[0, 1, 2, 3, 4].map((i) => {
+        const v = step * i;
+        return (
+          <g key={i}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#e2e8f0" />
+            <text x={L - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#64748b">{shortMoney(v)}</text>
+          </g>
+        );
+      })}
+      <path d={area} fill="#ede9fe" opacity="0.7" />
+      <path d={line} fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinejoin="round" />
+      {data.map((d, i) => {
+        const [yy, mm, dd] = d.date.split('-');
+        const wd = WEEKDAY[new Date(Number(yy), Number(mm) - 1, Number(dd)).getDay()];
+        return (
+          <g key={d.date}>
+            <circle cx={x(i)} cy={y(d.revenue)} r="4.5" fill="#fff" stroke="#7c3aed" strokeWidth="2">
+              <title>{`${dd}/${mm}: ${vnd(d.revenue)} (${d.orders} đơn)`}</title>
+            </circle>
+            <text x={x(i)} y={H - 18} textAnchor="middle" fontSize="11" fill="#475569">{wd}</text>
+            <text x={x(i)} y={H - 5} textAnchor="middle" fontSize="11" fill="#94a3b8">{`${dd}/${mm}`}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 // Hiện lỗi ngay trên màn hình thay vì trắng trơn, để biết chính xác lỗi ở đâu
 class ErrorBoundary extends Component {
@@ -354,7 +412,7 @@ export default function App() {
 }
 
 function AppMain() {
-  const [currentView, setCurrentView] = useState('pos'); // 'pos' | 'return-orders' | 'purchase-returns' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
+  const [currentView, setCurrentView] = useState('dashboard'); // 'pos' | 'return-orders' | 'purchase-returns' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
   const [sidebarOpen, setSidebarOpen] = useState(false); // menu trái trên điện thoại
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
   const [products, setProducts] = useState([]);
@@ -1019,6 +1077,31 @@ useEffect(() => {
   if ((plPeriod === 'quarter' || plPeriod === 'year') && String(plYear).length !== 4) return; // chờ gõ đủ 4 số năm
   loadProfitLossReport();
 }, [plPeriod, plMonth, plQuarter, plYear]);
+
+  // ===== Dashboard =====
+const EMPTY_DASH = { revenue: 0, profit: 0, orders: 0, daily: [], recent: [], topProducts: [], topCustomers: [] };
+const [dash, setDash] = useState(EMPTY_DASH);
+const [dashTop, setDashTop] = useState('30'); // kỳ xếp hạng top: '7' | '30' | 'all'
+const [dashLoading, setDashLoading] = useState(false);
+
+const loadDashboard = async () => {
+  setDashLoading(true);
+  try {
+    const start = dayOffsetLocal(6);
+    const end = dayOffsetLocal(0);
+    const topStart = dashTop === 'all' ? '2000-01-01' : dayOffsetLocal(Number(dashTop) - 1);
+    const res = await api(`/api/reports/dashboard?startDate=${start}&endDate=${end}&topStart=${topStart}`);
+    if (res && res.success) setDash({ ...EMPTY_DASH, ...(res.data || {}) });
+  } catch (e) {
+    setMsg({ type: 'err', text: 'Không tải được dashboard: ' + e.message });
+  } finally {
+    setDashLoading(false);
+  }
+};
+
+useEffect(() => {
+  if (currentView === 'dashboard') loadDashboard();
+}, [currentView, dashTop]);
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
@@ -2519,6 +2602,127 @@ const goView = (view) => {
       <main className="main-content" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
         {msg && <div style={{ padding: '10px', marginBottom: '15px', borderRadius: '6px', background: msg.type === 'ok' ? '#dcfce7' : '#fee2e2', color: msg.type === 'ok' ? '#166534' : '#991b1b' }}>{msg.text}</div>}
 
+        {/* 0. DASHBOARD */}
+{currentView === 'dashboard' && (() => {
+  const days = Array.from({ length: 7 }, (_, i) => dayOffsetLocal(6 - i));
+  const byDay = Object.fromEntries((dash.daily || []).map((r) => [String(r.d), r]));
+  const series = days.map((d) => ({ date: d, revenue: Number(byDay[d]?.revenue) || 0, orders: Number(byDay[d]?.orders) || 0 }));
+
+  const card = { background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '16px', minWidth: 0 };
+  const cardHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' };
+  const rowStyle = { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid #f1f5f9' };
+  const kpi = (label, value, color) => (
+    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: `4px solid ${color}` }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>{label}</div>
+      <div style={{ fontSize: '20px', fontWeight: 900, color, marginTop: '4px' }}>{value}</div>
+    </div>
+  );
+  const rank = (i) => (
+    <span style={{ width: '22px', height: '22px', flexShrink: 0, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', background: i < 3 ? '#7c3aed' : '#e2e8f0', color: i < 3 ? '#fff' : '#475569' }}>{i + 1}</span>
+  );
+
+  return (
+    <div className="view-wrap" style={{ padding: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          <h2 style={{ margin: 0, color: '#0f172a' }}>Dashboard</h2>
+          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>Tổng quan kinh doanh 7 ngày qua</div>
+        </div>
+        <button onClick={loadDashboard} disabled={dashLoading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', opacity: dashLoading ? 0.6 : 1 }}>
+          {dashLoading ? 'Đang tải...' : '🔄 Làm mới'}
+        </button>
+      </div>
+
+      {/* 3 ô KPI */}
+      <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+        {kpi('DOANH THU 7 NGÀY QUA', vnd(dash.revenue), '#16a34a')}
+        {kpi('LỢI NHUẬN 7 NGÀY QUA', vnd(dash.profit), dash.profit >= 0 ? '#7c3aed' : '#dc2626')}
+        {kpi('ĐƠN HÀNG 7 NGÀY QUA', Number(dash.orders) || 0, '#0284c7')}
+      </div>
+
+      {/* Biểu đồ + đơn hàng gần nhất */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '15px', marginBottom: '15px', alignItems: 'start' }}>
+        <div style={card}>
+          <div style={cardHead}><h3 style={{ margin: 0, color: '#0f172a' }}>Doanh thu 7 ngày qua</h3></div>
+          <SalesChart data={series} />
+        </div>
+
+        <div style={card}>
+          <div style={cardHead}>
+            <h3 style={{ margin: 0, color: '#0f172a' }}>Đơn hàng gần nhất</h3>
+            <button onClick={() => goView('pos')} style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: '13px' }}>Xem tất cả</button>
+          </div>
+          {(dash.recent || []).length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</div>
+          ) : (dash.recent || []).map((o) => {
+            const owe = Number(o.debt) > 0;
+            return (
+              <div key={o.id} onClick={() => handleViewDetail('invoices', o.id)} style={{ ...rowStyle, cursor: 'pointer', justifyContent: 'space-between' }} title="Bấm để xem chi tiết">
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.customer_name}</div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>{o.code} · {o.created_at ? new Date(o.created_at).toLocaleDateString('vi-VN') : ''}</div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{vnd(o.total)}</div>
+                  <span style={{ fontSize: '11px', padding: '1px 8px', borderRadius: '4px', fontWeight: 'bold', background: owe ? '#fee2e2' : '#dcfce7', color: owe ? '#dc2626' : '#16a34a' }}>{owe ? 'Còn nợ' : 'Xong'}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Chọn kỳ xếp hạng */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Xếp hạng theo:</span>
+        <select value={dashTop} onChange={(e) => setDashTop(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+          <option value="7">7 ngày qua</option>
+          <option value="30">30 ngày qua</option>
+          <option value="all">Tất cả thời gian</option>
+        </select>
+      </div>
+
+      {/* Top 10 sản phẩm + top 10 khách hàng */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+        <div style={card}>
+          <div style={cardHead}><h3 style={{ margin: 0, color: '#0f172a' }}>🏆 Top 10 sản phẩm bán chạy</h3></div>
+          {(dash.topProducts || []).length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có dữ liệu bán hàng.</div>
+          ) : (dash.topProducts || []).map((p, i) => (
+            <div key={p.id ?? i} style={rowStyle}>
+              {rank(i)}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{p.sku || '---'}</div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#7c3aed' }}>{Number(p.qty) || 0} cái</div>
+                <div style={{ fontSize: '11px', color: '#16a34a' }}>{vnd(p.revenue)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={card}>
+          <div style={cardHead}><h3 style={{ margin: 0, color: '#0f172a' }}>👑 Top 10 khách hàng mua nhiều</h3></div>
+          {(dash.topCustomers || []).length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có dữ liệu khách hàng.</div>
+          ) : (dash.topCustomers || []).map((c, i) => (
+            <div key={c.name + i} style={rowStyle}>
+              {rank(i)}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{Number(c.orders) || 0} đơn</div>
+              </div>
+              <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#16a34a', flexShrink: 0 }}>{vnd(c.total)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+})()}
+        
         {/* 1. MÀN HÌNH DANH SÁCH ĐƠN HÀNG & PHIẾU BÁN HÀNG */}
         {currentView === 'pos' && (
             <div className="pos-page">
@@ -6403,6 +6607,12 @@ const statBoxStyle = { background: '#f8fafc', padding: '20px', borderRadius: '8p
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
 // ===== Cấu hình menu trái theo nhóm =====
 const MENU_GROUPS = [
+  {
+    title: 'Tổng quan',
+    items: [
+      { view: 'dashboard', label: '🏠 Dashboard' },
+    ],
+  },
   {
     title: 'Bán hàng',
     items: [
