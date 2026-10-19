@@ -299,6 +299,46 @@ const RESPONSIVE_CSS = `
   .report-filter-range input { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; padding: 6px 8px !important; font-size: 13px !important; }
   /* Nút Lọc dữ liệu nhỏ lại */
   .report-filter > button { padding: 7px 18px !important; font-size: 13px !important; }
+
+    /* ===== KPI: 4 ô = 2 hàng x 2 ô ; 3 ô = 1 hàng ===== */
+  .main-content div.kpi-grid[style] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; margin-bottom: 12px !important; }
+  .main-content div.kpi-grid-3[style] { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px !important; margin-bottom: 12px !important; }
+  .kpi-grid > div, .kpi-grid-3 > div { padding: 8px 10px !important; min-width: 0; box-sizing: border-box; border-radius: 8px !important; }
+  .kpi-grid > div > div:first-child, .kpi-grid-3 > div > div:first-child { font-size: 10.5px !important; line-height: 1.25; margin-bottom: 0 !important; }
+  .kpi-grid > div > div:last-child { font-size: 15px !important; margin-top: 4px !important; word-break: break-word; }
+  .kpi-grid-3 > div { padding: 8px 6px !important; }
+  .kpi-grid-3 > div > div:last-child { font-size: 11.5px !important; margin-top: 4px !important; word-break: break-word; }
+
+  /* ===== Bảng: bỏ bớt lề để bảng rộng bằng nhau giữa các mục ===== */
+  .main-content > div.view-wrap { padding: 0 !important; min-height: 0 !important; background: transparent !important; }
+  .main-content > div[style*="box-shadow"] { padding: 12px !important; }
+  .pos-card { padding: 12px !important; }
+
+  /* ===== Đồng bộ font ===== */
+  .main-content > div:not([style*="position: fixed"]) h2 { font-size: 1.15rem !important; }
+  .main-content > div:not([style*="position: fixed"]) h3 { font-size: 1rem !important; }
+  .main-content > div:not([style*="position: fixed"]) table { font-size: 12.5px !important; }
+  .main-content > div:not([style*="position: fixed"]) table th,
+  .main-content > div:not([style*="position: fixed"]) table td { padding: 8px 10px !important; }
+  .main-content h2 + div { flex-wrap: wrap; gap: 8px !important; }
+  .main-content h2 + div > button { font-size: 13px !important; padding: 8px 12px !important; }
+
+  /* ===== Ô tìm kiếm + bộ lọc nhỏ gọn ===== */
+  .main-content div[style*="flex: 1 1 280px"] { flex: 1 1 100% !important; max-width: 100% !important; }
+  .main-content div[style*="flex: 1 1 280px"] input { height: 34px !important; padding: 0 30px 0 10px !important; font-size: 14px !important; }
+  .main-content div[style*="flex: 1 1 280px"] button { top: 3px !important; }
+  .main-content div[style*="flex: 1 1 280px"] + div { gap: 6px !important; }
+  .main-content div[style*="flex: 1 1 280px"] + div span { font-size: 12px !important; }
+  .main-content div[style*="flex: 1 1 280px"] + div select,
+  .main-content div[style*="flex: 1 1 280px"] + div input,
+  .main-content div[style*="flex: 1 1 280px"] + select { height: 32px !important; padding: 0 8px !important; font-size: 13px !important; box-sizing: border-box; }
+
+  /* Thanh lọc của màn Trả hàng nhập */
+  .pr-filter { padding: 10px !important; gap: 6px !important; }
+  .pr-filter > input:not([type="date"]) { flex: 1 1 100% !important; min-width: 0 !important; }
+  .pr-filter > select, .pr-filter > input[type="date"] { flex: 1 1 calc(50% - 6px) !important; min-width: 0 !important; }
+  .pr-filter > input, .pr-filter > select, .pr-filter > button { height: 32px !important; padding: 0 8px !important; font-size: 13px !important; box-sizing: border-box; }
+  .pr-filter > button { flex: 1 1 100%; }
 }
   /* Đồng nhất font (áp dụng cả máy tính và điện thoại) */
 .layout, .layout button, .layout input, .layout select, .layout textarea {
@@ -809,9 +849,7 @@ function AppMain() {
 
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [warranties, setWarranties] = useState(() => {
-  try { const v = JSON.parse(localStorage.getItem('warranties') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
-});
+  const [warranties, setWarranties] = useState([]);
   const [showWarrantyModal, setShowWarrantyModal] = useState(false);
   const [warrantyForm, setWarrantyForm] = useState(null);
   const [editingWarrantyId, setEditingWarrantyId] = useState(null);
@@ -2194,9 +2232,23 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
   useEffect(() => { if (!showOrderModal) setDepositFromOrder(0); }, [showOrderModal]);
 
     // ----- Phiếu bảo hành -----
-  useEffect(() => {
-    try { localStorage.setItem('warranties', JSON.stringify(warranties)); } catch (e) { /* bỏ qua */ }
-  }, [warranties]);
+  const loadWarranties = async () => {
+  try {
+    let list = asArray(await api('/api/warranties'));
+    if (list.length === 0) { // lần đầu: chuyển dữ liệu cũ từ trình duyệt lên server
+      let old = [];
+      try { old = JSON.parse(localStorage.getItem('warranties') || '[]'); } catch (e) { /* bỏ qua */ }
+      if (Array.isArray(old) && old.length > 0) {
+        for (const w of [...old].reverse()) {
+          try { await api('/api/warranties', { method: 'POST', body: JSON.stringify(w) }); } catch (e) { /* bỏ qua */ }
+        }
+        list = asArray(await api('/api/warranties'));
+      }
+    }
+    setWarranties(list);
+  } catch (e) { console.error('Lỗi tải phiếu bảo hành:', e); }
+};
+useEffect(() => { loadWarranties(); }, []);
 
   const openWarrantyModal = (draft) => {
     setEditingWarrantyId(null);
@@ -2247,16 +2299,21 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
       duration: Number(f.duration),
       expiry_date: addWarrantyDuration(f.purchase_date, f.duration, f.unit),
     };
+    try {
     if (editingWarrantyId) {
-      setWarranties((list) => list.map((w) => (w.id === editingWarrantyId ? { ...w, ...rec } : w)));
+      await api(`/api/warranties/${editingWarrantyId}`, { method: 'PUT', body: JSON.stringify(rec) });
       setMsg({ type: 'ok', text: `Đã cập nhật phiếu bảo hành ${rec.code}` });
     } else {
-      setWarranties((list) => [{ ...rec, id: 'w' + Date.now(), created_at: nowLocalISO() }, ...list]);
+      await api('/api/warranties', { method: 'POST', body: JSON.stringify(rec) });
       setMsg({ type: 'ok', text: `Đã tạo phiếu bảo hành ${rec.code}` });
     }
+    await loadWarranties();
     setShowWarrantyModal(false);
     setEditingWarrantyId(null);
-  };
+  } catch (e) {
+    alert('Lỗi: ' + e.message);
+  }
+};
 
   const editWarranty = (w) => {
     setEditingWarrantyId(w.id);
@@ -2264,11 +2321,14 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
     setShowWarrantyModal(true);
   };
 
-  const deleteWarranty = (w) => {
-    if (!confirm(`Xóa phiếu bảo hành ${w.code}?`)) return;
-    setWarranties((list) => list.filter((x) => x.id !== w.id));
+  const deleteWarranty = async (w) => {
+  if (!confirm(`Xóa phiếu bảo hành ${w.code}?`)) return;
+  try {
+    await api(`/api/warranties/${w.id}`, { method: 'DELETE' });
+    await loadWarranties();
     setMsg({ type: 'ok', text: `Đã xóa phiếu bảo hành ${w.code}` });
-  };
+  } catch (e) { alert('Lỗi: ' + e.message); }
+};
 
   const wKeyword = removeAccents(warrantySearch.trim());
   const visibleWarranties = sortDesc(warranties).filter((w) => {
@@ -2513,7 +2573,7 @@ const goView = (view) => {
   </div>
 
   {/* 4 ô KPI */}
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }}>
+  <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }}>
     <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ BÁN</div>
       <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(posSums.invoiceTotal)}</div>
@@ -2697,7 +2757,7 @@ const goView = (view) => {
 
         {/* MÀN HÌNH QUẢN LÝ TRẢ HÀNG */}
         {currentView === 'return-orders' && (
-          <div style={{ flex: 1, padding: '24px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+          <div className="view-wrap" style={{ flex: 1, padding: '24px', background: '#f8fafc', minHeight: '100vh', overflowY: 'auto', boxSizing: 'border-box' }}>
 
             {/* Header & Nút Tạo Phiếu */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -2716,7 +2776,7 @@ const goView = (view) => {
             </div>
 
             {/* Các thẻ Thống kê tổng quan */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
+            <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{returnOrdersData.stats.total}</div>
@@ -3124,7 +3184,7 @@ const goView = (view) => {
           );
           const statCard = { background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' };
           return (
-            <div style={{ padding: '10px' }}>
+            <div className="view-wrap" style={{ padding: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2 style={{ margin: 0, color: '#1e293b', fontSize: '24px' }}>Trả Hàng Nhập</h2>
                 <div style={{ display: 'flex', gap: '10px' }}>
@@ -3136,13 +3196,13 @@ const goView = (view) => {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' }}>
+              <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' }}>
                 <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng phiếu trả</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{prData.stats.total}</div></div>
                 <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền trả</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>{vnd(prData.stats.totalAmount)}</div></div>
                 <div style={statCard}><div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Đã hoàn thành</div><div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{prData.stats.completed}</div></div>
               </div>
 
-              <div style={{ ...statCard, display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <div className="pr-filter" style={{ ...statCard, display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
                 <input placeholder="Tìm mã phiếu, NCC..." value={prSearch} onChange={(e) => setPrSearch(e.target.value)} style={{ flex: 1, minWidth: '200px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
                 <select value={prStatus} onChange={(e) => setPrStatus(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
                   <option value="">Tất cả trạng thái</option>
@@ -3576,7 +3636,7 @@ const goView = (view) => {
 
         {/* MÀN HÌNH QUẢN LÝ THU CHI */}
         {currentView === 'cash-book' && (
-          <div style={{ padding: '10px' }}>
+          <div className="view-wrap" style={{ padding: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi ({visibleCashItems.length}{cashFiltering ? `/${allCashItems.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -3652,7 +3712,7 @@ const goView = (view) => {
             </div>
 
             {/* 4 ô KPI (cỡ chữ giống mục Nhà cung cấp) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG THU</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(cashSums.totalIn || 0)}</div>
@@ -3953,7 +4013,7 @@ const goView = (view) => {
             </div>
 
             {/* 3 ô tổng hợp theo bộ lọc */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(supplierSums.total)}</div>
@@ -4072,7 +4132,7 @@ const goView = (view) => {
             </div>
 
             {/* 3 ô tổng hợp theo bộ lọc */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(purSums.total)}</div>
@@ -4574,7 +4634,7 @@ const goView = (view) => {
             </div>
 
             {/* 3 ô tổng hợp theo bộ lọc */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ MUA</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(customerSums.total)}</div>
