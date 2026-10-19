@@ -1111,6 +1111,52 @@ useEffect(() => {
   loadDashboard();
 }, [currentView, dashTop, dashYear, dashSort]);
 
+  // ===== Báo cáo doanh thu chi tiết =====
+const [rvPeriod, setRvPeriod] = useState('month'); // 'day' | 'month' | 'quarter' | 'year'
+const [rvDay, setRvDay] = useState(() => todayLocal());
+const [rvMonth, setRvMonth] = useState(() => todayLocal().slice(0, 7));
+const [rvYear, setRvYear] = useState(() => todayLocal().slice(0, 4));
+const [rvQuarter, setRvQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
+const [rvData, setRvData] = useState({ summary: { revenue: 0, cost: 0, profit: 0, count: 0 }, invoices: [] });
+const [rvDetail, setRvDetail] = useState(null); // phiếu đang xem chi tiết
+const [rvLoading, setRvLoading] = useState(false);
+
+const getRvRange = () => {
+  const pad = (n) => String(n).padStart(2, '0');
+  if (rvPeriod === 'day') return [rvDay, rvDay];
+  if (rvPeriod === 'month' && rvMonth) {
+    const [y, m] = rvMonth.split('-');
+    return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+  }
+  if (rvPeriod === 'quarter' && rvYear) {
+    const sm = (Number(rvQuarter) - 1) * 3 + 1;
+    const em = sm + 2;
+    return [`${rvYear}-${pad(sm)}-01`, `${rvYear}-${pad(em)}-${pad(new Date(Number(rvYear), em, 0).getDate())}`];
+  }
+  if (rvPeriod === 'year' && rvYear) return [`${rvYear}-01-01`, `${rvYear}-12-31`];
+  return ['', ''];
+};
+
+const loadRevenueReport = async () => {
+  const [from, to] = getRvRange();
+  if (!from || !to) return;
+  setRvLoading(true);
+  try {
+    const res = await api(`/api/reports/revenue-detail?startDate=${from}&endDate=${to}`);
+    if (res && res.success && res.data) setRvData(res.data);
+  } catch (e) {
+    setMsg({ type: 'err', text: 'Không tải được báo cáo doanh thu: ' + e.message });
+  } finally {
+    setRvLoading(false);
+  }
+};
+
+useEffect(() => {
+  if (currentView !== 'revenue-report') return;
+  if ((rvPeriod === 'quarter' || rvPeriod === 'year') && String(rvYear).length !== 4) return; // chờ gõ đủ 4 số năm
+  loadRevenueReport();
+}, [currentView, rvPeriod, rvDay, rvMonth, rvQuarter, rvYear]);
+  
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
     try {
@@ -4746,6 +4792,179 @@ const goView = (view) => {
           </div>
         )}
 
+        {/* 📈 MÀN HÌNH BÁO CÁO DOANH THU CHI TIẾT */}
+{currentView === 'revenue-report' && (() => {
+  const s = rvData.summary || { revenue: 0, cost: 0, profit: 0, count: 0 };
+  const rows = rvData.invoices || [];
+  const pct = (profit, revenue) => (revenue > 0 ? `${((profit / revenue) * 100).toFixed(1)}%` : '-');
+  const profitColor = (v) => (v >= 0 ? '#16a34a' : '#dc2626');
+  const kpi = (label, value, color) => (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: `4px solid ${color}` }}>
+      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>{label}</div>
+      <div style={{ fontSize: '18px', fontWeight: 900, color, marginTop: '4px' }}>{value}</div>
+    </div>
+  );
+  const sel = { padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' };
+  const inp = { padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' };
+
+  return (
+    <div className="view-wrap" style={{ padding: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          <h2 style={{ margin: 0, color: '#0f172a' }}>📈 Báo Cáo Doanh Thu Chi Tiết ({rows.length})</h2>
+          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
+            Giá vốn tính theo <b style={{ color: '#0f172a' }}>bình quân gia quyền</b> của kỳ đang lọc
+          </div>
+        </div>
+        <button onClick={loadRevenueReport} disabled={rvLoading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', opacity: rvLoading ? 0.6 : 1 }}>
+          {rvLoading ? 'Đang tải...' : '🔄 Làm mới'}
+        </button>
+      </div>
+
+      {/* Bộ lọc thời gian */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+        <select value={rvPeriod} onChange={(e) => setRvPeriod(e.target.value)} style={sel}>
+          <option value="day">Theo ngày</option>
+          <option value="month">Theo tháng</option>
+          <option value="quarter">Theo quý</option>
+          <option value="year">Theo năm</option>
+        </select>
+        {rvPeriod === 'day' && <input type="date" value={rvDay} onChange={(e) => setRvDay(e.target.value)} style={inp} />}
+        {rvPeriod === 'month' && <input type="month" value={rvMonth} onChange={(e) => setRvMonth(e.target.value)} style={inp} />}
+        {rvPeriod === 'quarter' && (
+          <>
+            <select value={rvQuarter} onChange={(e) => setRvQuarter(e.target.value)} style={sel}>
+              <option value="1">Quý 1</option>
+              <option value="2">Quý 2</option>
+              <option value="3">Quý 3</option>
+              <option value="4">Quý 4</option>
+            </select>
+            <input type="number" value={rvYear} onChange={(e) => setRvYear(e.target.value)} style={{ ...inp, width: '80px' }} />
+          </>
+        )}
+        {rvPeriod === 'year' && <input type="number" value={rvYear} onChange={(e) => setRvYear(e.target.value)} style={{ ...inp, width: '80px' }} />}
+      </div>
+
+      {/* 3 ô KPI */}
+      <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+        {kpi('TỔNG DOANH THU', vnd(s.revenue), '#2563eb')}
+        {kpi('TỔNG GIÁ VỐN', vnd(s.cost), '#d97706')}
+        {kpi('TỔNG LỢI NHUẬN', vnd(s.profit), profitColor(s.profit))}
+      </div>
+
+      {/* Bảng các phiếu bán */}
+      <div style={{ background: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <FillHeight bottom={40}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Ngày bán</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Mã phiếu</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Mã KH</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Tên khách hàng</th>
+                <th style={{ padding: '12px', textAlign: 'right' }}>Giá trị phiếu</th>
+                <th style={{ padding: '12px', textAlign: 'right' }}>Giá vốn</th>
+                <th style={{ padding: '12px', textAlign: 'right' }}>Lợi nhuận</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{rvLoading ? 'Đang tải...' : 'Không có phiếu bán hàng nào trong khoảng thời gian này.'}</td></tr>
+              ) : rows.map((r) => (
+                <tr key={r.id} onClick={() => setRvDetail(r)} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }} title="Bấm để xem chi tiết từng sản phẩm">
+                  <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>{r.created_at ? new Date(r.created_at).toLocaleDateString('vi-VN') : '---'}</td>
+                  <td style={{ padding: '12px', fontWeight: 'bold', color: '#0284c7', whiteSpace: 'nowrap' }}>{r.code}</td>
+                  <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>{r.customer_code || '-'}</td>
+                  <td style={{ padding: '12px', fontWeight: 500 }}>{r.customer_name}</td>
+                  <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(r.revenue)}</td>
+                  <td style={{ padding: '12px', textAlign: 'right', color: '#d97706' }}>{vnd(r.cost)}</td>
+                  <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: profitColor(r.profit) }}>{vnd(r.profit)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr style={{ background: '#f1f5f9', borderTop: '2px solid #0f172a', fontWeight: 'bold' }}>
+                  <td colSpan="4" style={{ padding: '12px', textAlign: 'right' }}>TỔNG CỘNG ({s.count} phiếu)</td>
+                  <td style={{ padding: '12px', textAlign: 'right' }}>{vnd(s.revenue)}</td>
+                  <td style={{ padding: '12px', textAlign: 'right', color: '#d97706' }}>{vnd(s.cost)}</td>
+                  <td style={{ padding: '12px', textAlign: 'right', color: profitColor(s.profit) }}>{vnd(s.profit)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </FillHeight>
+      </div>
+
+      {/* POPUP CHI TIẾT TỪNG SẢN PHẨM CỦA PHIẾU */}
+      {rvDetail && (
+        <div style={overlayStyle}>
+          <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, color: '#7c3aed' }}>Chi tiết lãi lỗ: {rvDetail.code}</h3>
+              <button onClick={() => setRvDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px', lineHeight: 1.8 }}>
+              <div><b>Khách hàng:</b> {rvDetail.customer_name} {rvDetail.customer_code ? `(${rvDetail.customer_code})` : ''}</div>
+              <div><b>Ngày bán:</b> {rvDetail.created_at ? new Date(rvDetail.created_at).toLocaleDateString('vi-VN') : '---'}</div>
+            </div>
+
+            <div style={{ flex: 1, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '15px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Sản phẩm</th>
+                    <th style={{ padding: '8px', textAlign: 'center' }}>SL</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Đơn giá</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Giảm giá</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Doanh thu</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Giá vốn / SP</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Giá vốn</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Lợi nhuận</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Biên LN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(rvDetail.items || []).length === 0 ? (
+                    <tr><td colSpan="9" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Phiếu này chưa có chi tiết sản phẩm.</td></tr>
+                  ) : rvDetail.items.map((it, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px' }}>
+                        <div style={{ fontWeight: 500 }}>{it.sku ? `${it.sku} - ` : ''}{it.name}</div>
+                        {it.detail && <div style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic' }}>{it.detail}</div>}
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{it.quantity}</td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>{vnd(it.price)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>{vnd(it.discount)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>{vnd(it.revenue)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>{vnd(it.unit_cost)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: '#d97706' }}>{vnd(it.cost)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: profitColor(it.profit) }}>{vnd(it.profit)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: profitColor(it.profit) }}>{pct(it.profit, it.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={statBoxStyle}><div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#2563eb' }}>{vnd(rvDetail.revenue)}</div><div style={{ fontSize: '12px', color: '#64748b' }}>Doanh thu phiếu</div></div>
+              <div style={statBoxStyle}><div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#d97706' }}>{vnd(rvDetail.cost)}</div><div style={{ fontSize: '12px', color: '#64748b' }}>Giá vốn phiếu</div></div>
+              <div style={statBoxStyle}><div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: profitColor(rvDetail.profit) }}>{vnd(rvDetail.profit)} ({pct(rvDetail.profit, rvDetail.revenue)})</div><div style={{ fontSize: '12px', color: '#64748b' }}>Lợi nhuận phiếu</div></div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setRvDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+})()}
+        
         {/* 📊 MÀN HÌNH BÁO CÁO KẾT QUẢ KINH DOANH (LÃI / LỖ) */}
         {currentView === 'profit-loss-report' && (
           <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
@@ -6664,6 +6883,7 @@ const MENU_GROUPS = [
     title: 'Báo cáo',
     items: [
       { view: 'cash-book', label: '💰 Thu chi' },
+      { view: 'revenue-report', label: '📈 Báo cáo doanh thu chi tiết' }, 
       { view: 'profit-loss-report', label: '📊 Báo cáo KQ kinh doanh' },
       { view: 'inventory-report', label: '📊 Báo cáo X - N - T' },
     ],
