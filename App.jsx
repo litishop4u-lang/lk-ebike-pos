@@ -973,10 +973,31 @@ function AppMain() {
   const [plReport, setPlReport] = useState(EMPTY_PL_REPORT);
   const [plStartDate, setPlStartDate] = useState('2025-01-01');
   const [plEndDate, setPlEndDate] = useState(todayLocal());
+  const [plPeriod, setPlPeriod] = useState('custom'); // 'month' | 'quarter' | 'year' | 'custom'
+  const [plMonth, setPlMonth] = useState(() => todayLocal().slice(0, 7));
+  const [plYear, setPlYear] = useState(() => todayLocal().slice(0, 4));
+  const [plQuarter, setPlQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
 
+  // Đổi tháng / quý / năm thành [ngày bắt đầu, ngày kết thúc]
+const getPlRange = () => {
+  const pad = (n) => String(n).padStart(2, '0');
+  if (plPeriod === 'month' && plMonth) {
+    const [y, m] = plMonth.split('-');
+    return [`${y}-${m}-01`, `${y}-${m}-${pad(new Date(Number(y), Number(m), 0).getDate())}`];
+  }
+  if (plPeriod === 'quarter' && plYear) {
+    const sm = (Number(plQuarter) - 1) * 3 + 1;
+    const em = sm + 2;
+    return [`${plYear}-${pad(sm)}-01`, `${plYear}-${pad(em)}-${pad(new Date(Number(plYear), em, 0).getDate())}`];
+  }
+  if (plPeriod === 'year' && plYear) return [`${plYear}-01-01`, `${plYear}-12-31`];
+  return [plStartDate, plEndDate];
+};
+  
   const loadProfitLossReport = async () => {
     try {
-      const res = await api(`/api/reports/profit-loss?startDate=${plStartDate}&endDate=${plEndDate}`);
+      const [from, to] = getPlRange();
+      const res = await api(`/api/reports/profit-loss?startDate=${from}&endDate=${to}`);
       if (res && res.success) {
         const d = res.data || {};
         setPlReport({
@@ -991,6 +1012,13 @@ function AppMain() {
       console.error('Lỗi kết nối API báo cáo:', err);
     }
   };
+
+  // Đổi tháng / quý / năm là tự tải lại báo cáo
+useEffect(() => {
+  if (currentView !== 'profit-loss-report') return;
+  if ((plPeriod === 'quarter' || plPeriod === 'year') && String(plYear).length !== 4) return; // chờ gõ đủ 4 số năm
+  loadProfitLossReport();
+}, [plPeriod, plMonth, plQuarter, plYear]);
 
   // Quản lý thông tin doanh nghiệp & Logo (tự động lưu vào localStorage)
   const [companyInfo, setCompanyInfo] = useState(() => {
@@ -4490,13 +4518,42 @@ const goView = (view) => {
           <div style={{ padding: '20px', background: '#f8fafc', minHeight: '100vh', borderRadius: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
               <h2 style={{ margin: 0, color: '#1e293b' }}>📊 Báo Cáo Kết Quả Kinh Doanh (Lãi / Lỗ)</h2>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span>Từ ngày:</span>
-                <input type="date" value={plStartDate} onChange={e => setPlStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-                <span>Đến ngày:</span>
-                <input type="date" value={plEndDate} onChange={e => setPlEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
-                <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
-              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+  <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#475569' }}>Lọc theo:</span>
+  <select value={plPeriod} onChange={(e) => setPlPeriod(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+    <option value="month">Theo tháng</option>
+    <option value="quarter">Theo quý</option>
+    <option value="year">Theo năm</option>
+    <option value="custom">Khoảng ngày</option>
+  </select>
+
+  {plPeriod === 'month' && (
+    <input type="month" value={plMonth} onChange={(e) => setPlMonth(e.target.value)} style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+  )}
+  {plPeriod === 'quarter' && (
+    <>
+      <select value={plQuarter} onChange={(e) => setPlQuarter(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+        <option value="1">Quý 1</option>
+        <option value="2">Quý 2</option>
+        <option value="3">Quý 3</option>
+        <option value="4">Quý 4</option>
+      </select>
+      <input type="number" value={plYear} onChange={(e) => setPlYear(e.target.value)} style={{ width: '80px', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+    </>
+  )}
+  {plPeriod === 'year' && (
+    <input type="number" value={plYear} onChange={(e) => setPlYear(e.target.value)} style={{ width: '80px', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+  )}
+  {plPeriod === 'custom' && (
+    <>
+      <input type="date" value={plStartDate} onChange={(e) => setPlStartDate(e.target.value)} style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+      <span>đến</span>
+      <input type="date" value={plEndDate} onChange={(e) => setPlEndDate(e.target.value)} style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+    </>
+  )}
+
+  <button onClick={loadProfitLossReport} style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
+</div>
             </div>
 
             <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', maxWidth: '800px', margin: '0 auto' }}>
