@@ -2039,9 +2039,28 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
     return null;
   })();
 
+  // Tạm ứng của đơn đặt hàng chưa xuất bán -> hiện như phiếu thu trong Thu chi
+// (bỏ qua nếu server đã có phiếu thu tham chiếu đúng mã đơn, tránh trùng)
+const orderDepositItems = (ordersList || [])
+  .filter((o) => isPendingOrder(o) && (Number(o.paid_amount) || 0) > 0 && !(cashItems || []).some((c) => c.reference_code === o.code))
+  .map((o) => ({
+    id: 'od-' + o.id,
+    virtual: true,
+    order_id: o.id,
+    code: 'TU-' + o.code,
+    type: 'IN',
+    amount: Number(o.paid_amount) || 0,
+    category: 'Tạm ứng đơn đặt hàng',
+    payment_method: o.payment_method || 'Tiền mặt',
+    reference_code: o.code,
+    note: `Tạm ứng đơn đặt hàng ${o.code} - ${o.customer_name || ''}`,
+    created_at: o.created_at,
+  }));
+const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
+
   // Lọc phiếu: theo thời gian + từ khóa (mã GD, mã/tên NCC-KH, chứng từ, danh mục, ghi chú)
   const cashKeyword = removeAccents(cashSearch.trim());
-  const visibleCashItems = (cashItems || []).filter((item) => {
+  const visibleCashItems = allCashItems.filter((item) => {
     if (cashRange) {
       const d = String(item.created_at || '').slice(0, 10);
       if (d < cashRange[0] || d > cashRange[1]) return false;
@@ -2062,7 +2081,15 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
         const tout = visibleCashItems.filter((i) => i.type !== 'IN').reduce((s, i) => s + (Number(i.amount) || 0), 0);
         return { totalIn: tin, totalOut: tout, netProfit: tin - tout, balance: Number(cashSummary.balance) || 0 };
       })()
-    : cashSummary;
+    : (() => {
+        const dep = orderDepositItems.reduce((s, i) => s + i.amount, 0);
+        return {
+          ...cashSummary,
+          totalIn: (Number(cashSummary.totalIn) || 0) + dep,
+          netProfit: (Number(cashSummary.netProfit) || 0) + dep,
+          balance: (Number(cashSummary.balance) || 0) + dep,
+        };
+      })();
 
     // Sắp xếp khách hàng theo mã A→Z (số trong mã so đúng thứ tự: KH2 trước KH10)
   const sortedCustomers = useMemo(
@@ -3551,7 +3578,7 @@ const goView = (view) => {
         {currentView === 'cash-book' && (
           <div style={{ padding: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi ({visibleCashItems.length}{cashFiltering ? `/${cashItems.length}` : ''})</h2>
+              <h2 style={{ margin: 0, color: '#0f172a' }}>Quản Lý Thu Chi ({visibleCashItems.length}{cashFiltering ? `/${allCashItems.length}` : ''})</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => { setEditingCashId(null); setCashForm(newCashForm()); setShowCashModal(true); }}
@@ -3715,6 +3742,7 @@ const goView = (view) => {
                               >👁️</button>
                               <button
                                 onClick={() => {
+                                  if (item.virtual) { handleEditOrder({ id: item.order_id }); return; }
                                   setEditingCashId(item.id);
                                   setCashForm({
                                     type: item.type,
@@ -3732,6 +3760,7 @@ const goView = (view) => {
                               >✏️</button>
                               <button
                                 onClick={async () => {
+                                  if (item.virtual) { alert('Đây là tạm ứng của đơn đặt hàng. Hãy sửa số tạm ứng trong đơn đặt hàng.'); return; } 
                                   if (confirm('Bạn có chắc muốn xóa giao dịch này?')) {
                                     try {
                                       await api(`/api/cash-book/${item.id}`, { method: 'DELETE' });
@@ -6006,6 +6035,7 @@ const goView = (view) => {
               <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '20px' }}>
                 <button onClick={() => setCustomerDetailTab('orders')} style={tabBtnStyle(customerDetailTab === 'orders')}>📦 Đơn Hàng</button>
                 <button onClick={() => setCustomerDetailTab('payments')} style={tabBtnStyle(customerDetailTab === 'payments')}>💰 Lịch Sử Thanh Toán</button>
+                <button onClick={() => setCustomerDetailTab('returns')} style={tabBtnStyle(customerDetailTab === 'returns')}>↩️ Lịch Sử Trả Hàng</button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
@@ -6118,6 +6148,51 @@ const goView = (view) => {
                   </div>
                 );
               })()}
+
+              {customerDetailTab === 'returns' && (
+  <div style={{ flex: 1, overflowY: 'auto' }}>
+    <h4>Lịch sử trả hàng</h4>
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+          <th style={{ padding: '10px' }}>Mã phiếu trả</th>
+          <th style={{ padding: '10px' }}>Phiếu bán gốc</th>
+          <th style={{ padding: '10px' }}>Ngày trả</th>
+          <th style={{ padding: '10px', textAlign: 'right' }}>Tiền hoàn</th>
+          <th style={{ padding: '10px' }}>Lý do</th>
+          <th style={{ padding: '10px' }}>Trạng thái</th>
+          <th style={{ padding: '10px', textAlign: 'center' }}>Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {customerReturnList.length === 0 ? (
+          <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có phiếu trả hàng nào.</td></tr>
+        ) : customerReturnList.map((r) => (
+          <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+            <td
+              onClick={() => { setShowCustomerDetailModal(false); setCurrentView('return-orders'); loadReturnOrders(); handleViewReturn(r); }}
+              style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
+              title="Bấm để xem chi tiết"
+            >{r.code}</td>
+            <td style={{ padding: '10px' }}>{r.invoice_code || '-'}</td>
+            <td style={{ padding: '10px' }}>{r.return_date ? String(r.return_date).slice(0, 10).split('-').reverse().join('/') : '---'}</td>
+            <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(r.refund_amount)}</td>
+            <td style={{ padding: '10px' }}>{r.reason}</td>
+            <td style={{ padding: '10px' }}>
+              <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: isDoneReturn(r.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(r.status) ? '#16a34a' : '#d97706' }}>
+                {isDoneReturn(r.status) ? 'Hoàn thành' : r.status}
+              </span>
+            </td>
+            <td style={{ padding: '10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+              <button title="Xem" onClick={() => { setShowCustomerDetailModal(false); setCurrentView('return-orders'); loadReturnOrders(); handleViewReturn(r); }} style={smallBtn('#e0f2fe', '#0284c7')}>👁️</button>
+              <button title="Sửa" onClick={() => { setShowCustomerDetailModal(false); setCurrentView('return-orders'); loadReturnOrders(); handleEditReturn(r); }} style={smallBtn('#fef3c7', '#d97706')}>✏️</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+)}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
                 <button onClick={() => setShowCustomerDetailModal(false)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
