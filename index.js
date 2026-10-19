@@ -1909,6 +1909,74 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
 
   return json({ success: true, data: { revenue, profit, orders, daily, recent, topProducts, topCustomers } }, 200, origin);
 }
+
+      // ===== BÁO CÁO DOANH THU CHI TIẾT (theo từng phiếu bán + từng sản phẩm) =====
+if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
+  await ensureReturnSchema(db);
+  await ensureChassisColumns(db);
+  const u = new URL(request.url);
+  const startDate = dateOnly(u.searchParams.get('startDate')) || '2000-01-01';
+  const endDate = dateOnly(u.searchParams.get('endDate')) || '2100-12-31';
+
+  // Đơn giá vốn bình quân gia quyền của kỳ (cùng hàm với báo cáo X-N-T / Kết quả kinh doanh)
+  const report = await buildInventoryReport(db, startDate, endDate);
+  const unitCost = new Map(report.map((r) => [String(r.id), Number(r.avgCost) || 0]));
+
+  const invs = (await db.prepare(`
+    SELECT i.id, i.code, i.customer_name, i.created_at, i.total, i.paid_amount, i.debt,
+           (SELECT code FROM customers WHERE name = i.customer_name LIMIT 1) AS customer_code
+    FROM invoices i
+    WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
+    ORDER BY i.created_at DESC, i.id DESC
+  `).bind(startDate, endDate).all()).results || [];
+
+  const lineRows = (await db.prepare(`
+    SELECT ii.invoice_id, ii.product_id, ii.quantity, ii.price, ii.discount, ii.total, ii.chassis_color,
+           p.name AS product_name, p.sku
+    FROM invoice_items ii
+    JOIN invoices i ON ii.invoice_id = i.id
+    LEFT JOIN products p ON ii.product_id = p.id
+    WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
+    ORDER BY ii.id
+  `).bind(startDate, endDate).all()).results || [];
+
+  const byInvoice = new Map();
+  for (const l of lineRows) {
+    const qty = Number(l.quantity) || 0;
+    const uc = unitCost.get(String(l.product_id)) || 0;
+    const revenue = Number(l.total) || 0;
+    const cost = Math.round(qty * uc);
+    const item = {
+      product_id: l.product_id,
+      sku: l.sku || '',
+      name: l.product_name || 'Sản phẩm đã xóa',
+      detail: l.chassis_color || '',
+      quantity: qty,
+      price: Number(l.price) || 0,
+      discount: Number(l.discount) || 0,
+      revenue,
+      unit_cost: Math.round(uc),
+      cost,
+      profit: revenue - cost,
+    };
+    if (!byInvoice.has(l.invoice_id)) byInvoice.set(l.invoice_id, []);
+    byInvoice.get(l.invoice_id).push(item);
+  }
+
+  const invoices = invs.map((inv) => {
+    const items = byInvoice.get(inv.id) || [];
+    const cost = items.reduce((s, x) => s + x.cost, 0);
+    const revenue = Number(inv.total) || 0;
+    return { ...inv, revenue, cost, profit: revenue - cost, items };
+  });
+
+  const summary = invoices.reduce(
+    (a, r) => ({ revenue: a.revenue + r.revenue, cost: a.cost + r.cost, profit: a.profit + r.profit, count: a.count + 1 }),
+    { revenue: 0, cost: 0, profit: 0, count: 0 }
+  );
+
+  return json({ success: true, data: { summary, invoices } }, 200, origin);
+}
       
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
