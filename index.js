@@ -1848,6 +1848,8 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
   const startDate = dateOnly(u.searchParams.get('startDate'));
   const endDate = dateOnly(u.searchParams.get('endDate'));
   const topStart = dateOnly(u.searchParams.get('topStart')) || startDate; // kỳ xếp hạng top SP / top KH
+  const topEnd = dateOnly(u.searchParams.get('topEnd')) || endDate;
+  const sortBy = u.searchParams.get('sort') === 'qty' ? 'qty' : 'value'; // chỉ nhận 2 giá trị này
   if (!startDate || !endDate) throw new HttpError(400, 'Thiếu khoảng ngày');
 
   // Doanh thu + số đơn theo từng ngày
@@ -1876,7 +1878,8 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
     'SELECT id, code, customer_name, total, paid_amount, debt, created_at FROM invoices ORDER BY created_at DESC, id DESC LIMIT 8'
   ).all()).results || [];
 
-  // Top 10 sản phẩm bán chạy (theo số lượng)
+   // Top 10 sản phẩm bán chạy (theo số lượng hoặc doanh thu)
+  const prodOrder = sortBy === 'qty' ? 'qty DESC, revenue DESC' : 'revenue DESC, qty DESC';
   const topProducts = (await db.prepare(`
     SELECT ii.product_id AS id, COALESCE(p.sku, '') AS sku, COALESCE(p.name, 'Sản phẩm đã xóa') AS name,
            SUM(ii.quantity) AS qty, SUM(ii.total) AS revenue
@@ -1885,20 +1888,24 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
     LEFT JOIN products p ON ii.product_id = p.id
     WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
     GROUP BY ii.product_id
-    ORDER BY qty DESC, revenue DESC
+    ORDER BY ${prodOrder}
     LIMIT 10
-  `).bind(topStart, endDate).all()).results || [];
+  `).bind(topStart, topEnd).all()).results || [];
 
-  // Top 10 khách mua nhiều nhất (theo giá trị, bỏ "Khách lẻ")
+   // Top 10 khách hàng (theo tổng tiền hoặc tổng số sản phẩm đã mua, bỏ "Khách lẻ")
+  const cusOrder = sortBy === 'qty' ? 'qty DESC, total DESC' : 'total DESC, qty DESC';
   const topCustomers = (await db.prepare(`
-    SELECT customer_name AS name, COUNT(*) AS orders, COALESCE(SUM(total), 0) AS total
-    FROM invoices
-    WHERE date(created_at) >= ? AND date(created_at) <= ?
-      AND customer_name NOT LIKE 'Khách lẻ%'
-    GROUP BY customer_name
-    ORDER BY total DESC
+    SELECT i.customer_name AS name,
+           COUNT(*) AS orders,
+           COALESCE(SUM(i.total), 0) AS total,
+           COALESCE(SUM((SELECT SUM(ii.quantity) FROM invoice_items ii WHERE ii.invoice_id = i.id)), 0) AS qty
+    FROM invoices i
+    WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
+      AND i.customer_name NOT LIKE 'Khách lẻ%'
+    GROUP BY i.customer_name
+    ORDER BY ${cusOrder}
     LIMIT 10
-  `).bind(topStart, endDate).all()).results || [];
+  `).bind(topStart, topEnd).all()).results || [];
 
   return json({ success: true, data: { revenue, profit, orders, daily, recent, topProducts, topCustomers } }, 200, origin);
 }
