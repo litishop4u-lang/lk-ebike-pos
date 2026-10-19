@@ -2284,7 +2284,7 @@ useEffect(() => { loadWarranties(); }, []);
     }
   };
 
-  const saveWarranty = () => {
+  const saveWarranty = async () => {
     const f = warrantyForm;
     if (!f) return;
     if (!String(f.code || '').trim()) return alert('Vui lòng nhập mã phiếu bảo hành!');
