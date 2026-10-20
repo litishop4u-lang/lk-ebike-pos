@@ -2946,8 +2946,8 @@ const goView = (view) => {
           </div>
           )}
 
-            {/* Bảng Danh sách Phiếu Bán Hàng */}
-           <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                        {/* Bảng Danh sách Phiếu Bán Hàng */}
+            <div className="pos-card" style={{ display: posTab === 'invoices' ? 'block' : 'none', background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({visibleInvoices.length}{posFiltering ? `/${invoicesList.length}` : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -2976,22 +2976,22 @@ const goView = (view) => {
                         <td style={{ padding: '10px', color: inv.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(inv.debt)}</td>
                         <td style={{ padding: '10px' }}>{inv.payment_method || 'Tiền mặt'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
-                         {(() => {
-                          const hasWarranty = warrantiedInvoices.has(inv.code);
-                          return (
-                            <button
-                              disabled={hasWarranty}
-                              onClick={() => { openWarrantyModal({ invoice_code: inv.code }); handleSelectWarrantyInvoice(inv.code); }}
-                              title={hasWarranty ? 'Phiếu bán hàng này đã có phiếu bảo hành' : 'Tạo phiếu bảo hành'}
-                              style={{
-                                background: '#dcfce7', color: '#16a34a', border: 'none', padding: '4px 6px', borderRadius: '4px', marginRight: '4px',
-                                cursor: hasWarranty ? 'not-allowed' : 'pointer',
-                                opacity: hasWarranty ? 0.35 : 1,
-                                filter: hasWarranty ? 'grayscale(1)' : 'none',
-                              }}
-                            >🛡️</button>
-                          );
-                        })()}
+                          {(() => {
+                            const hasWarranty = warrantiedInvoices.has(inv.code);
+                            return (
+                              <button
+                                disabled={hasWarranty}
+                                onClick={() => { openWarrantyModal({ invoice_code: inv.code }); handleSelectWarrantyInvoice(inv.code); }}
+                                title={hasWarranty ? 'Phiếu bán hàng này đã có phiếu bảo hành' : 'Tạo phiếu bảo hành'}
+                                style={{
+                                  background: '#dcfce7', color: '#16a34a', border: 'none', padding: '4px 6px', borderRadius: '4px', marginRight: '4px',
+                                  cursor: hasWarranty ? 'not-allowed' : 'pointer',
+                                  opacity: hasWarranty ? 0.35 : 1,
+                                  filter: hasWarranty ? 'grayscale(1)' : 'none',
+                                }}
+                              >🛡️</button>
+                            );
+                          })()}
                           <button onClick={() => handlePrintOrder(inv, false)} title="In phiếu bán hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
                           <button onClick={() => handleViewDetail('invoices', inv.id)} title="Xem chi tiết" style={{ background: '#f1f5f9', color: '#475569', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
                           <button onClick={() => handleEditInvoice(inv)} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>✏️</button>
@@ -3004,17 +3004,9 @@ const goView = (view) => {
               </table>
             </div>
 
-            {posTab === 'orders' && (
-            <div className="pos-card" style={{ ... }}>
-            <h3 ...>📝 Danh sách Đơn Đặt Hàng ...</h3>
-            <table> ... </table>
-          </div>
-          )}
-          </div>   {/* đóng pos-page, giữ nguyên */}
-        )}  
             {/* Bảng Danh sách Đơn Đặt Hàng */}
-            <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-             <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
+            <div className="pos-card" style={{ display: posTab === 'orders' ? 'block' : 'none', background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
