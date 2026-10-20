@@ -283,7 +283,7 @@ const RESPONSIVE_CSS = `
 }
 .pos-page > div:first-child { flex-shrink: 0; margin-bottom: 0 !important; }
 .pos-card {
-  flex: 0 1 auto; min-height: 180px; overflow-y: auto;
+  flex: 1 1 0; min-height: 180px; overflow-y: auto;
   margin-bottom: 0 !important; box-sizing: border-box;
 }
 .pos-card thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
@@ -445,6 +445,7 @@ function AppMain() {
   const [posQuarter, setPosQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
   const [posFrom, setPosFrom] = useState('');
   const [posTo, setPosTo] = useState('');
+  const [posTab, setPosTab] = useState('invoices'); // 'invoices' = Phiếu bán hàng | 'orders' = Đơn đặt hàng
 
   const [returnOrdersData, setReturnOrdersData] = useState(EMPTY_RETURN_DATA);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -2824,13 +2825,13 @@ const goView = (view) => {
               <h2 style={{ margin: 0 }}>Quản lý Đơn hàng & Phiếu bán hàng</h2>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  onClick={() => { setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  onClick={() => { setPosTab('invoices'); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('invoices'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
                   style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Phiếu Bán Hàng
                 </button>
                 <button
-                  onClick={() => { setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
+                  onClick={() => { setPosTab('orders'); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
                   style={{ padding: '10px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Đơn Đặt Hàng
@@ -2919,6 +2920,32 @@ const goView = (view) => {
   </div>
 </div>
 
+              {/* 2 tab: Phiếu bán hàng / Đơn đặt hàng */}
+<div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+  {[
+    { key: 'invoices', label: `📦 Phiếu bán hàng (${visibleInvoices.length})`, color: '#16a34a' },
+    { key: 'orders', label: `📝 Đơn đặt hàng (${visibleOrders.length})`, color: '#7c3aed' },
+  ].map((t) => (
+    <button
+      key={t.key}
+      onClick={() => setPosTab(t.key)}
+      style={{
+        flex: '0 1 auto', padding: '9px 18px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold',
+        border: `1px solid ${t.color}`,
+        background: posTab === t.key ? t.color : '#fff',
+        color: posTab === t.key ? '#fff' : t.color,
+      }}
+    >{t.label}</button>
+  ))}
+</div>
+              
+            {posTab === 'invoices' && (
+            <div className="pos-card" style={{ ... }}>
+            <h3 ...>📦 Danh sách Phiếu Bán Hàng ...</h3>
+            <table> ... </table>
+          </div>
+          )}
+
             {/* Bảng Danh sách Phiếu Bán Hàng */}
            <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({visibleInvoices.length}{posFiltering ? `/${invoicesList.length}` : ''})</h3>
@@ -2977,6 +3004,14 @@ const goView = (view) => {
               </table>
             </div>
 
+            {posTab === 'orders' && (
+            <div className="pos-card" style={{ ... }}>
+            <h3 ...>📝 Danh sách Đơn Đặt Hàng ...</h3>
+            <table> ... </table>
+          </div>
+          )}
+          </div>   {/* đóng pos-page, giữ nguyên */}
+        )}  
             {/* Bảng Danh sách Đơn Đặt Hàng */}
             <div className="pos-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
              <h3 style={{ marginTop: 0, color: '#7c3aed' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
