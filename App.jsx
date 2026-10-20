@@ -1778,9 +1778,12 @@ useEffect(() => {
     const rows = [];
 
     supplierCashItems.forEach((c) => {
-      const ref = c.reference_code || '';
-      const hit = codes.has(ref) || (ref && ref === sup.code) || (supName && c.note && removeAccents(c.note).includes(supName));
-      if (!hit) return;
+  // Chỉ lấy phiếu thu chi thuộc danh mục NCC (Mua hàng / Trả nợ NCC, Thu hoàn tiền NCC...)
+  // Phiếu "Chi phí vận chuyển", "Chi phí khác"... không phải thanh toán cho NCC
+  if (!String(c.category || '').includes('NCC')) return;
+  const ref = c.reference_code || '';
+  const hit = codes.has(ref) || (ref && ref === sup.code) || (supName.length >= 4 && c.note && removeAccents(c.note).includes(supName));
+  if (!hit) return;
       if (codes.has(ref)) usedCodes.add(ref);
       rows.push({ key: 'c' + c.id, date: c.created_at, code: c.code, type: c.type, amount: Number(c.amount) || 0, method: c.payment_method, note: c.note || c.reference_code || '', kind: 'cash', ref: c });
     });
@@ -1934,6 +1937,7 @@ useEffect(() => {
     const rows = [];
 
     customerCashItems.forEach((c) => {
+      if (!['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(c.category)) return; // chỉ lấy phiếu liên quan khách hàng
       const ref = c.reference_code || '';
       const hit = codes.has(ref) || (ref && ref === cus.code) || (cusName.length >= 4 && c.note && removeAccents(c.note).includes(cusName));
       if (!hit) return;
