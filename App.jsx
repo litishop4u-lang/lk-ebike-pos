@@ -2939,13 +2939,6 @@ const goView = (view) => {
   ))}
 </div>
               
-            {posTab === 'invoices' && (
-            <div className="pos-card" style={{ ... }}>
-            <h3 ...>📦 Danh sách Phiếu Bán Hàng ...</h3>
-            <table> ... </table>
-          </div>
-          )}
-
                         {/* Bảng Danh sách Phiếu Bán Hàng */}
             <div className="pos-card" style={{ display: posTab === 'invoices' ? 'block' : 'none', background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <h3 style={{ marginTop: 0, color: '#16a34a' }}>📦 Danh sách Phiếu Bán Hàng ({visibleInvoices.length}{posFiltering ? `/${invoicesList.length}` : ''})</h3>
