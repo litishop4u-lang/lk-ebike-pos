@@ -944,7 +944,8 @@ function AppMain() {
 
   useEffect(() => {
     if (currentView === 'cash-book') { loadCashBook(); loadPurchaseReturns(); loadReturnOrders(); }
-  }, [currentView]);
+    if (currentView === 'suppliers') loadCashBook();
+    }, [currentView]);
 
   const loadInventoryReport = async () => {
     const reqId = ++reportReqRef.current;
@@ -2184,8 +2185,22 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
       const m = map[po.supplier_id] || (map[po.supplier_id] = { total: 0, paid: 0, debt: 0, count: 0 });
       m.total += total; m.paid += paid; m.debt += debt; m.count += 1;
     });
-    return map;
-  }, [purchaseOrders, rangeStart, rangeEnd]);
+    const idByCode = {};
+(suppliers || []).forEach((s) => { idByCode[s.code] = s.id; });
+(cashItems || []).forEach((c) => {
+  if (!String(c.category || '').includes('NCC')) return;
+  const sid = idByCode[c.reference_code];
+  if (!sid) return; // chỉ tính phiếu tham chiếu thẳng mã NCC (phiếu tự sinh đã nằm trong phiếu nhập)
+  const d = String(c.created_at || '').slice(0, 10);
+  if (rangeStart && (d < rangeStart || d > rangeEnd)) return;
+  const amt = Number(c.amount) || 0;
+  const delta = c.type === 'IN' ? -amt : amt;
+  const m = map[sid] || (map[sid] = { total: 0, paid: 0, debt: 0, count: 0 });
+  m.paid += delta;
+  m.debt -= delta;
+});
+return map;
+}, [purchaseOrders, rangeStart, rangeEnd, cashItems, suppliers]);
 
   // Dòng hiển thị: không lọc thời gian thì dùng số của server, có lọc thì dùng số tính theo kỳ
   const supplierRows = visibleSuppliers
@@ -4360,7 +4375,10 @@ const goView = (view) => {
                       <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{s.address || '-'}</td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(s.f_total)}</td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(s.f_paid)}</td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: s.f_debt > 0 ? '#dc2626' : 'inherit', fontWeight: s.f_debt > 0 ? 'bold' : 'normal' }}>{vnd(s.f_debt)}</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: s.f_debt > 0 ? '#dc2626' : s.f_debt < 0 ? '#0284c7' : 'inherit', fontWeight: s.f_debt !== 0 ? 'bold' : 'normal' }}>
+                        {vnd(s.f_debt)}
+                        {s.f_debt < 0 && <div style={{ fontSize: '11px', fontWeight: 'normal' }}>(đã trả trước)</div>}
+                      </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{s.status === 'active' ? 'Hoạt động' : 'Ngừng'}</td>
                     </tr>
                   ))}
