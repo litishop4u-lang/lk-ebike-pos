@@ -1350,20 +1350,27 @@ export default {
         // Công nợ = tổng nhập - (tiền trả ngay trên phiếu nhập + các khoản thanh toán về sau) - hàng đã trả NCC + tiền NCC đã hoàn lại cho mình
         // [FIX] Cộng lại received_amount: nếu NCC đã hoàn tiền mặt thì phần đó không còn làm giảm nợ nữa
         const { results } = await db.prepare(`
-          SELECT s.*,
-            COALESCE(p.total_purchase, 0) AS total_purchase,
-            COALESCE(p.po_paid, 0) + COALESCE(pay.total_paid, 0) AS total_paid,
-            COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0)
-              - COALESCE(rt.total_returned, 0) + COALESCE(rt.total_received, 0) AS total_debt
-          FROM suppliers s
-          LEFT JOIN (SELECT supplier_id, SUM(total) AS total_purchase, SUM(paid_amount) AS po_paid
-                     FROM purchase_orders GROUP BY supplier_id) p ON s.id = p.supplier_id
-          LEFT JOIN (SELECT supplier_id, SUM(amount) AS total_paid
-                     FROM supplier_payments GROUP BY supplier_id) pay ON s.id = pay.supplier_id
-          LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned, SUM(COALESCE(received_amount, 0)) AS total_received
-                     FROM purchase_return_orders WHERE status LIKE '%Hoàn Thành%' GROUP BY supplier_id) rt ON s.id = rt.supplier_id
-          ORDER BY s.id DESC
-        `).all();
+  SELECT s.*,
+    COALESCE(p.total_purchase, 0) AS total_purchase,
+    COALESCE(p.po_paid, 0) + COALESCE(pay.total_paid, 0) + COALESCE(cb.cash_out, 0) - COALESCE(cb.cash_in, 0) AS total_paid,
+    COALESCE(p.total_purchase, 0) - COALESCE(p.po_paid, 0) - COALESCE(pay.total_paid, 0)
+      - COALESCE(cb.cash_out, 0) + COALESCE(cb.cash_in, 0)
+      - COALESCE(rt.total_returned, 0) + COALESCE(rt.total_received, 0) AS total_debt
+  FROM suppliers s
+  LEFT JOIN (SELECT supplier_id, SUM(total) AS total_purchase, SUM(paid_amount) AS po_paid
+             FROM purchase_orders GROUP BY supplier_id) p ON s.id = p.supplier_id
+  LEFT JOIN (SELECT supplier_id, SUM(amount) AS total_paid
+             FROM supplier_payments GROUP BY supplier_id) pay ON s.id = pay.supplier_id
+  LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned, SUM(COALESCE(received_amount, 0)) AS total_received
+             FROM purchase_return_orders WHERE status LIKE '%Hoàn Thành%' GROUP BY supplier_id) rt ON s.id = rt.supplier_id
+  LEFT JOIN (SELECT reference_code,
+                    SUM(CASE WHEN type = 'OUT' THEN amount ELSE 0 END) AS cash_out,
+                    SUM(CASE WHEN type = 'IN' THEN amount ELSE 0 END) AS cash_in
+             FROM cash_books
+             WHERE category LIKE '%NCC%'
+             GROUP BY reference_code) cb ON cb.reference_code = s.code
+  ORDER BY s.id DESC
+`).all();
         return json(results || [], 200, origin);
       }
 
