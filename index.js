@@ -42,6 +42,53 @@ const idOf = (pathname) => Number(pathname.split('/')[3]);
 const dateOnly = (v) => String(v || '').slice(0, 10);
 // Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
 const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
+// ===== Công nợ khách: tiền thu nợ nhập tay trong Thu chi =====
+const normName = (v) => String(v ?? '').normalize('NFC').trim().toLowerCase();
+
+// Tiền thu nợ khách (danh mục "Bán hàng / Thu nợ KH", chứng từ = mã khách), gom theo tên khách
+async function loadCollectionsByName(db) {
+  const m = new Map();
+  try {
+    const { results } = await db.prepare(`
+      SELECT c.name AS customer_name, SUM(cb.amount) AS collected
+      FROM cash_books cb
+      JOIN customers c ON c.code = cb.reference_code
+      WHERE cb.type = 'IN' AND cb.category = 'Bán hàng / Thu nợ KH'
+      GROUP BY c.id
+    `).all();
+    for (const r of results || []) {
+      const k = normName(r.customer_name);
+      m.set(k, (m.get(k) || 0) + (Number(r.collected) || 0));
+    }
+  } catch (e) { console.error('load collections failed', e); }
+  return m;
+}
+
+// Phân bổ tiền thu nợ vào các phiếu còn nợ của khách (phiếu cũ nhất trước).
+// Chỉ để HIỂN THỊ: không sửa dữ liệu gốc trong bảng invoices.
+function withCollected(invoices, collections) {
+  const left = new Map(collections);
+  const used = new Map();
+  const baseDebt = (inv) =>
+    inv.debt !== null && inv.debt !== undefined
+      ? Number(inv.debt) || 0
+      : (Number(inv.total) || 0) - (Number(inv.paid_amount) || 0);
+  [...invoices]
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')) || (a.id - b.id))
+    .forEach((inv) => {
+      const k = normName(inv.customer_name);
+      const take = Math.min(Math.max(0, baseDebt(inv)), left.get(k) || 0);
+      if (take > 0) {
+        left.set(k, left.get(k) - take);
+        used.set(inv.id, take);
+      }
+    });
+  return invoices.map((inv) => {
+    const take = used.get(inv.id) || 0;
+    if (!take) return inv;
+    return { ...inv, paid_amount: (Number(inv.paid_amount) || 0) + take, debt: baseDebt(inv) - take, collected: take };
+  });
+}
 // ===== Phiếu bảo hành (lưu trên D1 để dùng chung giữa máy tính và điện thoại) =====
 let warrantyReady = false;
 async function ensureWarrantySchema(db) {
@@ -712,6 +759,11 @@ export default {
       if (pathname === '/api/invoices' && method === 'POST') {
         const payload = await request.json();
         const r = await createInvoice(db, payload);
+                // Phiếu bán tạo từ đơn đặt hàng -> đơn chuyển sang "Hoàn thành" (vẫn giữ trong danh sách)
+        const fromOrderId = Number(payload.from_order_id);
+        if (Number.isInteger(fromOrderId) && fromOrderId > 0) {
+          await db.prepare("UPDATE orders SET status = 'Hoàn thành' WHERE id = ?").bind(fromOrderId).run();
+        }
 
         // 👉 TỰ ĐỘNG SINH PHIẾU THU NẾU HÓA ĐƠN CÓ THANH TOÁN (paid_amount > 0)
         const paidAmount = Number(payload.paid_amount) || 0;
@@ -736,10 +788,10 @@ export default {
         return json({ success: true, ...r }, 201, origin);
       }
 
-      // GET /api/invoices — Lấy danh sách phiếu bán hàng
+      // GET /api/invoices — Lấy danh sách phiếu bán hàng (đã trừ tiền thu nợ nhập trong Thu chi)
       if (pathname === '/api/invoices' && request.method === 'GET') {
         const res = await db.prepare('SELECT * FROM invoices ORDER BY id DESC').all();
-        return json(res.results || [], 200, origin);
+        return json(withCollected(res.results || [], await loadCollectionsByName(db)), 200, origin);
       }
 
       // GET /api/orders — Lấy danh sách đơn đặt hàng
@@ -1594,36 +1646,46 @@ export default {
       }
 
       // ===== 5. KHÁCH HÀNG =====
-      if (pathname === '/api/customers' && method === 'GET') {
-        let results = [];
-        try {
-          await ensureReturnSchema(db); 
-          // Công nợ = tổng mua - (tiền trả ngay trên phiếu bán + các khoản thanh toán về sau)
-          const payJoin = (await hasTable(db, 'customer_payments'))
-            ? `LEFT JOIN (SELECT customer_name, SUM(amount) AS total_paid FROM customer_payments GROUP BY customer_name) pay ON c.name = pay.customer_name`
-            : `LEFT JOIN (SELECT NULL AS customer_name, 0 AS total_paid) pay ON 1 = 0`;
-          const res = await db.prepare(`
-            SELECT c.*,
-              COALESCE(i.total_purchased, 0) AS total_purchased,
-              COALESCE(i.inv_paid, 0) + COALESCE(pay.total_paid, 0) AS total_paid,
-              COALESCE(i.total_purchased, 0) - COALESCE(i.inv_paid, 0) - COALESCE(pay.total_paid, 0) - COALESCE(rtn.ret_offset, 0) AS total_debt
-            FROM customers c
-            LEFT JOIN (SELECT customer_name, SUM(total) AS total_purchased, SUM(paid_amount) AS inv_paid
-                       FROM invoices GROUP BY customer_name) i ON c.name = i.customer_name
-             LEFT JOIN (SELECT customer_name,
-                              SUM(COALESCE(NULLIF(total_amount, 0), refund_amount)) - SUM(refund_amount) AS ret_offset
-                       FROM return_orders
-                       WHERE status LIKE '%Hoàn Thành%'
-                       GROUP BY customer_name) rtn ON c.name = rtn.customer_name
-            ${payJoin}
-            ORDER BY c.id DESC
-          `).all();
-          results = res.results || [];
-        } catch (e) {
-          console.error('customers summary failed', e);
-          results = (await db.prepare('SELECT *, 0 AS total_purchased, 0 AS total_paid, 0 AS total_debt FROM customers ORDER BY id DESC').all()).results || [];
+            if (pathname === '/api/customers' && method === 'GET') {
+        await ensureReturnSchema(db);
+        const customers = (await db.prepare('SELECT * FROM customers ORDER BY id DESC').all()).results || [];
+        const invs = (await db.prepare('SELECT customer_name, total, paid_amount FROM invoices').all()).results || [];
+        let pays = [];
+        if (await hasTable(db, 'customer_payments')) {
+          pays = (await db.prepare('SELECT customer_name, amount FROM customer_payments').all()).results || [];
         }
-        return json(results, 200, origin);
+        let rets = [];
+        try {
+          rets = (await db.prepare("SELECT customer_name, refund_amount, total_amount FROM return_orders WHERE status LIKE '%Hoàn Thành%'").all()).results || [];
+        } catch (e) { console.error('customer returns failed', e); }
+        const collected = await loadCollectionsByName(db);
+
+        // Gom số liệu theo tên khách đã chuẩn hóa (không phân biệt hoa/thường, dấu cách thừa)
+        const agg = new Map();
+        const slot = (name) => {
+          const k = normName(name);
+          if (!agg.has(k)) agg.set(k, { purchased: 0, invPaid: 0, pay: 0, retOffset: 0 });
+          return agg.get(k);
+        };
+        invs.forEach((i) => { const a = slot(i.customer_name); a.purchased += Number(i.total) || 0; a.invPaid += Number(i.paid_amount) || 0; });
+        pays.forEach((p) => { slot(p.customer_name).pay += Number(p.amount) || 0; });
+        rets.forEach((r) => {
+          const refunded = Number(r.refund_amount) || 0;
+          const totalValue = Number(r.total_amount) || refunded;
+          slot(r.customer_name).retOffset += Math.max(0, totalValue - refunded); // phần trả hàng trừ vào công nợ
+        });
+
+        return json(customers.map((c) => {
+          const k = normName(c.name);
+          const a = agg.get(k) || { purchased: 0, invPaid: 0, pay: 0, retOffset: 0 };
+          const got = collected.get(k) || 0;
+          return {
+            ...c,
+            total_purchased: a.purchased,
+            total_paid: a.invPaid + a.pay + got,
+            total_debt: a.purchased - a.invPaid - a.pay - a.retOffset - got,
+          };
+        }), 200, origin);
       }
 
       if (pathname === '/api/customers' && method === 'POST') {
@@ -1666,7 +1728,7 @@ export default {
         if (await hasTable(db, 'customer_payments')) {
           payments = (await db.prepare('SELECT * FROM customer_payments WHERE customer_name = ? ORDER BY id DESC').bind(customer.name).all()).results || [];
         }
-        return json({ customer, invoices, payments }, 200, origin);
+        return json({ customer, invoices: withCollected(invoices, await loadCollectionsByName(db)), payments }, 200, origin);
       }
 
       if (is(/^\/api\/customers\/\d+$/, 'PUT')) {
