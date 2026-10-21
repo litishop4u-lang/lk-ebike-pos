@@ -121,6 +121,15 @@ async function ensureReturnSchema(db) {
       console.error('backfill return items failed', e);
     }
   }
+    // Cột total_amount = tổng giá trị hàng trả (khác refund_amount là số tiền mặt đã hoàn cho khách)
+  const { results: roCols } = await db.prepare('PRAGMA table_info(return_orders)').all();
+  if (!(roCols || []).some((c) => c.name === 'total_amount')) {
+    await db.prepare('ALTER TABLE return_orders ADD COLUMN total_amount REAL NOT NULL DEFAULT 0').run();
+    // Phiếu cũ: lấy tổng từ chi tiết sản phẩm, phiếu nào chưa có chi tiết thì lấy theo tiền hoàn
+    await db.prepare(`UPDATE return_orders SET total_amount = COALESCE(
+      (SELECT SUM(total) FROM return_order_items WHERE return_order_id = return_orders.id), 0)`).run();
+    await db.prepare('UPDATE return_orders SET total_amount = refund_amount WHERE total_amount = 0').run();
+  }
   returnSchemaReady = true;
 }
 
