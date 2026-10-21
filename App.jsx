@@ -431,6 +431,7 @@ function AppMain() {
   const [posProductKeyword, setPosProductKeyword] = useState('');
   const [showPosSuggest, setShowPosSuggest] = useState(false);
   const [depositFromOrder, setDepositFromOrder] = useState(0); // tạm ứng lấy từ đơn đặt hàng khi xuất phiếu bán
+  const [sourceOrderId, setSourceOrderId] = useState(null); // đơn đặt hàng đang được xuất thành phiếu bán
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
@@ -932,6 +933,8 @@ function AppMain() {
   const [cashQuarter, setCashQuarter] = useState(() => String(Math.ceil((new Date().getMonth() + 1) / 3)));
   const [cashFrom, setCashFrom] = useState('');
   const [cashTo, setCashTo] = useState('');
+  const [cashPartnerSearch, setCashPartnerSearch] = useState('');
+  const [showCashPartnerDrop, setShowCashPartnerDrop] = useState(false);
 
   const loadCashBook = async () => {
     try {
@@ -1255,6 +1258,7 @@ useEffect(() => {
     });
 
   const handleSelectOrderToInvoice = async (orderId) => {
+    setSourceOrderId(orderId ? Number(orderId) : null);
     if (!orderId) return;
     try {
       const details = await api(`/api/orders/${orderId}`);
@@ -1295,6 +1299,7 @@ useEffect(() => {
         created_at: new Date(orderDate).toISOString(),
         payment_method: paymentMethod,
         paid_amount: Number(paidAmount) || 0,
+        from_order_id: modalOrderType === 'invoices' && !editingInvoiceId ? (sourceOrderId || undefined) : undefined,
         items: cartLines.map((l) => ({
           product_id: l.id,
           quantity: l.quantity,
@@ -1424,6 +1429,7 @@ useEffect(() => {
       try {
         const type = isOrder ? 'orders' : 'invoices';
         printData = await api(`/api/${type}/${item.id}`);
+        if (item.collected) printData = { ...printData, paid_amount: item.paid_amount, debt: item.debt };
       } catch (e) {
         alert('Không thể tải chi tiết để in: ' + e.message);
         return;
@@ -1950,7 +1956,7 @@ useEffect(() => {
     });
 
     invs.forEach((i) => {
-      const paid = Number(i.paid_amount) || 0;
+      const paid = (Number(i.paid_amount) || 0) - (Number(i.collected) || 0);
       if (paid > 0 && !usedCodes.has(i.code) && !isOrderCode(i.code)) {
         rows.push({ key: 'i' + i.id, date: i.created_at, code: i.code, type: 'IN', amount: paid, method: i.payment_method || '', note: 'Thanh toán khi bán hàng', kind: 'inv', ref: i });
       }
@@ -1958,7 +1964,7 @@ useEffect(() => {
 
     ords.forEach((o) => {
       const paid = Number(o.paid_amount) || 0;
-      if (paid > 0 && !usedCodes.has(o.code)) {
+      if (paid > 0 && isPendingOrder(o) && !usedCodes.has(o.code)) {
         rows.push({ key: 'o' + o.id, date: o.created_at, code: o.code, type: 'IN', amount: paid, method: o.payment_method || '', note: 'Tạm ứng đơn đặt hàng', kind: 'ord', ref: o });
       }
     });
@@ -2416,7 +2422,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
     return [...invs, ...ords].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   };
 
-  useEffect(() => { if (!showOrderModal) setDepositFromOrder(0); }, [showOrderModal]);
+  useEffect(() => { if (!showOrderModal) { setDepositFromOrder(0); setSourceOrderId(null); } }, [showOrderModal]);
 
     // ----- Phiếu bảo hành -----
   const loadWarranties = async () => {
@@ -3027,7 +3033,11 @@ const goView = (view) => {
                         <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(ord.total)}</td>
                         <td style={{ padding: '10px', color: '#16a34a' }}>{vnd(ord.paid_amount)}</td>
                         <td style={{ padding: '10px', color: '#dc2626' }}>{vnd(ord.debt)}</td>
-                        <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#d97706', fontSize: '12px', fontWeight: 'bold' }}>{ord.status || 'Pending'}</span></td>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{ padding: '3px 8px', borderRadius: '4px', background: isPendingOrder(ord) ? '#fef3c7' : '#dcfce7', color: isPendingOrder(ord) ? '#d97706' : '#16a34a', fontSize: '12px', fontWeight: 'bold' }}>
+                            {ord.status || 'Pending'}
+                          </span>
+                        </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button onClick={() => handleViewDetail('orders', ord.id)} title="Xem chi tiết" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>👁️</button>
                           <button onClick={() => handlePrintOrder(ord, true)} title="In đơn đặt hàng" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px' }}>🖨️</button>
@@ -5850,35 +5860,62 @@ const goView = (view) => {
                 </select>
               </div>
 
-              {/* Chọn NCC khi danh mục liên quan nhà cung cấp */}
-              {String(cashForm.category || '').includes('NCC') && (
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Nhà cung cấp:</label>
-                  <select
-                    value={(suppliers || []).some((s) => s.code === cashForm.reference_code) ? cashForm.reference_code : ''}
-                    onChange={(e) => setCashForm({ ...cashForm, reference_code: e.target.value })}
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                  >
-                    <option value="">-- Không chọn --</option>
-                    {(suppliers || []).map((s) => <option key={s.id} value={s.code}>{s.name} ({s.code})</option>)}
-                  </select>
-                </div>
-              )}
-
-              {/* Chọn KH khi danh mục liên quan khách hàng */}
-              {['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(cashForm.category) && (
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Khách hàng:</label>
-                  <select
-                    value={(customers || []).some((c) => c.code === cashForm.reference_code) ? cashForm.reference_code : ''}
-                    onChange={(e) => setCashForm({ ...cashForm, reference_code: e.target.value })}
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                  >
-                    <option value="">-- Không chọn --</option>
-                    {(customers || []).map((c) => <option key={c.id} value={c.code}>{c.name} ({c.code})</option>)}
-                  </select>
-                </div>
-              )}
+             {/* Chọn NCC / KH: gõ tên, mã hoặc SĐT sẽ có gợi ý */}
+{(() => {
+  const isSup = String(cashForm.category || '').includes('NCC');
+  const isCus = ['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(cashForm.category);
+  if (!isSup && !isCus) return null;
+  const source = (isSup ? suppliers : customers) || [];
+  const picked = source.find((x) => x.code === cashForm.reference_code);
+  const k = removeAccents(cashPartnerSearch.trim());
+  const kPhone = cashPartnerSearch.trim().replace(/[\s.]/g, '');
+  const list = source
+    .filter((x) => !k || removeAccents(x.name).includes(k) || removeAccents(x.code).includes(k) || (kPhone && String(x.phone || '').replace(/[\s.]/g, '').includes(kPhone)))
+    .slice(0, 50);
+  return (
+    <div style={{ marginBottom: '12px', position: 'relative' }}>
+      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>{isSup ? 'Nhà cung cấp:' : 'Khách hàng:'}</label>
+      <input
+        placeholder={isSup ? 'Gõ tên, mã hoặc SĐT nhà cung cấp...' : 'Gõ tên, mã hoặc SĐT khách hàng...'}
+        value={showCashPartnerDrop ? cashPartnerSearch : (picked ? `${picked.name} (${picked.code})` : '')}
+        onChange={(e) => { setCashPartnerSearch(e.target.value); setShowCashPartnerDrop(true); }}
+        onFocus={() => { setCashPartnerSearch(''); setShowCashPartnerDrop(true); }}
+        onBlur={() => setTimeout(() => setShowCashPartnerDrop(false), 150)}
+        style={{ width: '100%', padding: '8px', paddingRight: picked ? '30px' : '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+      />
+      {picked && !showCashPartnerDrop && (
+        <button
+          type="button"
+          title="Bỏ chọn"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setCashForm({ ...cashForm, reference_code: '' })}
+          style={{ position: 'absolute', right: '6px', top: '26px', background: 'transparent', border: 'none', fontSize: '15px', cursor: 'pointer', color: '#64748b' }}
+        >✕</button>
+      )}
+      {showCashPartnerDrop && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', zIndex: 20, marginTop: '3px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          {list.length === 0 ? (
+            <div style={{ padding: '10px', color: '#94a3b8', textAlign: 'center' }}>Không tìm thấy.</div>
+          ) : list.map((x) => (
+            <div
+              key={x.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setCashForm({ ...cashForm, reference_code: x.code }); setShowCashPartnerDrop(false); }}
+              style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}
+            >
+              <b>{x.name}</b> <span style={{ color: '#64748b' }}>({x.code}){x.phone ? ` - ${x.phone}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {cashForm.type === 'IN' && cashForm.category === 'Bán hàng / Thu nợ KH' && (
+        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+          Tiền thu sẽ tự trừ vào công nợ của khách (phiếu cũ nhất trước).
+        </div>
+      )}
+    </div>
+  );
+})()}
 
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
@@ -6030,7 +6067,7 @@ const goView = (view) => {
             <label style={{ ...cLabel, color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
             <select onChange={(e) => handleSelectOrderToInvoice(e.target.value)} style={cInput}>
               <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
-              {ordersList.map((o) => (
+              {ordersList.filter(isPendingOrder).map((o) => (
                 <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
               ))}
             </select>
