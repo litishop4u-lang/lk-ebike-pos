@@ -398,6 +398,17 @@ const RESPONSIVE_CSS = `
   .pr-filter > select, .pr-filter > input[type="date"] { flex: 1 1 calc(50% - 6px) !important; min-width: 0 !important; }
   .pr-filter > input, .pr-filter > select, .pr-filter > button { height: 32px !important; padding: 0 8px !important; font-size: 13px !important; box-sizing: border-box; }
   .pr-filter > button { flex: 1 1 100%; }
+    /* ===== Popup khách hàng: cả popup cuộn dọc, 4 ô KPI xếp 2x2 ===== */
+  .main-content div[style*="position: fixed"] > div.cust-modal { display: block !important; overflow-y: auto !important; padding: 14px !important; }
+  .cust-modal > div[style*="flex: 1"] { overflow: visible !important; }
+  .main-content div.cust-stats[style] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; margin-bottom: 12px !important; }
+  .cust-stats > div { padding: 10px 6px !important; }
+  .cust-stats > div > div:first-child { font-size: 14px !important; word-break: break-word; }
+  .cust-modal h3 { font-size: 1rem !important; }
+  .cust-modal button[style*="flex: 1"] { padding: 10px 4px !important; font-size: 12.5px !important; }
+
+  /* ===== Ô địa chỉ dài: cho phép xuống dòng, không tràn sang cột khác ===== */
+  .main-content td[style*="max-width"] { white-space: normal !important; word-break: break-word; min-width: 180px !important; max-width: 220px !important; }
 }
   /* Đồng nhất font (áp dụng cả máy tính và điện thoại) */
 .layout, .layout button, .layout input, .layout select, .layout textarea {
@@ -6696,7 +6707,7 @@ const goView = (view) => {
         {/* POPUP THỐNG KÊ CHI TIẾT KHÁCH HÀNG (2 TAB) */}
         {showCustomerDetailModal && !customerChildOpen && selectedCustomerDetail && (
           <div style={overlayStyle}>
-            <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div className="cust-modal" style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                 <h3 style={{ margin: 0, color: '#7c3aed' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
                 <button onClick={() => setShowCustomerDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
@@ -6708,7 +6719,7 @@ const goView = (view) => {
                 <button onClick={() => setCustomerDetailTab('returns')} style={tabBtnStyle(customerDetailTab === 'returns')}>↩️ Lịch Sử Trả Hàng</button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+              <div className="cust-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
                 <div style={statBoxStyle}>
                   <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#7c3aed' }}>{getCustomerOrderRows().length}</div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
