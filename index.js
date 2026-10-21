@@ -42,6 +42,19 @@ const idOf = (pathname) => Number(pathname.split('/')[3]);
 const dateOnly = (v) => String(v || '').slice(0, 10);
 // Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
 const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
+// Đơn đặt hàng chưa xuất bán
+const isPendingStatus = (s) => !s || /pending|chờ|đang/i.test(String(s));
+
+// Cột invoice_code trên bảng orders: nhớ đơn đặt hàng này đã xuất thành phiếu bán nào
+let orderSchemaReady = false;
+async function ensureOrderSchema(db) {
+  if (orderSchemaReady) return;
+  const { results } = await db.prepare('PRAGMA table_info(orders)').all();
+  if (!(results || []).some((c) => c.name === 'invoice_code')) {
+    await db.prepare('ALTER TABLE orders ADD COLUMN invoice_code TEXT').run();
+  }
+  orderSchemaReady = true;
+}
 // ===== Công nợ khách: tiền thu nợ nhập tay trong Thu chi =====
 const normName = (v) => String(v ?? '').normalize('NFC').trim().toLowerCase();
 
@@ -531,14 +544,32 @@ async function createOrder(db, b) {
   const created_at = isoDate(b.created_at);
   const code = await nextCode(db, 'orders', 'DH', created_at);
 
-  await db.batch([
+    const paymentMethod = str(b.payment_method) || 'Tiền mặt';
+  const stmts = [
     ensureCustomer(db, customer_name, customer_phone, address),
     db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, status) VALUES (?,?,?,?,?,?,?,?,?)')
-      .bind(code, customer_name, customer_phone, total, paid, total - paid, str(b.payment_method) || 'Tiền mặt', created_at, 'Pending'),
+      .bind(code, customer_name, customer_phone, total, paid, total - paid, paymentMethod, created_at, 'Pending'),
     ...lines.map((l) =>
       db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?,?)')
         .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total, l.chassis_color)),
-  ]);
+  ];
+  // Có tạm ứng -> ghi ngay 1 phiếu thu vào Sổ quỹ (chứng từ = mã đơn đặt hàng)
+  if (paid > 0) {
+    stmts.push(
+      db.prepare(`
+        INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+        VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
+      `).bind(
+        await nextCode(db, 'cash_books', 'PT', created_at),
+        paid,
+        paymentMethod,
+        code,
+        `Tạm ứng đơn đặt hàng ${code} của khách ${customer_name}`,
+        created_at
+      )
+    );
+  }
+  await db.batch(stmts);
   return { code, total };
 }
 
@@ -571,7 +602,10 @@ export default {
 
     try {
       // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
-      if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) await ensureChassisColumns(db);
+      if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) {
+        await ensureChassisColumns(db);
+        await ensureOrderSchema(db);
+      }
 
       // ===== 1. SẢN PHẨM =====
       if (pathname === '/api/products' && method === 'GET') {
@@ -756,28 +790,38 @@ export default {
       }
 
       // ===== 2. PHIẾU BÁN HÀNG / ĐƠN ĐẶT HÀNG =====
-      if (pathname === '/api/invoices' && method === 'POST') {
+            if (pathname === '/api/invoices' && method === 'POST') {
         const payload = await request.json();
         const r = await createInvoice(db, payload);
-                // Phiếu bán tạo từ đơn đặt hàng -> đơn chuyển sang "Hoàn thành" (vẫn giữ trong danh sách)
+
+        // Phiếu bán tạo từ đơn đặt hàng: đơn chuyển "Hoàn thành" (vẫn giữ trong danh sách) và nhớ phiếu bán đã xuất
+        let depositRecorded = 0;
         const fromOrderId = Number(payload.from_order_id);
         if (Number.isInteger(fromOrderId) && fromOrderId > 0) {
-          await db.prepare("UPDATE orders SET status = 'Hoàn thành' WHERE id = ?").bind(fromOrderId).run();
+          const ord = await db.prepare('SELECT code FROM orders WHERE id = ?').bind(fromOrderId).first();
+          if (ord) {
+            const dep = await db.prepare("SELECT COALESCE(SUM(amount), 0) AS s FROM cash_books WHERE type = 'IN' AND reference_code = ?").bind(ord.code).first();
+            depositRecorded = Number(dep?.s) || 0; // tạm ứng đã có phiếu thu riêng từ lúc tạo đơn
+            await db.prepare("UPDATE orders SET status = 'Hoàn thành', invoice_code = ? WHERE id = ?").bind(r.code, fromOrderId).run();
+          }
         }
 
-        // 👉 TỰ ĐỘNG SINH PHIẾU THU NẾU HÓA ĐƠN CÓ THANH TOÁN (paid_amount > 0)
-        const paidAmount = Number(payload.paid_amount) || 0;
-        if (paidAmount > 0 && r && r.code) {
+        // Phiếu thu tự sinh chỉ ghi phần CHƯA được ghi nhận
+        const paidAmount = Math.min(money(payload.paid_amount), r.total);
+        const cashAmount = Math.max(0, paidAmount - depositRecorded);
+        if (cashAmount > 0 && r.code) {
           const cashCode = await nextCode(db, 'cash_books', 'PT', payload.created_at);
           const customerName = payload.customer_name || 'Khách hàng';
           const paymentMethod = payload.payment_method || 'Chuyển khoản';
-          const noteText = `Thu tiền bán hàng từ khách ${customerName} theo hóa đơn ${r.code}`;
+          const noteText = depositRecorded > 0
+            ? `Thu thêm tiền bán hàng từ khách ${customerName} theo hóa đơn ${r.code} (đã trừ tạm ứng ${depositRecorded.toLocaleString('vi-VN')})`
+            : `Thu tiền bán hàng từ khách ${customerName} theo hóa đơn ${r.code}`;
           const customDate = payload.created_at || new Date().toISOString();
 
           await db.prepare(`
             INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
             VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
-          `).bind(cashCode, paidAmount, paymentMethod, r.code, noteText, customDate).run();
+          `).bind(cashCode, cashAmount, paymentMethod, r.code, noteText, customDate).run();
         }
 
         return json({ success: true, ...r }, 201, origin);
@@ -794,10 +838,28 @@ export default {
         return json(withCollected(res.results || [], await loadCollectionsByName(db)), 200, origin);
       }
 
-      // GET /api/orders — Lấy danh sách đơn đặt hàng
+            // GET /api/orders — Lấy danh sách đơn đặt hàng
+      // Đơn đã "Hoàn thành": công nợ lấy theo phiếu bán đã xuất (đã trừ tiền thu nợ trong Thu chi)
       if (pathname === '/api/orders' && request.method === 'GET') {
-        const res = await db.prepare('SELECT * FROM orders ORDER BY id DESC').all();
-        return json(res.results || [], 200, origin);
+        const orders = (await db.prepare('SELECT * FROM orders ORDER BY id DESC').all()).results || [];
+        const invs = withCollected((await db.prepare('SELECT * FROM invoices').all()).results || [], await loadCollectionsByName(db));
+        const byCode = new Map(invs.map((i) => [i.code, i]));
+        const claimed = new Set(orders.map((o) => o.invoice_code).filter(Boolean));
+
+        return json(orders.map((o) => {
+          if (isPendingStatus(o.status)) return o;
+          let inv = o.invoice_code ? byCode.get(o.invoice_code) : null;
+          if (!inv) {
+            // Đơn cũ chưa có liên kết: ghép theo cùng khách + cùng tổng tiền
+            inv = invs.find((i) =>
+              !claimed.has(i.code) &&
+              normName(i.customer_name) === normName(o.customer_name) &&
+              Math.abs((Number(i.total) || 0) - (Number(o.total) || 0)) <= 10);
+            if (inv) claimed.add(inv.code);
+          }
+          if (!inv) return o;
+          return { ...o, invoice_code: inv.code, debt: Math.max(0, Number(inv.debt) || 0) };
+        }), 200, origin);
       }
 
       // PUT /api/orders/:id — Cập nhật đơn đặt hàng
@@ -814,6 +876,8 @@ export default {
 
         if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
         if (items.length === 0) throw new HttpError(400, 'Giỏ hàng trống');
+        const oldOrder = await db.prepare('SELECT code FROM orders WHERE id = ?').bind(id).first();
+        if (!oldOrder) throw new HttpError(404, 'Không tìm thấy đơn đặt hàng');
 
         let total = 0;
         for (const item of items) {
@@ -835,6 +899,25 @@ export default {
           );
         }
 
+                // Đồng bộ Sổ quỹ: xóa phiếu thu tạm ứng cũ rồi ghi lại theo số mới
+        stmts.push(
+          db.prepare("DELETE FROM cash_books WHERE reference_code = ? AND type = 'IN' AND category = 'Bán hàng / Thu nợ KH'").bind(oldOrder.code)
+        );
+        if (paid_amount > 0) {
+          stmts.push(
+            db.prepare(`
+              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+              VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
+            `).bind(
+              await nextCode(db, 'cash_books', 'PT', created_at),
+              paid_amount,
+              payment_method,
+              oldOrder.code,
+              `Tạm ứng đơn đặt hàng ${oldOrder.code} của khách ${customer_name}`,
+              created_at
+            )
+          );
+        }
         await db.batch(stmts);
         return json({ success: true, total }, 200, origin);
       }
@@ -860,7 +943,7 @@ export default {
         return json({ ...mainObj, items: items.results || [] }, 200, origin);
       }
 
-      // DELETE /api/orders/:id hoặc /api/invoices/:id
+            // DELETE /api/orders/:id hoặc /api/invoices/:id
       if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'DELETE') {
         const parts = pathname.split('/');
         const type = parts[2];
@@ -868,21 +951,32 @@ export default {
         const itemTable = type === 'orders' ? 'order_items' : 'invoice_items';
         const foreignKey = type === 'orders' ? 'order_id' : 'invoice_id';
 
-        // Nếu là phiếu bán hàng (invoices), khi xóa cần hoàn lại tồn kho sản phẩm
-        if (type === 'invoices') {
-          const items = await db.prepare(`SELECT * FROM invoice_items WHERE invoice_id = ?`).bind(id).all();
-          for (const item of (items.results || [])) {
-            await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(item.quantity, item.product_id).run();
-          }
-        }
+        const head = await db.prepare(`SELECT * FROM ${type} WHERE id = ?`).bind(id).first();
+        if (!head) throw new HttpError(404, 'Không tìm thấy dữ liệu');
 
-        await db.batch([
-          db.prepare(`DELETE FROM ${itemTable} WHERE ${foreignKey} = ?`).bind(id),
-          db.prepare(`DELETE FROM ${type} WHERE id = ?`).bind(id)
-        ]);
+        const stmts = [];
+        if (type === 'invoices') {
+          // Hoàn lại tồn kho
+          const items = (await db.prepare('SELECT product_id, quantity FROM invoice_items WHERE invoice_id = ?').bind(id).all()).results || [];
+          for (const item of items) {
+            stmts.push(db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(item.quantity, item.product_id));
+          }
+          // Xóa phiếu bảo hành của phiếu bán này
+          await ensureWarrantySchema(db);
+          stmts.push(db.prepare('DELETE FROM warranties WHERE invoice_code = ?').bind(head.code));
+          // Xóa phiếu thu tự sinh của phiếu bán này trong Sổ quỹ (tránh phiếu thu mồ côi)
+          stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(head.code));
+          // Đơn đặt hàng đã xuất thành phiếu này quay lại trạng thái chờ (phiếu thu tạm ứng của đơn vẫn giữ)
+          stmts.push(db.prepare("UPDATE orders SET status = 'Pending', invoice_code = NULL WHERE invoice_code = ?").bind(head.code));
+        } else if (isPendingStatus(head.status)) {
+          // Xóa đơn đặt hàng chưa xuất bán -> xóa luôn phiếu thu tạm ứng của đơn
+          stmts.push(db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(head.code));
+        }
+        stmts.push(db.prepare(`DELETE FROM ${itemTable} WHERE ${foreignKey} = ?`).bind(id));
+        stmts.push(db.prepare(`DELETE FROM ${type} WHERE id = ?`).bind(id));
+        await db.batch(stmts);
         return json({ success: true }, 200, origin);
       }
-
       // PUT /api/invoices/:id — Cập nhật phiếu bán hàng (SỬA LỖI: thêm unit_price, kiểm tra tồn kho, trả về code)
       if (is(/^\/api\/invoices\/\d+$/, 'PUT')) {
         const id = idOf(pathname);
@@ -930,14 +1024,23 @@ export default {
           db.prepare('DELETE FROM cash_books WHERE reference_code = ?').bind(oldInv.code),
         ];
 
-        // Tạo lại phiếu thu nếu có thanh toán
-        if (paid_amount > 0) {
+                // Tạo lại phiếu thu (trừ phần tạm ứng đã có phiếu thu riêng của đơn đặt hàng liên kết)
+        const linkedOrders = (await db.prepare('SELECT code FROM orders WHERE invoice_code = ?').bind(oldInv.code).all()).results || [];
+        let depositRecorded = 0;
+        if (linkedOrders.length) {
+          const orderCodes = linkedOrders.map((o) => o.code);
+          const dep = await db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM cash_books WHERE type = 'IN' AND reference_code IN (${placeholders(orderCodes)})`)
+            .bind(...orderCodes).first();
+          depositRecorded = Number(dep?.s) || 0;
+        }
+        const cashAmount = Math.max(0, paid_amount - depositRecorded);
+        if (cashAmount > 0) {
           const noteText = `Thu tiền bán hàng từ khách ${customer_name} theo hóa đơn ${oldInv.code} (Đã cập nhật)`;
           stmts.push(
             db.prepare(`
               INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
               VALUES (?, 'IN', ?, 'Bán hàng / Thu nợ KH', ?, ?, ?, ?)
-              `).bind(await nextCode(db, 'cash_books', 'PT', created_at), paid_amount, payment_method, oldInv.code, noteText, created_at)
+              `).bind(await nextCode(db, 'cash_books', 'PT', created_at), cashAmount, payment_method, oldInv.code, noteText, created_at)
           );
         }
 
@@ -1960,10 +2063,11 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
   for (const r of invReport) cogs += (r.soldQty - r.returnedQty) * r.avgCost;
   const profit = Math.round(revenue - returnDeductions - Math.max(0, cogs));
 
-  // Đơn hàng gần nhất
-  const recent = (await db.prepare(
-    'SELECT id, code, customer_name, total, paid_amount, debt, created_at FROM invoices ORDER BY created_at DESC, id DESC LIMIT 8'
-  ).all()).results || [];
+    // Đơn hàng gần nhất (đã trừ tiền thu nợ nhập trong Thu chi)
+  const allInv = (await db.prepare('SELECT id, code, customer_name, total, paid_amount, debt, created_at FROM invoices').all()).results || [];
+  const recent = withCollected(allInv, await loadCollectionsByName(db))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || (b.id - a.id))
+    .slice(0, 8);
 
    // Top 10 sản phẩm bán chạy (theo số lượng hoặc doanh thu)
   const prodOrder = sortBy === 'qty' ? 'qty DESC, revenue DESC' : 'revenue DESC, qty DESC';
