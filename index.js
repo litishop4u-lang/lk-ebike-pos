@@ -936,14 +936,15 @@ export default {
         if (lines.length === 0) throw new HttpError(400, 'Danh sách sản phẩm trả lại trống');
         await loadProducts(db, lines, { checkStock: false });
 
-        const refundTotal = money(refund_amount);
+        const totalValue = lines.reduce((s, l) => s + l.quantity * l.price, 0); // tổng giá trị hàng trả
+        const refundTotal = Math.min(money(refund_amount), totalValue);          // tiền mặt hoàn lại (không vượt tổng)
         const retDate = return_date || new Date().toISOString().slice(0, 10);
 
         const stmts = [
           // Lưu phiếu trả hàng
           db.prepare(`
-            INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, total_amount, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
           `).bind(
             code,
             invoice_code || '',
@@ -951,6 +952,7 @@ export default {
             retDate,
             reason || 'Sản phẩm lỗi',
             refundTotal,
+            totalValue,
             statusText
           ),
           // Lưu chi tiết từng sản phẩm trả lại
@@ -1023,7 +1025,8 @@ export default {
         const ids = [...new Set([...oldItems.map((i) => i.product_id), ...newIds])];
 
         const statusText = str(body.status) || old.status || 'Hoàn Thành';
-        const refundTotal = money(body.refund_amount);
+        const totalValue = lines.reduce((s, l) => s + l.quantity * l.price, 0);
+        const refundTotal = Math.min(money(body.refund_amount), totalValue);
         const retDate = str(body.return_date) || old.return_date || new Date().toISOString().slice(0, 10);
         const custName = str(body.customer_name) || old.customer_name || 'Khách lẻ';
         const invoiceCode = body.invoice_code !== undefined ? str(body.invoice_code) : (old.invoice_code || '');
@@ -1042,8 +1045,8 @@ export default {
         stmts.push(db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').bind(id));
         // 3. Cập nhật chính phiếu này
         stmts.push(
-          db.prepare('UPDATE return_orders SET invoice_code = ?, customer_name = ?, return_date = ?, reason = ?, refund_amount = ?, status = ? WHERE id = ?')
-            .bind(invoiceCode, custName, retDate, reason, refundTotal, statusText, id)
+          db.prepare('UPDATE return_orders SET invoice_code = ?, customer_name = ?, return_date = ?, reason = ?, refund_amount = ?, total_amount = ?, status = ? WHERE id = ?')
+            .bind(invoiceCode, custName, retDate, reason, refundTotal, totalValue, statusText, id)
         );
         // 4. Ghi lại chi tiết mới
         stmts.push(...lines.map((l) =>
@@ -1760,7 +1763,7 @@ export default {
 
         // 2. Các khoản giảm trừ = tiền hoàn của các phiếu trả hàng đã hoàn thành trong kỳ
         const retRes = await db.prepare(`
-          SELECT COALESCE(SUM(refund_amount), 0) AS refunded FROM return_orders
+          SELECT COALESCE(SUM(COALESCE(NULLIF(total_amount, 0), refund_amount)), 0) AS refunded FROM return_orders
           WHERE date(return_date) >= ? AND date(return_date) <= ?
             AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
         `).bind(startDate, endDate).first();
@@ -1879,7 +1882,7 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
 
   // Lợi nhuận = doanh thu - tiền hàng trả lại - giá vốn (cùng cách tính với báo cáo Kết quả kinh doanh)
   const retRes = await db.prepare(`
-    SELECT COALESCE(SUM(refund_amount), 0) AS refunded FROM return_orders
+    SELECT COALESCE(SUM(COALESCE(NULLIF(total_amount, 0), refund_amount)), 0) AS refunded FROM return_orders
     WHERE date(return_date) >= ? AND date(return_date) <= ?
       AND (status LIKE '%Hoàn Thành%' OR status LIKE '%Đã hoàn thành%')
   `).bind(startDate, endDate).first();
