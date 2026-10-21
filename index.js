@@ -55,29 +55,131 @@ async function ensureOrderSchema(db) {
   }
   orderSchemaReady = true;
 }
+
+// ===== Gắn mã khách hàng (customer_code) vào chứng từ để không bị lẫn khách trùng tên =====
+let customerCodeReady = false;
+async function ensureCustomerCodes(db) {
+  if (customerCodeReady) return;
+  await ensureReturnSchema(db);
+  // Thứ tự quan trọng: invoices trước, return_orders sau (phiếu trả mượn mã khách từ phiếu bán gốc)
+  const targets = ['invoices', 'orders', 'return_orders'];
+  if (await hasTable(db, 'customer_payments')) targets.push('customer_payments');
+
+  // Chuẩn hóa SĐT: bỏ dấu cách và dấu chấm
+  const ph = (x) => `REPLACE(REPLACE(COALESCE(${x}, ''), ' ', ''), '.', '')`;
+
+  for (const t of targets) {
+    const { results } = await db.prepare(`PRAGMA table_info(${t})`).all();
+    const cols = (results || []).map((c) => c.name);
+    if (!cols.includes('customer_code')) {
+      await db.prepare(`ALTER TABLE ${t} ADD COLUMN customer_code TEXT`).run();
+    }
+    const blank = `(${t}.customer_code IS NULL OR ${t}.customer_code = '')`;
+
+    // 1. Cùng tên + cùng số điện thoại
+    if (cols.includes('customer_phone')) {
+      await db.prepare(
+        `UPDATE ${t} SET customer_code = (
+           SELECT c.code FROM customers c
+           WHERE c.name = ${t}.customer_name AND ${ph('c.phone')} <> '' AND ${ph('c.phone')} = ${ph(`${t}.customer_phone`)}
+           ORDER BY c.id LIMIT 1)
+         WHERE ${blank}`
+      ).run();
+    }
+
+    // 2. Cùng tên + cùng địa chỉ
+    if (cols.includes('address')) {
+      await db.prepare(
+        `UPDATE ${t} SET customer_code = (
+           SELECT c.code FROM customers c
+           WHERE c.name = ${t}.customer_name AND COALESCE(c.address, '') <> '' AND c.address = ${t}.address
+           ORDER BY c.id LIMIT 1)
+         WHERE ${blank}`
+      ).run();
+    }
+
+    // 3. Phiếu trả hàng: lấy mã khách từ phiếu bán gốc
+    if (t === 'return_orders') {
+      await db.prepare(
+        `UPDATE return_orders SET customer_code = (
+           SELECT i.customer_code FROM invoices i WHERE i.code = return_orders.invoice_code AND COALESCE(i.customer_code, '') <> '')
+         WHERE ${blank} AND COALESCE(invoice_code, '') <> ''`
+      ).run();
+    }
+
+    // 4. Tên chỉ có DUY NHẤT 1 khách -> gán luôn
+    await db.prepare(
+      `UPDATE ${t} SET customer_code = (SELECT c.code FROM customers c WHERE c.name = ${t}.customer_name)
+       WHERE ${blank} AND (SELECT COUNT(*) FROM customers c WHERE c.name = ${t}.customer_name) = 1`
+    ).run();
+    // Còn lại (tên trùng, không phân biệt được bằng SĐT/địa chỉ) -> để trống, chờ gán tay
+  }
+  customerCodeReady = true;
+}
+
+// Xác định khách hàng của phiếu bán / đơn đặt hàng:
+//  - client gửi customer_code -> dùng đúng khách đó
+//  - không gửi mã: tên chỉ khớp 1 khách -> dùng khách đó; trùng tên thì thử phân biệt bằng SĐT;
+//    chưa có khách -> tạo mới; vẫn không phân biệt được -> báo lỗi bắt chọn
+async function resolveCustomer(db, b) {
+  const name = str(b.customer_name);
+  if (!name) throw new HttpError(400, 'Thiếu tên khách hàng');
+  const phone = str(b.customer_phone) || null;
+  const address = str(b.address) || null;
+  const code = str(b.customer_code);
+  if (code) {
+    const c = await db.prepare('SELECT code, name FROM customers WHERE code = ?').bind(code).first();
+    if (!c) throw new HttpError(404, 'Khách hàng không tồn tại');
+    return { code: c.code, name: c.name, phone, address, create: null };
+  }
+  const { results } = await db.prepare('SELECT code FROM customers WHERE name = ?').bind(name).all();
+  const found = results || [];
+  if (found.length === 1) return { code: found[0].code, name, phone, address, create: null };
+  if (found.length > 1 && phone) {
+    const byPhone = (await db.prepare('SELECT code FROM customers WHERE name = ? AND phone = ?').bind(name, phone).all()).results || [];
+    if (byPhone.length === 1) return { code: byPhone[0].code, name, phone, address, create: null };
+  }
+    if (found.length > 1 && phone) {
+    const byPhone = (await db.prepare('SELECT code FROM customers WHERE name = ? AND phone = ?').bind(name, phone).all()).results || [];
+    if (byPhone.length === 1) return { code: byPhone[0].code, name, phone, address, create: null };
+  }
+  if (found.length > 1) {
+    throw new HttpError(409, `Có ${found.length} khách hàng trùng tên "${name}". Vui lòng chọn đúng khách từ danh sách gợi ý.`);
+  }
+  const newCode = genCode('KH');
+  return {
+    code: newCode, name, phone, address,
+    create: db.prepare('INSERT INTO customers (code, name, phone, address) VALUES (?,?,?,?)').bind(newCode, name, phone, address),
+  };
+}
+
+// Phiếu trả hàng: tìm mã khách nhưng không tạo khách mới
+async function lookupCustomerCode(db, code, name) {
+  const c = str(code);
+  if (c) return c;
+  const { results } = await db.prepare('SELECT code FROM customers WHERE name = ?').bind(str(name)).all();
+  return (results || []).length === 1 ? results[0].code : '';
+}
 // ===== Công nợ khách: tiền thu nợ nhập tay trong Thu chi =====
 const normName = (v) => String(v ?? '').normalize('NFC').trim().toLowerCase();
 
-// Tiền thu nợ khách (danh mục "Bán hàng / Thu nợ KH", chứng từ = mã khách), gom theo tên khách
+// Tiền thu nợ nhập tay trong Thu chi, gom theo MÃ khách: Map(mã khách -> số tiền)
 async function loadCollectionsByName(db) {
   const m = new Map();
   try {
     const { results } = await db.prepare(`
-      SELECT c.name AS customer_name, SUM(cb.amount) AS collected
-      FROM cash_books cb
-      JOIN customers c ON c.code = cb.reference_code
-      WHERE cb.type = 'IN' AND cb.category = 'Bán hàng / Thu nợ KH'
-      GROUP BY c.id
+      SELECT reference_code AS code, SUM(amount) AS collected
+      FROM cash_books
+      WHERE type = 'IN' AND category = 'Bán hàng / Thu nợ KH'
+        AND reference_code IN (SELECT code FROM customers)
+      GROUP BY reference_code
     `).all();
-    for (const r of results || []) {
-      const k = normName(r.customer_name);
-      m.set(k, (m.get(k) || 0) + (Number(r.collected) || 0));
-    }
+    for (const r of results || []) m.set(r.code, Number(r.collected) || 0);
   } catch (e) { console.error('load collections failed', e); }
   return m;
 }
 
-// Phân bổ tiền thu nợ vào các phiếu còn nợ của khách (phiếu cũ nhất trước).
+// Phân bổ tiền thu nợ vào các phiếu còn nợ của đúng khách đó (phiếu cũ nhất trước).
 // Chỉ để HIỂN THỊ: không sửa dữ liệu gốc trong bảng invoices.
 function withCollected(invoices, collections) {
   const left = new Map(collections);
@@ -89,7 +191,8 @@ function withCollected(invoices, collections) {
   [...invoices]
     .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')) || (a.id - b.id))
     .forEach((inv) => {
-      const k = normName(inv.customer_name);
+      const k = inv.customer_code || '';
+      if (!k) return;
       const take = Math.min(Math.max(0, baseDebt(inv)), left.get(k) || 0);
       if (take > 0) {
         left.set(k, left.get(k) - take);
@@ -498,10 +601,7 @@ const ensureCustomer = (db, name, phone, address) =>
 
 // ===== Nghiệp vụ =====
 async function createInvoice(db, b) {
-  const customer_name = str(b.customer_name);
-  if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
-  const customer_phone = str(b.customer_phone) || null;
-  const address = str(b.address) || null;
+  const cus = await resolveCustomer(db, b);
 
   const lines = normalizeItems(b.items);
   const ids = await loadProducts(db, lines, { checkStock: true });
@@ -514,12 +614,11 @@ async function createInvoice(db, b) {
   const payment_method = str(b.payment_method) || 'Tiền mặt';
 
   const stmts = [
-    ensureCustomer(db, customer_name, customer_phone, address),
-    // Bảng invoices cần có cột address (đã thêm bằng ALTER TABLE) để lưu địa chỉ trên phiếu
-    db.prepare('INSERT INTO invoices (code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method) VALUES (?,?,?,?,?,?,?,?,?)')
-      .bind(code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method),
+    ...(cus.create ? [cus.create] : []),
+    db.prepare('INSERT INTO invoices (code, customer_name, customer_phone, address, total, paid_amount, debt, created_at, payment_method, customer_code) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .bind(code, cus.name, cus.phone, cus.address, total, paid_amount, debt, created_at, payment_method, cus.code),
     ...lines.map((l) =>
-      // Bảng invoice_items của bạn có cột unit_price (NOT NULL) nên ghi thêm cả unit_price lẫn price
+      // Bảng invoice_items có cột unit_price (NOT NULL) nên ghi thêm cả unit_price lẫn price
       db.prepare('INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, price, discount, total, chassis_color) VALUES ((SELECT id FROM invoices WHERE code = ?),?,?,?,?,?,?,?)')
         .bind(code, l.product_id, l.quantity, l.price, l.price, l.discount, l.total, l.chassis_color)),
     ...lines.map((l) =>
@@ -531,10 +630,7 @@ async function createInvoice(db, b) {
 }
 
 async function createOrder(db, b) {
-  const customer_name = str(b.customer_name);
-  if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
-  const customer_phone = str(b.customer_phone) || null;
-  const address = str(b.address) || null;
+  const cus = await resolveCustomer(db, b);
 
   const lines = normalizeItems(b.items);
   await loadProducts(db, lines, { checkStock: false }); // đơn đặt hàng: không trừ kho
@@ -543,12 +639,12 @@ async function createOrder(db, b) {
   const paid = Math.min(money(b.paid_amount), total);
   const created_at = isoDate(b.created_at);
   const code = await nextCode(db, 'orders', 'DH', created_at);
+  const paymentMethod = str(b.payment_method) || 'Tiền mặt';
 
-    const paymentMethod = str(b.payment_method) || 'Tiền mặt';
   const stmts = [
-    ensureCustomer(db, customer_name, customer_phone, address),
-    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, status) VALUES (?,?,?,?,?,?,?,?,?)')
-      .bind(code, customer_name, customer_phone, total, paid, total - paid, paymentMethod, created_at, 'Pending'),
+    ...(cus.create ? [cus.create] : []),
+    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, status, customer_code) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .bind(code, cus.name, cus.phone, total, paid, total - paid, paymentMethod, created_at, 'Pending', cus.code),
     ...lines.map((l) =>
       db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?,?)')
         .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total, l.chassis_color)),
@@ -564,7 +660,7 @@ async function createOrder(db, b) {
         paid,
         paymentMethod,
         code,
-        `Tạm ứng đơn đặt hàng ${code} của khách ${customer_name}`,
+        `Tạm ứng đơn đặt hàng ${code} của khách ${cus.name}`,
         created_at
       )
     );
@@ -601,6 +697,7 @@ export default {
     if (method === 'OPTIONS') return json(null, 204, origin);
 
     try {
+      if (pathname.startsWith('/api/')) await ensureCustomerCodes(db);
       // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
       if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) {
         await ensureChassisColumns(db);
@@ -853,7 +950,7 @@ export default {
             // Đơn cũ chưa có liên kết: ghép theo cùng khách + cùng tổng tiền
             inv = invs.find((i) =>
               !claimed.has(i.code) &&
-              normName(i.customer_name) === normName(o.customer_name) &&
+              (i.customer_code || '') === (o.customer_code || '') &&
               Math.abs((Number(i.total) || 0) - (Number(o.total) || 0)) <= 10);
             if (inv) claimed.add(inv.code);
           }
@@ -866,9 +963,10 @@ export default {
       if (pathname.match(/^\/api\/orders\/\d+$/) && request.method === 'PUT') {
         const id = pathname.split('/')[3];
         const b = await request.json();
-        const customer_name = String(b.customer_name || '').trim();
-        const customer_phone = String(b.customer_phone || '').trim() || null;
-        const address = String(b.address || '').trim() || null;
+        const cus = await resolveCustomer(db, b);
+        const customer_name = cus.name;
+        const customer_phone = cus.phone;
+        const address = cus.address;
         const created_at = b.created_at || new Date().toISOString();
         const items = b.items || [];
         const paid_amount = Number(b.paid_amount) || 0;
@@ -886,8 +984,9 @@ export default {
         const debt = total - paid_amount;
 
         const stmts = [
-          db.prepare('UPDATE orders SET customer_name = ?, customer_phone = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-            .bind(customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, id),
+          ...(cus.create ? [cus.create] : []),
+          db.prepare('UPDATE orders SET customer_name = ?, customer_phone = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ?, customer_code = ? WHERE id = ?')
+            .bind(customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, cus.code, id),
           db.prepare('DELETE FROM order_items WHERE order_id = ?').bind(id)
         ];
 
@@ -986,10 +1085,10 @@ export default {
         if (!oldInv) throw new HttpError(404, 'Không tìm thấy phiếu bán hàng');
 
         const b = await request.json();
-        const customer_name = str(b.customer_name);
-        if (!customer_name) throw new HttpError(400, 'Thiếu tên khách hàng');
-        const customer_phone = str(b.customer_phone) || null;
-        const address = str(b.address) || null;
+        const cus = await resolveCustomer(db, b);
+        const customer_name = cus.name;
+        const customer_phone = cus.phone;
+        const address = cus.address;
         const created_at = b.created_at ? isoDate(b.created_at) : oldInv.created_at;
         const payment_method = str(b.payment_method) || 'Tiền mặt';
 
@@ -1005,12 +1104,13 @@ export default {
         const ids = [...new Set([...oldItems.map((i) => i.product_id), ...newIds])];
 
         const stmts = [
+          ...(cus.create ? [cus.create] : []),
           // Hoàn lại tồn kho theo phiếu cũ
           ...oldItems.map((i) =>
             db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(i.quantity, i.product_id)),
           // Cập nhật thông tin phiếu
-          db.prepare('UPDATE invoices SET customer_name = ?, customer_phone = ?, address = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-            .bind(customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, id),
+            db.prepare('UPDATE invoices SET customer_name = ?, customer_phone = ?, address = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ?, customer_code = ? WHERE id = ?')
+            .bind(customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, cus.code, id),
           // Làm mới chi tiết sản phẩm
           db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(id),
           // Bảng invoice_items có cột unit_price (NOT NULL) nên ghi cả unit_price lẫn price
@@ -1094,12 +1194,13 @@ export default {
         const totalValue = lines.reduce((s, l) => s + l.quantity * l.price, 0); // tổng giá trị hàng trả
         const refundTotal = Math.min(money(refund_amount), totalValue);          // tiền mặt hoàn lại (không vượt tổng)
         const retDate = return_date || new Date().toISOString().slice(0, 10);
+        const custCode = await lookupCustomerCode(db, body.customer_code, customer_name);
 
         const stmts = [
           // Lưu phiếu trả hàng
           db.prepare(`
-            INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, total_amount, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            INSERT INTO return_orders (code, invoice_code, customer_name, return_date, reason, refund_amount, total_amount, status, created_at, customer_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
           `).bind(
             code,
             invoice_code || '',
@@ -1108,7 +1209,8 @@ export default {
             reason || 'Sản phẩm lỗi',
             refundTotal,
             totalValue,
-            statusText
+            statusText,
+            custCode
           ),
           // Lưu chi tiết từng sản phẩm trả lại
           ...lines.map((l) =>
@@ -1186,6 +1288,7 @@ export default {
         const custName = str(body.customer_name) || old.customer_name || 'Khách lẻ';
         const invoiceCode = body.invoice_code !== undefined ? str(body.invoice_code) : (old.invoice_code || '');
         const reason = str(body.reason) || old.reason || 'Sản phẩm lỗi';
+        const custCode = (await lookupCustomerCode(db, body.customer_code, custName)) || old.customer_code || '';
 
         // Ngày phiếu chi trong Sổ quỹ = ngày trả hàng
         const cashDate = retDate;
@@ -1200,8 +1303,8 @@ export default {
         stmts.push(db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').bind(id));
         // 3. Cập nhật chính phiếu này
         stmts.push(
-          db.prepare('UPDATE return_orders SET invoice_code = ?, customer_name = ?, return_date = ?, reason = ?, refund_amount = ?, total_amount = ?, status = ? WHERE id = ?')
-            .bind(invoiceCode, custName, retDate, reason, refundTotal, totalValue, statusText, id)
+        db.prepare('UPDATE return_orders SET invoice_code = ?, customer_name = ?, return_date = ?, reason = ?, refund_amount = ?, total_amount = ?, status = ?, customer_code = ? WHERE id = ?')
+            .bind(invoiceCode, custName, retDate, reason, refundTotal, totalValue, statusText, custCode, id)
         );
         // 4. Ghi lại chi tiết mới
         stmts.push(...lines.map((l) =>
@@ -1749,39 +1852,38 @@ export default {
       }
 
       // ===== 5. KHÁCH HÀNG =====
-            if (pathname === '/api/customers' && method === 'GET') {
+                  if (pathname === '/api/customers' && method === 'GET') {
         await ensureReturnSchema(db);
         const customers = (await db.prepare('SELECT * FROM customers ORDER BY id DESC').all()).results || [];
-        const invs = (await db.prepare('SELECT customer_name, total, paid_amount FROM invoices').all()).results || [];
+        const invs = (await db.prepare('SELECT customer_code, total, paid_amount FROM invoices').all()).results || [];
         let pays = [];
         if (await hasTable(db, 'customer_payments')) {
-          pays = (await db.prepare('SELECT customer_name, amount FROM customer_payments').all()).results || [];
+          pays = (await db.prepare('SELECT customer_code, amount FROM customer_payments').all()).results || [];
         }
         let rets = [];
         try {
-          rets = (await db.prepare("SELECT customer_name, refund_amount, total_amount FROM return_orders WHERE status LIKE '%Hoàn Thành%'").all()).results || [];
+          rets = (await db.prepare("SELECT customer_code, refund_amount, total_amount FROM return_orders WHERE status LIKE '%Hoàn Thành%'").all()).results || [];
         } catch (e) { console.error('customer returns failed', e); }
         const collected = await loadCollectionsByName(db);
 
-        // Gom số liệu theo tên khách đã chuẩn hóa (không phân biệt hoa/thường, dấu cách thừa)
+        // Gom số liệu theo MÃ khách hàng
         const agg = new Map();
-        const slot = (name) => {
-          const k = normName(name);
+        const slot = (code) => {
+          const k = code || '';
           if (!agg.has(k)) agg.set(k, { purchased: 0, invPaid: 0, pay: 0, retOffset: 0 });
           return agg.get(k);
         };
-        invs.forEach((i) => { const a = slot(i.customer_name); a.purchased += Number(i.total) || 0; a.invPaid += Number(i.paid_amount) || 0; });
-        pays.forEach((p) => { slot(p.customer_name).pay += Number(p.amount) || 0; });
+        invs.forEach((i) => { const a = slot(i.customer_code); a.purchased += Number(i.total) || 0; a.invPaid += Number(i.paid_amount) || 0; });
+        pays.forEach((p) => { slot(p.customer_code).pay += Number(p.amount) || 0; });
         rets.forEach((r) => {
           const refunded = Number(r.refund_amount) || 0;
           const totalValue = Number(r.total_amount) || refunded;
-          slot(r.customer_name).retOffset += Math.max(0, totalValue - refunded); // phần trả hàng trừ vào công nợ
+          slot(r.customer_code).retOffset += Math.max(0, totalValue - refunded); // phần trả hàng trừ vào công nợ
         });
 
         return json(customers.map((c) => {
-          const k = normName(c.name);
-          const a = agg.get(k) || { purchased: 0, invPaid: 0, pay: 0, retOffset: 0 };
-          const got = collected.get(k) || 0;
+          const a = agg.get(c.code) || { purchased: 0, invPaid: 0, pay: 0, retOffset: 0 };
+          const got = collected.get(c.code) || 0;
           return {
             ...c,
             total_purchased: a.purchased,
@@ -1826,14 +1928,13 @@ export default {
         const id = idOf(pathname);
         const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
         if (!customer) throw new HttpError(404, 'Không tìm thấy khách hàng');
-        const invoices = (await db.prepare('SELECT * FROM invoices WHERE customer_name = ? ORDER BY id DESC').bind(customer.name).all()).results || [];
+        const invoices = (await db.prepare('SELECT * FROM invoices WHERE customer_code = ? ORDER BY id DESC').bind(customer.code).all()).results || [];
         let payments = [];
         if (await hasTable(db, 'customer_payments')) {
-          payments = (await db.prepare('SELECT * FROM customer_payments WHERE customer_name = ? ORDER BY id DESC').bind(customer.name).all()).results || [];
+          payments = (await db.prepare('SELECT * FROM customer_payments WHERE customer_code = ? ORDER BY id DESC').bind(customer.code).all()).results || [];
         }
         return json({ customer, invoices: withCollected(invoices, await loadCollectionsByName(db)), payments }, 200, origin);
       }
-
       if (is(/^\/api\/customers\/\d+$/, 'PUT')) {
         const id = idOf(pathname);
         const b = await request.json();
@@ -1842,16 +1943,20 @@ export default {
         const current = await db.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
         if (!current) throw new HttpError(404, 'Không tìm thấy khách hàng');
 
+        const newCode = str(b.code) || current.code;
         const stmts = [
           db.prepare('UPDATE customers SET code = ?, name = ?, phone = ?, address = ? WHERE id = ?')
-            .bind(str(b.code) || current.code, name, str(b.phone) || null, str(b.address) || null, id),
+            .bind(newCode, name, str(b.phone) || null, str(b.address) || null, id),
         ];
-        // Lịch sử đang liên kết theo TÊN, nên đổi tên phải cập nhật theo để không mất công nợ/lịch sử
-        if (name !== current.name) {
-          stmts.push(db.prepare('UPDATE invoices SET customer_name = ? WHERE customer_name = ?').bind(name, current.name));
-          stmts.push(db.prepare('UPDATE orders SET customer_name = ? WHERE customer_name = ?').bind(name, current.name));
-          if (await hasTable(db, 'customer_payments'))
-            stmts.push(db.prepare('UPDATE customer_payments SET customer_name = ? WHERE customer_name = ?').bind(name, current.name));
+        // Đổi tên hoặc mã khách: cập nhật lại chứng từ của ĐÚNG khách này (theo mã cũ)
+        const docTables = ['invoices', 'orders', 'return_orders'];
+        if (await hasTable(db, 'customer_payments')) docTables.push('customer_payments');
+        for (const t of docTables) {
+          stmts.push(db.prepare(`UPDATE ${t} SET customer_name = ?, customer_code = ? WHERE customer_code = ?`).bind(name, newCode, current.code));
+        }
+        if (newCode !== current.code) {
+          // Phiếu thu chi nhập tay đang ghi mã khách cũ trong ô chứng từ
+          stmts.push(db.prepare('UPDATE cash_books SET reference_code = ? WHERE reference_code = ?').bind(newCode, current.code));
         }
         try { await db.batch(stmts); }
         catch (err) {
@@ -1863,9 +1968,9 @@ export default {
 
       if (is(/^\/api\/customers\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
-        const c = await db.prepare('SELECT name FROM customers WHERE id = ?').bind(id).first();
+        const c = await db.prepare('SELECT name, code FROM customers WHERE id = ?').bind(id).first();
         if (!c) throw new HttpError(404, 'Không tìm thấy khách hàng');
-        const used = await db.prepare('SELECT (SELECT COUNT(*) FROM invoices WHERE customer_name = ?1) + (SELECT COUNT(*) FROM orders WHERE customer_name = ?1) AS n').bind(c.name).first();
+        const used = await db.prepare('SELECT (SELECT COUNT(*) FROM invoices WHERE customer_code = ?1) + (SELECT COUNT(*) FROM orders WHERE customer_code = ?1) AS n').bind(c.code).first();
         if (used?.n > 0) throw new HttpError(409, 'Khách hàng đã có đơn hàng/phiếu bán nên không thể xóa');
         await db.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
         return json({ success: true }, 200, origin);
@@ -2064,7 +2169,7 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
   const profit = Math.round(revenue - returnDeductions - Math.max(0, cogs));
 
     // Đơn hàng gần nhất (đã trừ tiền thu nợ nhập trong Thu chi)
-  const allInv = (await db.prepare('SELECT id, code, customer_name, total, paid_amount, debt, created_at FROM invoices').all()).results || [];
+  const allInv = (await db.prepare('SELECT id, code, customer_name, customer_code, total, paid_amount, debt, created_at FROM invoices').all()).results || [];
   const recent = withCollected(allInv, await loadCollectionsByName(db))
     .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || (b.id - a.id))
     .slice(0, 8);
@@ -2086,14 +2191,16 @@ if (pathname === '/api/reports/dashboard' && method === 'GET') {
    // Top 10 khách hàng (theo tổng tiền hoặc tổng số sản phẩm đã mua, bỏ "Khách lẻ")
   const cusOrder = sortBy === 'qty' ? 'qty DESC, total DESC' : 'total DESC, qty DESC';
   const topCustomers = (await db.prepare(`
-    SELECT i.customer_name AS name,
+    SELECT COALESCE(NULLIF(i.customer_code, ''), i.customer_name) AS ckey,
+           MAX(i.customer_name) AS name,
+           MAX(i.customer_code) AS code,
            COUNT(*) AS orders,
            COALESCE(SUM(i.total), 0) AS total,
            COALESCE(SUM((SELECT SUM(ii.quantity) FROM invoice_items ii WHERE ii.invoice_id = i.id)), 0) AS qty
     FROM invoices i
     WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
       AND i.customer_name NOT LIKE 'Khách lẻ%'
-    GROUP BY i.customer_name
+    GROUP BY ckey
     ORDER BY ${cusOrder}
     LIMIT 10
   `).bind(topStart, topEnd).all()).results || [];
@@ -2115,7 +2222,7 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
 
   const invs = (await db.prepare(`
     SELECT i.id, i.code, i.customer_name, i.created_at, i.total, i.paid_amount, i.debt,
-           (SELECT code FROM customers WHERE name = i.customer_name LIMIT 1) AS customer_code
+                      i.customer_code AS customer_code
     FROM invoices i
     WHERE date(i.created_at) >= ? AND date(i.created_at) <= ?
     ORDER BY i.created_at DESC, i.id DESC
