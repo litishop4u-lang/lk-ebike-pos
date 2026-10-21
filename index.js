@@ -1597,6 +1597,7 @@ export default {
       if (pathname === '/api/customers' && method === 'GET') {
         let results = [];
         try {
+          await ensureReturnSchema(db); 
           // Công nợ = tổng mua - (tiền trả ngay trên phiếu bán + các khoản thanh toán về sau)
           const payJoin = (await hasTable(db, 'customer_payments'))
             ? `LEFT JOIN (SELECT customer_name, SUM(amount) AS total_paid FROM customer_payments GROUP BY customer_name) pay ON c.name = pay.customer_name`
@@ -1605,10 +1606,15 @@ export default {
             SELECT c.*,
               COALESCE(i.total_purchased, 0) AS total_purchased,
               COALESCE(i.inv_paid, 0) + COALESCE(pay.total_paid, 0) AS total_paid,
-              COALESCE(i.total_purchased, 0) - COALESCE(i.inv_paid, 0) - COALESCE(pay.total_paid, 0) AS total_debt
+              COALESCE(i.total_purchased, 0) - COALESCE(i.inv_paid, 0) - COALESCE(pay.total_paid, 0) - COALESCE(rtn.ret_offset, 0) AS total_debt
             FROM customers c
             LEFT JOIN (SELECT customer_name, SUM(total) AS total_purchased, SUM(paid_amount) AS inv_paid
                        FROM invoices GROUP BY customer_name) i ON c.name = i.customer_name
+             LEFT JOIN (SELECT customer_name,
+                              SUM(COALESCE(NULLIF(total_amount, 0), refund_amount)) - SUM(refund_amount) AS ret_offset
+                       FROM return_orders
+                       WHERE status LIKE '%Hoàn Thành%'
+                       GROUP BY customer_name) rtn ON c.name = rtn.customer_name
             ${payJoin}
             ORDER BY c.id DESC
           `).all();
