@@ -168,6 +168,7 @@ const PR_REASONS = ['Hàng thừa / Trả lại', 'Hàng lỗi', 'Sai quy cách'
 const SR_DONE = 'Hoàn Thành (Cộng kho & trừ nợ)';
 const newReturnForm = () => ({
   customer_name: '',
+  customer_code: '',
   invoice_code: '',
   return_date: todayLocal(),
   reason: 'Sản phẩm lỗi',
@@ -536,7 +537,7 @@ function AppMain() {
       return;
     }
     const inv = (invoicesList || []).find((i) => String(i.code || i.id) === String(invCode));
-    setReturnForm((f) => ({ ...f, invoice_code: invCode, customer_name: inv?.customer_name || f.customer_name }));
+    setReturnForm((f) => ({ ...f, invoice_code: invCode, customer_name: inv?.customer_name || f.customer_name, customer_code: inv?.customer_code || f.customer_code }));
     if (inv?.customer_name) setReturnCustomerSearch(inv.customer_name);
     if (!inv) return;
 
@@ -607,6 +608,7 @@ function AppMain() {
       setEditingReturnId(item.id);
       setReturnForm({
         customer_name: d.customer_name || '',
+        customer_code: d.customer_code || '',
         invoice_code: d.invoice_code || '',
         return_date: d.return_date ? String(d.return_date).slice(0, 10) : todayLocal(),
         reason: d.reason || 'Sản phẩm lỗi',
@@ -1274,7 +1276,7 @@ useEffect(() => {
     try {
       const details = await api(`/api/orders/${orderId}`);
       // Điền thông tin khách hàng
-      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '', code: details.customer_code || '' });
       setCustomerSearch(details.customer_name);
 
       // Lấy số tiền đã cọc từ đơn đặt hàng làm mặc định đã thanh toán / tạm ứng
@@ -1305,6 +1307,7 @@ useEffect(() => {
 
       const body = {
         customer_name: posCustomer.name,
+        customer_code: posCustomer.code || '',
         customer_phone: posCustomer.phone,
         address: posCustomer.address,
         created_at: new Date(orderDate).toISOString(),
@@ -1635,7 +1638,7 @@ useEffect(() => {
       setEditingInvoiceOriginalQty({});
       setEditingOrderId(ord.id); // Lưu lại ID để biết đang sửa đơn này
       setModalOrderType('orders');
-      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '', code: details.customer_code || '' });
       setCustomerSearch(details.customer_name);
       setPaidAmount(details.paid_amount || 0);
       setPaymentMethod(details.payment_method || 'Tiền mặt');
@@ -1657,7 +1660,7 @@ useEffect(() => {
       setEditingOrderId(null);
       setEditingInvoiceId(inv.id);
       setModalOrderType('invoices');
-      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '' });
+      setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '', code: details.customer_code || '' });
       setCustomerSearch(details.customer_name);
       setPaidAmount(details.paid_amount || 0);
       setPaymentMethod(details.payment_method || 'Tiền mặt');
@@ -1888,11 +1891,11 @@ useEffect(() => {
         await api(`/api/customers/${editingCustomer.id}`, { method: 'PUT', body: JSON.stringify(customerForm) });
         setMsg({ type: 'ok', text: 'Đã cập nhật khách hàng thành công!' });
       } else {
-        await api('/api/customers', { method: 'POST', body: JSON.stringify(customerForm) });
+      const created = await api('/api/customers', { method: 'POST', body: JSON.stringify(customerForm) });
         setMsg({ type: 'ok', text: 'Đã thêm khách hàng mới thành công!' });
         // Nếu thêm từ popup tạo đơn thì chọn luôn khách vừa tạo
         if (showOrderModal) {
-          setPosCustomer({ name: customerForm.name, phone: customerForm.phone || '', address: customerForm.address || '' });
+          setPosCustomer({ name: customerForm.name, phone: customerForm.phone || '', address: customerForm.address || '', code: created.code || '' });
           setCustomerSearch(customerForm.name);
           setShowCustomerDropdown(false);
         }
@@ -1937,7 +1940,7 @@ useEffect(() => {
     try {
       const ro = await api('/api/return-orders');
       const list = Array.isArray(ro?.data?.list) ? ro.data.list : [];
-      setCustomerReturnList(list.filter((r) => r.customer_name === c.name));
+      setCustomerReturnList(list.filter((r) => r.customer_code === c.code));
     } catch (e) { /* bỏ qua */ }
     setShowCustomerDetailModal(true);
   };
@@ -1953,7 +1956,7 @@ useEffect(() => {
     if (!cus) return [];
     const cusName = removeAccents(cus.name);
     const invs = customerDetailData.invoices || [];
-    const ords = (ordersList || []).filter((o) => o.customer_name === cus.name);
+    const ords = (ordersList || []).filter((o) => o.customer_code === cus.code);
     const rets = customerReturnList;
     const codes = new Set([...invs.map((i) => i.code), ...ords.map((o) => o.code), ...rets.map((r) => r.code)]);
     const usedCodes = new Set();
@@ -2249,7 +2252,7 @@ return map;
     const asSup = (s) => (s ? { code: s.code, name: s.name, kind: 'ncc' } : null);
     const asCus = (c) => (c ? { code: c.code, name: c.name, kind: 'kh' } : null);
     const supById = (id) => (suppliers || []).find((s) => String(s.id) === String(id));
-    const cusByName = (n) => (customers || []).find((c) => c.name === n);
+    const cusByCode = (code) => (customers || []).find((c) => c.code === code);
 
     const direct = asSup((suppliers || []).find((s) => s.code === ref)) || asCus((customers || []).find((c) => c.code === ref));
     if (direct) return direct;
@@ -2260,9 +2263,9 @@ return map;
     if (pr) return asSup(supById(pr.supplier_id));
 
     const inv = (invoicesList || []).find((i) => i.code === ref) || (ordersList || []).find((o) => o.code === ref);
-    if (inv) return asCus((customers || []).find((c) => String(c.id) === String(inv.customer_id)) || cusByName(inv.customer_name));
+    if (inv) return asCus(cusByCode(inv.customer_code));
     const ro = (returnOrdersData.list || []).find((r) => r.code === ref);
-    if (ro) return asCus(cusByName(ro.customer_name));
+    if (ro) return asCus(cusByCode(ro.customer_code));
     return null;
   };
 
@@ -2385,7 +2388,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
       const total = Number(inv.total) || 0;
       const paid = Number(inv.paid_amount) || 0;
       const debt = inv.debt !== undefined && inv.debt !== null ? Number(inv.debt) : total - paid;
-      const m = slot(inv.customer_name);
+      const m = slot(inv.customer_code || inv.customer_name);
       m.total += total; m.paid += paid; m.debt += debt;
     });
     (ordersList || []).forEach((o) => {
@@ -2393,17 +2396,17 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
       const d = String(o.created_at || '').slice(0, 10);
       if (cusStart && (d < cusStart || d > cusEnd)) return;
       const paid = Number(o.paid_amount) || 0;
-      if (paid > 0) slot(o.customer_name).paid += paid;
+      if (paid > 0) slot(o.customer_code || o.customer_name).paid += paid;
     });
     return map;
   }, [invoicesList, ordersList, cusStart, cusEnd]);
 
   // Dòng hiển thị: không lọc thời gian thì dùng số của server, có lọc thì dùng số tính theo kỳ
   const customerRows = visibleCustomers
-    .filter((c) => !cusRange || customerStats[c.name])
+    .filter((c) => !cusRange || customerStats[c.code])
     .map((c) => {
       if (!cusRange) return { ...c, f_total: Number(c.total_purchased) || 0, f_paid: customerPaidOf(c), f_debt: Number(c.total_debt) || 0 };
-      const st = customerStats[c.name];
+      const st = customerStats[c.code];
       return { ...c, f_total: st.total, f_paid: st.paid, f_debt: st.debt };
     });
   const customerSums = customerRows.reduce(
@@ -2423,7 +2426,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
     function customerPaidOf(c) {
     return (Number(c.total_paid) || 0) +
       (ordersList || [])
-        .filter((o) => o.customer_name === c.name && isPendingOrder(o))
+        .filter((o) => o.customer_code === c.code && isPendingOrder(o))
         .reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
   }
   // Phiếu bán + đơn đặt hàng của khách đang xem (cho tab Đơn hàng)
@@ -2431,7 +2434,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
     const cus = selectedCustomerDetail;
     if (!cus) return [];
     const invs = customerDetailData.invoices || [];
-    const ords = (ordersList || []).filter((o) => o.customer_name === cus.name);
+    const ords = (ordersList || []).filter((o) => o.customer_code === cus.code);
     return [...invs, ...ords].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   };
 
@@ -2821,7 +2824,7 @@ const goView = (view) => {
               {rank(i)}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>{Number(c.orders) || 0} đơn</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{c.code ? `${c.code} · ` : ''}{Number(c.orders) || 0} đơn</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
   <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#7c3aed' : '#16a34a' }}>
@@ -3296,7 +3299,7 @@ const goView = (view) => {
                           onChange={(e) => {
                             const v = e.target.value;
                             setReturnCustomerSearch(v);
-                            setReturnForm((f) => ({ ...f, customer_name: v, invoice_code: '' }));
+                            setReturnForm((f) => ({ ...f, customer_name: v, customer_code: '', invoice_code: '' }));
                             setShowReturnCustomerDropdown(true);
                           }}
                           onFocus={() => setShowReturnCustomerDropdown(true)}
@@ -3319,9 +3322,9 @@ const goView = (view) => {
                                   key={c.id}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => {
-                                    const changed = c.name !== returnForm.customer_name;
-                                    setReturnCustomerSearch(c.name);
-                                    setReturnForm((f) => ({ ...f, customer_name: c.name, invoice_code: changed ? '' : f.invoice_code }));
+                                    const changed = c.code !== returnForm.customer_code;
+                                      setReturnCustomerSearch(c.name);
+                                      setReturnForm((f) => ({ ...f, customer_name: c.name, customer_code: c.code, invoice_code: changed ? '' : f.invoice_code }));
                                     if (changed && returnForm.invoice_code) setReturnItems([]); // đổi khách thì bỏ hàng của phiếu cũ
                                     setShowReturnCustomerDropdown(false);
                                   }}
@@ -3347,7 +3350,7 @@ const goView = (view) => {
                         <option value="">-- Chọn Phiếu Bán Gốc --</option>
                         {/* SỬA: trước đây dùng biến `invoices` không tồn tại, đúng phải là `invoicesList` */}
                         {(invoicesList || [])
-                          .filter(inv => !returnForm.customer_name.trim() || (inv.customer_name || '').toLowerCase().includes(returnForm.customer_name.trim().toLowerCase()))
+                          .filter(inv => returnForm.customer_code ? inv.customer_code === returnForm.customer_code : (!returnForm.customer_name.trim() || (inv.customer_name || '').toLowerCase().includes(returnForm.customer_name.trim().toLowerCase())))
                           .map((inv, idx) => (
                             <option key={idx} value={inv.code || inv.id}>
                               {inv.code || `BH-${inv.id}`} - {inv.customer_name || 'Khách lẻ'} ({inv.total ? vnd(inv.total) : ''})
@@ -6101,7 +6104,7 @@ const goView = (view) => {
                 value={customerSearch}
                 onChange={(e) => {
                   setCustomerSearch(e.target.value);
-                  setPosCustomer((c) => ({ ...c, name: e.target.value }));
+                  setPosCustomer((c) => ({ ...c, name: e.target.value, code: '' }));
                   setShowCustomerDropdown(true);
                 }}
                 onFocus={() => setShowCustomerDropdown(true)}
@@ -6121,7 +6124,7 @@ const goView = (view) => {
                     key={c.id}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
-                      setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '' });
+                      setPosCustomer({ name: c.name, phone: c.phone || '', address: c.address || '', code: c.code });
                       setCustomerSearch(c.name);
                       setShowCustomerDropdown(false);
                     }}
