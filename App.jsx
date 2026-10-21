@@ -1940,7 +1940,7 @@ useEffect(() => {
     try {
       const ro = await api('/api/return-orders');
       const list = Array.isArray(ro?.data?.list) ? ro.data.list : [];
-      setCustomerReturnList(list.filter((r) => r.customer_code === c.code));
+      setCustomerReturnList(list.filter((r) => String(r.customer_name || '').trim() === String(c.name || '').trim()));
     } catch (e) { /* bỏ qua */ }
     setShowCustomerDetailModal(true);
   };
@@ -1965,7 +1965,7 @@ useEffect(() => {
     customerCashItems.forEach((c) => {
       if (!['Bán hàng / Thu nợ KH', 'Chi hoàn trả khách hàng'].includes(c.category)) return; // chỉ lấy phiếu liên quan khách hàng
       const ref = c.reference_code || '';
-      const hit = codes.has(ref) || (ref && ref === cus.code) || (cusName.length >= 4 && c.note && removeAccents(c.note).includes(cusName));
+      const hit = codes.has(ref) || (ref && ref === cus.code);
       if (!hit) return;
       if (codes.has(ref)) usedCodes.add(ref);
       rows.push({ key: 'c' + c.id, date: c.created_at, code: c.code, type: c.type, amount: Number(c.amount) || 0, method: c.payment_method, note: c.note || c.reference_code || '', kind: 'cash', ref: c });
