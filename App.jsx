@@ -172,6 +172,7 @@ const newReturnForm = () => ({
   return_date: todayLocal(),
   reason: 'Sản phẩm lỗi',
   refund_amount: 0,
+  refund_touched: false,
   payment_method: 'Tiền mặt',
   status: SR_DONE,
   items: [],
@@ -478,8 +479,8 @@ function AppMain() {
     (items || []).reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.price) || 0), 0);
 
   // Cập nhật danh sách hàng trả và tự tính lại số tiền hoàn
-  const setReturnItems = (items) =>
-    setReturnForm((f) => ({ ...f, items, refund_amount: calcReturnTotal(items) }));
+    const setReturnItems = (items) =>
+    setReturnForm((f) => ({ ...f, items, refund_amount: f.refund_touched ? f.refund_amount : calcReturnTotal(items) }));
 
   const updateReturnItem = (index, patch) =>
     setReturnItems((returnForm.items || []).map((it, i) => (i === index ? { ...it, ...patch } : it)));
@@ -598,6 +599,7 @@ function AppMain() {
         return_date: d.return_date ? String(d.return_date).slice(0, 10) : todayLocal(),
         reason: d.reason || 'Sản phẩm lỗi',
         refund_amount: Number(d.refund_amount) || 0,
+        refund_touched: true, // giữ nguyên số tiền hoàn của phiếu khi sửa
         payment_method: d.payment_method || 'Tiền mặt',
         status: isDoneReturn(d.status) ? SR_DONE : 'Đang xử lý',
         items: (d.items || []).map((it) => ({
@@ -3169,7 +3171,7 @@ const goView = (view) => {
                         <td style={{ padding: '14px', color: '#475569' }}>{item.invoice_code || '-'}</td>
                         <td style={{ padding: '14px', fontWeight: '500' }}>{item.customer_name}</td>
                         <td style={{ padding: '14px' }}>{item.return_date ? item.return_date.slice(0, 10) : ''}</td>
-                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(item.refund_amount)}</td>
+                        <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{vnd(Number(item.total_amount) || Number(item.refund_amount) || 0)}</td>
                         <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
                         <td style={{ padding: '14px' }}>{item.reason}</td>
                         <td style={{ padding: '14px' }}>
@@ -3223,9 +3225,23 @@ const goView = (view) => {
                       ))}
                     </tbody>
                   </table>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                    <span>Tiền hoàn trả khách:</span><span style={{ color: '#dc2626' }}>{vnd(returnDetail.refund_amount)}</span>
-                  </div>
+                                   {(() => {
+                    const tv = Number(returnDetail.total_amount) || Number(returnDetail.refund_amount) || 0;
+                    const rf = Number(returnDetail.refund_amount) || 0;
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '6px' }}>
+                          <span>Tổng giá trị hàng trả:</span><span style={{ color: '#7c3aed' }}>{vnd(tv)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '6px' }}>
+                          <span>Đã hoàn tiền cho khách:</span><span style={{ color: '#16a34a' }}>{vnd(rf)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                          <span>Trừ vào công nợ khách:</span><span style={{ color: '#dc2626' }}>{vnd(Math.max(0, tv - rf))}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
                     <button onClick={() => setReturnDetail(null)} style={{ padding: '8px 20px', background: '#cbd5e1', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đóng</button>
                   </div>
@@ -3345,13 +3361,17 @@ const goView = (view) => {
                     </div>
                     <div>
                       <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Số tiền hoàn trả khách:</label>
-                      <input
+                                            <input
                         type="number"
                         placeholder="0"
                         value={returnForm.refund_amount}
-                        onChange={e => setReturnForm({ ...returnForm, refund_amount: e.target.value })}
+                        onChange={e => setReturnForm({ ...returnForm, refund_amount: e.target.value, refund_touched: true })}
                         style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                       />
+                      <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                        Nhập 0 nếu không hoàn tiền. Phần chưa hoàn sẽ trừ vào công nợ khách:{' '}
+                        <b style={{ color: '#dc2626' }}>{vnd(Math.max(0, calcReturnTotal(returnForm.items) - (Number(returnForm.refund_amount) || 0)))}</b>
+                      </div>
                     </div>
                     <div>
                       <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Trạng thái xử lý:</label>
