@@ -1668,12 +1668,14 @@ useEffect(() => {
   };
 
   // 3. Hàm xóa đơn đặt hàng hoặc phiếu bán hàng
-  const handleDeleteOrderOrInvoice = async (type, id, code) => {
-    if (!confirm(`Bạn có chắc muốn xóa ${type === 'orders' ? 'đơn đặt hàng' : 'phiếu bán hàng'} ${code}?`)) return;
+    const handleDeleteOrderOrInvoice = async (type, id, code) => {
+    const warn = type === 'invoices' && warrantiedInvoices.has(code) ? '\nPhiếu bảo hành của phiếu này cũng sẽ bị xóa.' : '';
+    if (!confirm(`Bạn có chắc muốn xóa ${type === 'orders' ? 'đơn đặt hàng' : 'phiếu bán hàng'} ${code}?${warn}`)) return;
     try {
       await api(`/api/${type}/${id}`, { method: 'DELETE' });
       setMsg({ type: 'ok', text: `Đã xóa ${code} thành công!` });
       loadData();
+      if (type === 'invoices') { loadWarranties(); loadCashBook(); } // cập nhật lại bảo hành và Thu chi
     } catch (e) {
       alert('Lỗi khi xóa: ' + e.message);
     }
