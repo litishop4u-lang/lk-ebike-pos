@@ -42,6 +42,21 @@ const idOf = (pathname) => Number(pathname.split('/')[3]);
 const dateOnly = (v) => String(v || '').slice(0, 10);
 // Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
 const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
+// ===== Tính giá nhập: lưu trên D1 để dùng chung giữa máy tính và điện thoại =====
+let costReady = false;
+async function ensureCostSchema(db) {
+  if (costReady) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS import_costs (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at TEXT
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  )`).run();
+  costReady = true;
+}
 // Đơn đặt hàng chưa xuất bán
 const isPendingStatus = (s) => !s || /pending|chờ|đang/i.test(String(s));
 
@@ -2281,6 +2296,46 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
 
   return json({ success: true, data: { summary, invoices } }, 200, origin);
 }
+            // ===== TÍNH GIÁ NHẬP =====
+      if (pathname === '/api/import-costs' && method === 'GET') {
+        await ensureCostSchema(db);
+        const { results } = await db.prepare('SELECT data FROM import_costs ORDER BY rowid DESC').all();
+        const rows = (results || [])
+          .map((r) => { try { return JSON.parse(r.data); } catch (e) { return null; } })
+          .filter(Boolean);
+        const def = await db.prepare("SELECT value FROM app_settings WHERE key = 'import_cost_defaults'").first();
+        let defaults = null;
+        try { defaults = def ? JSON.parse(def.value) : null; } catch (e) { /* bỏ qua */ }
+        return json({ success: true, rows, defaults }, 200, origin);
+      }
+
+      if (pathname === '/api/import-cost-defaults' && method === 'PUT') {
+        await ensureCostSchema(db);
+        const b = await request.json();
+        await db.prepare(
+          `INSERT INTO app_settings (key, value) VALUES ('import_cost_defaults', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind(JSON.stringify(b || {})).run();
+        return json({ success: true }, 200, origin);
+      }
+
+      if (is(/^\/api\/import-costs\/[A-Za-z0-9_-]+$/, 'PUT')) {
+        await ensureCostSchema(db);
+        const id = pathname.split('/')[3];
+        const b = await request.json();
+        if (!b || typeof b !== 'object') throw new HttpError(400, 'Dữ liệu không hợp lệ');
+        await db.prepare(
+          `INSERT INTO import_costs (id, data, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`
+        ).bind(id, JSON.stringify({ ...b, id }), new Date().toISOString()).run();
+        return json({ success: true }, 200, origin);
+      }
+
+      if (is(/^\/api\/import-costs\/[A-Za-z0-9_-]+$/, 'DELETE')) {
+        await ensureCostSchema(db);
+        await db.prepare('DELETE FROM import_costs WHERE id = ?').bind(pathname.split('/')[3]).run();
+        return json({ success: true }, 200, origin);
+      }
       
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
