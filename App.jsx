@@ -1972,8 +1972,14 @@ useEffect(() => {
     });
 
     invs.forEach((i) => {
-      const paid = (Number(i.paid_amount) || 0) - (Number(i.collected) || 0);
-      if (paid > 0 && !usedCodes.has(i.code) && !isOrderCode(i.code)) {
+      if (isOrderCode(i.code)) return;
+      // Tạm ứng của đơn đặt hàng đã xuất thành phiếu này: đã có phiếu thu riêng, không tính lại
+      const depositFromOrder = (ordersList || [])
+        .filter((o) => o.invoice_code === i.code)
+        .reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
+      // Tiền thu nợ nhập trong Thu chi (i.collected) cũng đã hiện bằng phiếu thu riêng
+      const paid = (Number(i.paid_amount) || 0) - (Number(i.collected) || 0) - depositFromOrder;
+      if (paid > 0 && !usedCodes.has(i.code)) {
         rows.push({ key: 'i' + i.id, date: i.created_at, code: i.code, type: 'IN', amount: paid, method: i.payment_method || '', note: 'Thanh toán khi bán hàng', kind: 'inv', ref: i });
       }
     });
