@@ -444,6 +444,7 @@ function AppMain() {
   const [showPosSuggest, setShowPosSuggest] = useState(false);
   const [depositFromOrder, setDepositFromOrder] = useState(0); // tạm ứng lấy từ đơn đặt hàng khi xuất phiếu bán
   const [sourceOrderId, setSourceOrderId] = useState(null); // đơn đặt hàng đang được xuất thành phiếu bán
+  const [linkedOrder, setLinkedOrder] = useState(null); // đơn đặt hàng nguồn của phiếu bán đang sửa
   const [productSearchKeyword, setProductSearchKeyword] = useState(''); // dùng cho phiếu nhập
   const [editingOrderId, setEditingOrderId] = useState(null); // Lưu ID đơn đang sửa
   const [editingInvoiceId, setEditingInvoiceId] = useState(null); // Lưu ID phiếu đang sửa (nếu có)
@@ -1660,6 +1661,10 @@ useEffect(() => {
       setEditingOrderId(null);
       setEditingInvoiceId(inv.id);
       setModalOrderType('invoices');
+      // Phiếu bán xuất từ đơn đặt hàng: nhớ đơn nguồn và khoản tạm ứng (để hiện đúng "đã tạm ứng")
+      const fromOrder = (ordersList || []).find((o) => o.invoice_code === inv.code) || null;
+      setLinkedOrder(fromOrder);
+      setDepositFromOrder(fromOrder ? Number(fromOrder.paid_amount) || 0 : 0);
       setPosCustomer({ name: details.customer_name, phone: details.customer_phone || '', address: details.address || '', code: details.customer_code || '' });
       setCustomerSearch(details.customer_name);
       setPaidAmount(details.paid_amount || 0);
@@ -2444,7 +2449,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
     return [...invs, ...ords].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   };
 
-  useEffect(() => { if (!showOrderModal) { setDepositFromOrder(0); setSourceOrderId(null); } }, [showOrderModal]);
+  useEffect(() => { if (!showOrderModal) { setDepositFromOrder(0); setSourceOrderId(null); setLinkedOrder(null); } }, [showOrderModal]);
 
     // ----- Phiếu bảo hành -----
   const loadWarranties = async () => {
@@ -2991,7 +2996,13 @@ const goView = (view) => {
                   ) : (
                     visibleInvoices.map((inv) => (
                       <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>{inv.code}</td>
+                        <td style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7' }}>
+                          {inv.code}
+                          {(() => {
+                          const src = (ordersList || []).find((o) => o.invoice_code === inv.code);
+                          return src ? <div style={{ fontSize: '11px', fontWeight: 'normal', color: '#7c3aed' }}>📝 từ {src.code}</div> : null;
+                          })()}
+                        </td>
                         <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                         <td style={{ padding: '10px', fontWeight: '500' }}>{inv.customer_name}</td>
                         <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(inv.total)}</td>
@@ -6022,7 +6033,7 @@ const goView = (view) => {
       <div style={{ padding: '0 14px', height: '40px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0' }}>
         <h3 style={{ margin: 0, fontSize: '15px', color: modalOrderType === 'invoices' ? '#16a34a' : '#7c3aed' }}>
           {modalOrderType === 'invoices'
-            ? (editingInvoiceId ? '✏️ Sửa Phiếu Bán Hàng' : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
+            ? (editingInvoiceId ? `✏️ Sửa Phiếu Bán Hàng${linkedOrder ? ' (từ đơn ' + linkedOrder.code + ')' : ''}` : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
             : (editingOrderId ? '✏️ Sửa Đơn Đặt Hàng' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)')}
         </h3>
         <button onClick={() => { setShowOrderModal(false); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); }} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
@@ -6083,18 +6094,33 @@ const goView = (view) => {
           })()}
         </div>
 
-        {/* Chọn từ đơn đặt hàng (chỉ khi tạo phiếu bán) */}
-        {modalOrderType === 'invoices' && (
-          <div style={{ background: '#f0fdf4', padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-            <label style={{ ...cLabel, color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
-            <select onChange={(e) => handleSelectOrderToInvoice(e.target.value)} style={cInput}>
-              <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
-              {ordersList.filter(isPendingOrder).map((o) => (
-                <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Sửa phiếu bán xuất từ đơn đặt hàng: hiện đơn nguồn */}
+{modalOrderType === 'invoices' && editingInvoiceId && linkedOrder && (
+  <div style={{ background: '#f5f3ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #ddd6fe', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+    <div style={{ fontSize: '13px', color: '#5b21b6' }}>
+      📝 Phiếu này được xuất từ đơn đặt hàng <b>{linkedOrder.code}</b>
+      {' '}(ngày đặt {linkedOrder.created_at ? new Date(linkedOrder.created_at).toLocaleDateString('vi-VN') : '---'}, tạm ứng <b>{vnd(linkedOrder.paid_amount)}</b>)
+    </div>
+    <button
+      type="button"
+      onClick={() => handleViewDetail('orders', linkedOrder.id)}
+      style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+    >Xem đơn</button>
+  </div>
+)}
+
+{/* Tạo phiếu bán mới: cho chọn từ đơn đặt hàng chưa xuất */}
+{modalOrderType === 'invoices' && !editingInvoiceId && (
+  <div style={{ background: '#f0fdf4', padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+    <label style={{ ...cLabel, color: '#16a34a' }}>Chọn từ Đơn Đặt Hàng trước đó (nếu có):</label>
+    <select onChange={(e) => handleSelectOrderToInvoice(e.target.value)} style={cInput}>
+      <option value="">-- Chọn đơn đặt hàng để xuất bán --</option>
+      {ordersList.filter(isPendingOrder).map((o) => (
+        <option key={o.id} value={o.id}>{o.code} - {o.customer_name} ({vnd(o.total)})</option>
+      ))}
+    </select>
+  </div>
+)}
 
         {/* Ngày tạo + Khách hàng */}
         <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '8px 10px' }}>
