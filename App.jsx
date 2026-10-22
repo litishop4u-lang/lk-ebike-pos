@@ -126,25 +126,56 @@ const newWarrantyCode = (list) => {
 const UNIT_LABEL = { month: 'tháng', year: 'năm', day: 'ngày' };
 const nowLocalISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString();
 // ===== Tính giá nhập (hàng nhập từ Trung Quốc: tệ -> VNĐ) =====
+// Ô "override" = null/undefined: tự tính; có giá trị (kể cả rỗng): dùng số nhập tay
+const hasVal = (v) => v !== undefined && v !== null;
 const calcCostRow = (r) => {
   const n = (v) => Number(v) || 0;
   const qty = n(r.qty);
   const totalCny = qty * n(r.priceCny);
-  const vndAmount = totalCny * n(r.rate);
-  const fee = (vndAmount * n(r.feePct)) / 100;
-  const ship = n(r.kg) * n(r.shipPerKg);
+  const vndAuto = totalCny * n(r.rate);
+  const vndOver = hasVal(r.vndOverride);
+  const vndAmount = vndOver ? n(r.vndOverride) : vndAuto;
+  const feeAuto = (vndAmount * n(r.feePct)) / 100;
+  const feeOver = hasVal(r.feeOverride);
+  const fee = feeOver ? n(r.feeOverride) : feeAuto;
+  const shipAuto = n(r.kg) * n(r.shipPerKg);
+  const shipOver = hasVal(r.shipOverride);
+  const ship = shipOver ? n(r.shipOverride) : shipAuto;
   const total = vndAmount + fee + ship;
   const paid = n(r.paid1) + n(r.paid2);
-  return { totalCny, vndAmount, fee, ship, total, paid, debt: total - paid, unitCost: qty > 0 ? total / qty : 0 };
+  return {
+    totalCny, vndAmount, vndAuto, vndOver, fee, feeAuto, feeOver, ship, shipAuto, shipOver,
+    total, paid, debt: total - paid, unitCost: qty > 0 ? total / qty : 0,
+  };
 };
 const newCostRow = (d) => ({
   id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6),
   product_id: '', name: '', qty: 1, priceCny: 0,
   rate: d.rate, feePct: d.feePct, shipPerKg: d.shipPerKg, kg: 0,
+  vndOverride: null, feeOverride: null, shipOverride: null,
   date1: '', paid1: 0, date2: '', paid2: 0, sellPrice: 0,
-  appliedAt: '', appliedCost: 0,
+  appliedAt: '', appliedCost: 0, appliedSellAt: '', appliedSell: 0,
 });
 const fmtCny = (v) => (Number(v) || 0).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + ' ¥';
+const fmtStamp = (s) => (s ? fmtDMY(String(s).slice(0, 10)) + ' ' + String(s).slice(11, 16) : '');
+
+// Ô số tiền: tự tính, cho gõ đè; có nút ↺ để quay về số tự tính
+function MoneyOverride({ auto, over, value, onChange, onReset, width = 120 }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <input
+        type="number"
+        min="0"
+        value={over ? value : Math.round(auto)}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...cCell, width, fontWeight: 'bold', background: over ? '#fffbeb' : '#fff', borderColor: over ? '#f59e0b' : '#cbd5e1' }}
+      />
+      {over && (
+        <button type="button" onClick={onReset} title="Về số tự tính" style={{ background: '#fef3c7', color: '#d97706', border: 'none', width: '24px', height: '26px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>↺</button>
+      )}
+    </div>
+  );
+}
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -2650,26 +2681,53 @@ useEffect(() => { loadWarranties(); }, []);
     setCostFocusRow(null);
   };
 
-  // Áp dụng giá nhập: cập nhật "Giá nhập" của sản phẩm -> các phiếu nhập tạo SAU lúc này sẽ tự lấy giá này
+    // Ghi một phần thông tin (giá nhập / giá bán) vào danh mục sản phẩm. Lấy lại sản phẩm mới nhất để không ghi đè nhầm tồn kho.
+  const patchProduct = async (productId, patch, buildConfirm) => {
+    const fresh = asArray(await api('/api/products')).find((p) => String(p.id) === String(productId));
+    if (!fresh) { alert('Không tìm thấy sản phẩm này nữa.'); return null; }
+    if (buildConfirm && !confirm(buildConfirm(fresh))) return null;
+    await api('/api/products/' + fresh.id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        sku: fresh.sku, name: fresh.name, unit: fresh.unit,
+        import_price: fresh.import_price, price: fresh.price, wholesale_price: fresh.wholesale_price, stock: fresh.stock,
+        ...patch,
+      }),
+    });
+    return fresh;
+  };
+
+  // Áp dụng giá nhập: các phiếu nhập tạo SAU lúc bấm sẽ tự lấy giá này
   const applyImportCost = async (r) => {
     const c = calcCostRow(r);
     if (!r.product_id) return alert('Hãy chọn sản phẩm từ danh sách gợi ý cho dòng này!');
-    if (!(c.unitCost > 0)) return alert('Chưa có giá nhập hợp lệ (kiểm tra số lượng, đơn giá ¥, tỷ giá).');
+    if (!(c.unitCost > 0)) return alert('Chưa có giá nhập hợp lệ (kiểm tra số lượng và các khoản tiền).');
+    const newCost = Math.round(c.unitCost);
     try {
-      // Lấy lại sản phẩm mới nhất để không ghi đè nhầm tồn kho cũ
-      const fresh = asArray(await api('/api/products')).find((p) => String(p.id) === String(r.product_id));
-      if (!fresh) return alert('Không tìm thấy sản phẩm này nữa.');
-      const newCost = Math.round(c.unitCost);
-      if (!confirm('Áp dụng giá nhập ' + vnd(newCost) + ' / sản phẩm cho "' + fresh.name + '" từ các lần nhập kế tiếp?\nGiá nhập hiện tại: ' + vnd(fresh.import_price))) return;
-      await api('/api/products/' + fresh.id, {
-        method: 'PUT',
-        body: JSON.stringify({
-          sku: fresh.sku, name: fresh.name, unit: fresh.unit,
-          import_price: newCost, price: fresh.price, wholesale_price: fresh.wholesale_price, stock: fresh.stock,
-        }),
-      });
+      const done = await patchProduct(r.product_id, { import_price: newCost }, (p) =>
+        'Áp dụng giá nhập ' + vnd(newCost) + ' / sản phẩm cho "' + p.name + '" từ các lần nhập kế tiếp?\nGiá nhập hiện tại: ' + vnd(p.import_price));
+      if (!done) return;
       updateCostRow(r.id, { appliedAt: nowLocalISO(), appliedCost: newCost });
-      setMsg({ type: 'ok', text: 'Đã áp dụng giá nhập ' + vnd(newCost) + ' cho "' + fresh.name + '"' });
+      setMsg({ type: 'ok', text: 'Đã áp dụng giá nhập ' + vnd(newCost) + ' cho "' + done.name + '"' });
+      loadData();
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
+    }
+  };
+
+  // Áp dụng giá bán: ghi vào "Giá bán lẻ" của sản phẩm tại thời điểm bấm
+  const applySellPrice = async (r) => {
+    const c = calcCostRow(r);
+    const sell = Math.round(Number(r.sellPrice) || 0);
+    if (!r.product_id) return alert('Hãy chọn sản phẩm từ danh sách gợi ý cho dòng này!');
+    if (!(sell > 0)) return alert('Hãy nhập giá bán lớn hơn 0.');
+    try {
+      const done = await patchProduct(r.product_id, { price: sell }, (p) =>
+        'Áp dụng giá bán ' + vnd(sell) + ' cho "' + p.name + '"?\nGiá bán hiện tại: ' + vnd(p.price) +
+        (c.unitCost > 0 && sell < c.unitCost ? '\n⚠️ Giá bán đang THẤP HƠN giá nhập ' + vnd(c.unitCost) + ' / sản phẩm!' : ''));
+      if (!done) return;
+      updateCostRow(r.id, { appliedSellAt: nowLocalISO(), appliedSell: sell });
+      setMsg({ type: 'ok', text: 'Đã áp dụng giá bán ' + vnd(sell) + ' cho "' + done.name + '"' });
       loadData();
     } catch (e) {
       alert('Lỗi: ' + e.message);
@@ -5437,17 +5495,17 @@ const goView = (view) => {
             </div>
 
             <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-              <table style={{ width: '100%', minWidth: '2300px', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <table style={{ width: '100%', minWidth: '2500px', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
-                    {['Tên sản phẩm', 'Số lượng', 'Đơn giá (¥)', 'Tổng (¥)', 'Thành tiền VNĐ (quy đổi)', 'Phí dịch vụ', 'Số kg', 'Cước vận chuyển', 'Tổng cộng', 'Ngày TT lần 1', 'Đã TT lần 1', 'Ngày TT lần 2', 'Đã TT lần 2', 'Còn nợ', 'Giá bán', 'Giá nhập / SP', 'Áp dụng giá nhập', ''].map((h) => (
+                    {['Tên sản phẩm', 'Số lượng', 'Đơn giá (¥)', 'Tổng (¥)', 'Thành tiền VNĐ (quy đổi)', 'Phí dịch vụ', 'Số kg', 'Cước vận chuyển', 'Tổng cộng', 'Ngày TT lần 1', 'Đã TT lần 1', 'Ngày TT lần 2', 'Đã TT lần 2', 'Còn nợ', 'Giá bán', 'Áp dụng giá bán', 'Giá nhập / SP', 'Áp dụng giá nhập', ''].map((h) => (
                       <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {visibleCostRows.length === 0 ? (
-                    <tr><td colSpan="18" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{costRows.length === 0 ? 'Chưa có dòng nào. Bấm "+ Thêm dòng" để bắt đầu.' : 'Không tìm thấy sản phẩm phù hợp.'}</td></tr>
+                    <tr><td colSpan="19" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{costRows.length === 0 ? 'Chưa có dòng nào. Bấm "+ Thêm dòng" để bắt đầu.' : 'Không tìm thấy sản phẩm phù hợp.'}</td></tr>
                   ) : visibleCostRows.map((r) => {
                     const c = calcCostRow(r);
                     const linked = !!r.product_id;
@@ -5490,19 +5548,25 @@ const goView = (view) => {
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{fmtCny(c.totalCny)}</td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <div style={{ fontWeight: 'bold' }}>{vnd(c.vndAmount)}</div>
-                          <div style={sub}><span>tỷ giá</span><input type="number" step="any" value={r.rate} onChange={(e) => updateCostRow(r.id, { rate: e.target.value })} style={{ ...cCell, width: '70px' }} /></div>
+                          <MoneyOverride auto={c.vndAuto} over={c.vndOver} value={r.vndOverride} width={130}
+                            onChange={(v) => updateCostRow(r.id, { vndOverride: v })}
+                            onReset={() => updateCostRow(r.id, { vndOverride: null })} />
+                          <div style={{ ...sub, opacity: c.vndOver ? 0.4 : 1 }}><span>tỷ giá</span><input type="number" step="any" value={r.rate} onChange={(e) => updateCostRow(r.id, { rate: e.target.value })} style={{ ...cCell, width: '70px' }} /></div>
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <div>{vnd(c.fee)}</div>
-                          <div style={sub}><input type="number" step="any" value={r.feePct} onChange={(e) => updateCostRow(r.id, { feePct: e.target.value })} style={{ ...cCell, width: '56px' }} /><span>%</span></div>
+                          <MoneyOverride auto={c.feeAuto} over={c.feeOver} value={r.feeOverride} width={110}
+                            onChange={(v) => updateCostRow(r.id, { feeOverride: v })}
+                            onReset={() => updateCostRow(r.id, { feeOverride: null })} />
+                          <div style={{ ...sub, opacity: c.feeOver ? 0.4 : 1 }}><input type="number" step="any" value={r.feePct} onChange={(e) => updateCostRow(r.id, { feePct: e.target.value })} style={{ ...cCell, width: '56px' }} /><span>%</span></div>
                         </td>
                         <td style={{ padding: '8px 12px' }}>
                           <input type="number" step="any" min="0" value={r.kg} onChange={(e) => updateCostRow(r.id, { kg: e.target.value })} style={{ ...cCell, width: '80px' }} />
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <div>{vnd(c.ship)}</div>
-                          <div style={sub}><input type="number" step="any" value={r.shipPerKg} onChange={(e) => updateCostRow(r.id, { shipPerKg: e.target.value })} style={{ ...cCell, width: '70px' }} /><span>đ/kg</span></div>
+                          <MoneyOverride auto={c.shipAuto} over={c.shipOver} value={r.shipOverride} width={110}
+                            onChange={(v) => updateCostRow(r.id, { shipOverride: v })}
+                            onReset={() => updateCostRow(r.id, { shipOverride: null })} />
+                          <div style={{ ...sub, opacity: c.shipOver ? 0.4 : 1 }}><input type="number" step="any" value={r.shipPerKg} onChange={(e) => updateCostRow(r.id, { shipPerKg: e.target.value })} style={{ ...cCell, width: '70px' }} /><span>đ/kg</span></div>
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(c.total)}</td>
                         <td style={{ padding: '8px 12px' }}>
@@ -5521,6 +5585,25 @@ const goView = (view) => {
                         <td style={{ padding: '8px 12px' }}>
                           <input type="number" min="0" value={r.sellPrice} onChange={(e) => updateCostRow(r.id, { sellPrice: e.target.value })} style={{ ...cCell, width: '110px' }} />
                         </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                          {(() => {
+                            const sameSell = !!r.appliedSellAt && Number(r.sellPrice) === Number(r.appliedSell);
+                            const canSell = linked && Number(r.sellPrice) > 0;
+                            return (
+                              <>
+                                <button
+                                  onClick={() => applySellPrice(r)}
+                                  disabled={!canSell}
+                                  title={!linked ? 'Hãy chọn sản phẩm từ danh sách gợi ý trước' : 'Ghi giá bán này vào danh mục sản phẩm'}
+                                  style={{ height: '30px', padding: '0 12px', border: 'none', borderRadius: '5px', fontWeight: 'bold', fontSize: '12px', cursor: canSell ? 'pointer' : 'not-allowed', opacity: canSell ? 1 : 0.45, background: sameSell ? '#dcfce7' : '#16a34a', color: sameSell ? '#16a34a' : '#fff' }}
+                                >
+                                  {r.appliedSellAt ? (sameSell ? '✓ Đã áp dụng' : 'Áp dụng lại') : 'Áp dụng giá bán'}
+                                </button>
+                                {r.appliedSellAt && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '3px' }}>{fmtStamp(r.appliedSellAt)}: {vnd(r.appliedSell)}</div>}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: '#0284c7' }}>{vnd(c.unitCost)}</td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
                           <button
@@ -5531,7 +5614,7 @@ const goView = (view) => {
                           >
                             {r.appliedAt ? (same ? '✓ Đã áp dụng' : 'Áp dụng lại') : 'Áp dụng giá nhập'}
                           </button>
-                          {r.appliedAt && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '3px' }}>{fmtDMY(String(r.appliedAt).slice(0, 10))}: {vnd(r.appliedCost)}</div>}
+                          {r.appliedAt && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '3px' }}>{fmtStamp(r.appliedAt)}: {vnd(r.appliedCost)}</div>}
                         </td>
                         <td style={{ padding: '8px 12px' }}>
                           <button onClick={() => deleteCostRow(r)} title="Xóa dòng" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
@@ -5552,7 +5635,7 @@ const goView = (view) => {
                       <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: '#7c3aed' }}>{vnd(costSums.total)}</td>
                       <td colSpan="4" style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>Đã thanh toán: {vnd(costSums.paid)}</td>
                       <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: costSums.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(costSums.debt)}</td>
-                      <td colSpan="4" style={{ borderTop: '2px solid #0f172a' }}></td>
+                      <td colSpan="5" style={{ borderTop: '2px solid #0f172a' }}></td>
                     </tr>
                   </tfoot>
                 )}
