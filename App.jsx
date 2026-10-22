@@ -3218,8 +3218,8 @@ const goView = (view) => {
                         <td style={{ padding: '14px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{vnd(item.refund_amount)}</td>
                         <td style={{ padding: '14px' }}>{item.reason}</td>
                         <td style={{ padding: '14px' }}>
-                          <span style={{ padding: '4px 10px', borderRadius: '20px', background: isDoneReturn(item.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(item.status) ? '#16a34a' : '#d97706', fontWeight: '500', fontSize: '12px' }}>
-                            {item.status}
+                          <span style={{ padding: '4px 10px', borderRadius: '20px', background: isDoneReturn(item.status) ? '#dcfce7' : '#fef3c7', color: isDoneReturn(item.status) ? '#16a34a' : '#d97706', fontWeight: '500', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                          {isDoneReturn(item.status) ? 'Hoàn thành' : 'Đang xử lý'}
                           </span>
                         </td>
                         <td style={{ padding: '14px', textAlign: 'center' }}>
@@ -3246,7 +3246,7 @@ const goView = (view) => {
                     <div><b>Khách hàng:</b> {returnDetail.customer_name}</div>
                     <div><b>Phiếu bán gốc:</b> {returnDetail.invoice_code || '---'}</div>
                     <div><b>Ngày trả:</b> {returnDetail.return_date ? String(returnDetail.return_date).slice(0, 10) : '---'}</div>
-                    <div><b>Lý do:</b> {returnDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {returnDetail.status}</div>
+                    <div><b>Lý do:</b> {returnDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {isDoneReturn(returnDetail.status) ? 'Hoàn thành' : 'Đang xử lý'}</div>
                     <div><b>Phương thức hoàn tiền:</b> {returnDetail.payment_method || 'Tiền mặt'}</div>
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '15px' }}>
@@ -3889,7 +3889,7 @@ const goView = (view) => {
                 <div><b>Nhà cung cấp:</b> {prDetail.supplier_name}</div>
                 <div><b>Phiếu nhập gốc:</b> {prDetail.purchase_code || '---'}</div>
                 <div><b>Ngày trả:</b> {prDetail.return_date ? new Date(prDetail.return_date).toLocaleDateString('vi-VN') : '---'}</div>
-                <div><b>Lý do:</b> {prDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {prDetail.status}</div>
+                <div><b>Lý do:</b> {prDetail.reason} &nbsp;|&nbsp; <b>Trạng thái:</b> {isDoneReturn(prDetail.status) ? 'Hoàn thành' : 'Đang xử lý'}</div>
                 <div><b>Phương thức nhận tiền:</b> {prDetail.payment_method || 'Tiền mặt'}</div>
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '15px' }}>
