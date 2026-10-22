@@ -125,6 +125,26 @@ const newWarrantyCode = (list) => {
 };
 const UNIT_LABEL = { month: 'tháng', year: 'năm', day: 'ngày' };
 const nowLocalISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString();
+// ===== Tính giá nhập (hàng nhập từ Trung Quốc: tệ -> VNĐ) =====
+const calcCostRow = (r) => {
+  const n = (v) => Number(v) || 0;
+  const qty = n(r.qty);
+  const totalCny = qty * n(r.priceCny);
+  const vndAmount = totalCny * n(r.rate);
+  const fee = (vndAmount * n(r.feePct)) / 100;
+  const ship = n(r.kg) * n(r.shipPerKg);
+  const total = vndAmount + fee + ship;
+  const paid = n(r.paid1) + n(r.paid2);
+  return { totalCny, vndAmount, fee, ship, total, paid, debt: total - paid, unitCost: qty > 0 ? total / qty : 0 };
+};
+const newCostRow = (d) => ({
+  id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6),
+  product_id: '', name: '', qty: 1, priceCny: 0,
+  rate: d.rate, feePct: d.feePct, shipPerKg: d.shipPerKg, kg: 0,
+  date1: '', paid1: 0, date2: '', paid2: 0, sellPrice: 0,
+  appliedAt: '', appliedCost: 0,
+});
+const fmtCny = (v) => (Number(v) || 0).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + ' ¥';
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -932,6 +952,15 @@ function AppMain() {
   const [warrantyDetail, setWarrantyDetail] = useState(null);
   const [warrantySearch, setWarrantySearch] = useState('');
   const [warrantyFilter, setWarrantyFilter] = useState('all'); // all | valid | soon | expired
+  const [costRows, setCostRows] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem('import_costs') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  });
+  const [costDefaults, setCostDefaults] = useState(() => {
+    try { return { rate: 3600, feePct: 3, shipPerKg: 0, ...JSON.parse(localStorage.getItem('import_cost_defaults') || '{}') }; }
+    catch (e) { return { rate: 3600, feePct: 3, shipPerKg: 0 }; }
+  });
+  const [costSearch, setCostSearch] = useState('');
+  const [costFocusRow, setCostFocusRow] = useState(null);
 
   // ===== States cho Thu chi (Sổ quỹ) =====
   const [showCashModal, setShowCashModal] = useState(false);
@@ -2601,6 +2630,58 @@ useEffect(() => { loadWarranties(); }, []);
     const debt = po.debt !== undefined && po.debt !== null ? Number(po.debt) : total - paid;
     return { total: a.total + total, paid: a.paid + paid, debt: a.debt + debt };
   }, { total: 0, paid: 0, debt: 0 });
+
+    // ----- Tính giá nhập -----
+  useEffect(() => {
+    try { localStorage.setItem('import_costs', JSON.stringify(costRows)); } catch (e) { /* bỏ qua */ }
+  }, [costRows]);
+  useEffect(() => {
+    try { localStorage.setItem('import_cost_defaults', JSON.stringify(costDefaults)); } catch (e) { /* bỏ qua */ }
+  }, [costDefaults]);
+
+  const updateCostRow = (id, patch) => setCostRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addCostRow = () => setCostRows((rows) => [newCostRow(costDefaults), ...rows]);
+  const deleteCostRow = (r) => {
+    if (!confirm('Xóa dòng "' + (r.name || 'chưa đặt tên') + '"?')) return;
+    setCostRows((rows) => rows.filter((x) => x.id !== r.id));
+  };
+  const pickCostProduct = (rowId, p) => {
+    updateCostRow(rowId, { product_id: p.id, name: p.name, sellPrice: Number(p.price) || 0 });
+    setCostFocusRow(null);
+  };
+
+  // Áp dụng giá nhập: cập nhật "Giá nhập" của sản phẩm -> các phiếu nhập tạo SAU lúc này sẽ tự lấy giá này
+  const applyImportCost = async (r) => {
+    const c = calcCostRow(r);
+    if (!r.product_id) return alert('Hãy chọn sản phẩm từ danh sách gợi ý cho dòng này!');
+    if (!(c.unitCost > 0)) return alert('Chưa có giá nhập hợp lệ (kiểm tra số lượng, đơn giá ¥, tỷ giá).');
+    try {
+      // Lấy lại sản phẩm mới nhất để không ghi đè nhầm tồn kho cũ
+      const fresh = asArray(await api('/api/products')).find((p) => String(p.id) === String(r.product_id));
+      if (!fresh) return alert('Không tìm thấy sản phẩm này nữa.');
+      const newCost = Math.round(c.unitCost);
+      if (!confirm('Áp dụng giá nhập ' + vnd(newCost) + ' / sản phẩm cho "' + fresh.name + '" từ các lần nhập kế tiếp?\nGiá nhập hiện tại: ' + vnd(fresh.import_price))) return;
+      await api('/api/products/' + fresh.id, {
+        method: 'PUT',
+        body: JSON.stringify({
+          sku: fresh.sku, name: fresh.name, unit: fresh.unit,
+          import_price: newCost, price: fresh.price, wholesale_price: fresh.wholesale_price, stock: fresh.stock,
+        }),
+      });
+      updateCostRow(r.id, { appliedAt: nowLocalISO(), appliedCost: newCost });
+      setMsg({ type: 'ok', text: 'Đã áp dụng giá nhập ' + vnd(newCost) + ' cho "' + fresh.name + '"' });
+      loadData();
+    } catch (e) {
+      alert('Lỗi: ' + e.message);
+    }
+  };
+
+  const costKeyword = removeAccents(costSearch.trim());
+  const visibleCostRows = costRows.filter((r) => !costKeyword || removeAccents(r.name).includes(costKeyword));
+  const costSums = visibleCostRows.reduce((a, r) => {
+    const c = calcCostRow(r);
+    return { cny: a.cny + c.totalCny, vnd: a.vnd + c.vndAmount, fee: a.fee + c.fee, ship: a.ship + c.ship, total: a.total + c.total, paid: a.paid + c.paid, debt: a.debt + c.debt };
+  }, { cny: 0, vnd: 0, fee: 0, ship: 0, total: 0, paid: 0, debt: 0 });
   
   const filteredPosProducts = (products || []).filter((p) =>
     p.name.toLowerCase().includes(posProductKeyword.toLowerCase()) ||
@@ -5300,7 +5381,187 @@ const goView = (view) => {
             </div>
         )}
 
-                {/* MÀN HÌNH PHIẾU BẢO HÀNH */}
+                {/* MÀN HÌNH TÍNH GIÁ NHẬP */}
+        {currentView === 'import-cost' && (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ margin: 0 }}>Tính giá nhập ({visibleCostRows.length}{costKeyword ? '/' + costRows.length : ''})</h2>
+              <button onClick={addCostRow} style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm dòng</button>
+            </div>
+
+            {/* Thông số mặc định cho dòng mới */}
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '15px' }}>
+              <div>
+                <label style={cLabel}>Tỷ giá (VNĐ / 1 ¥)</label>
+                <input type="number" step="any" value={costDefaults.rate} onChange={(e) => setCostDefaults({ ...costDefaults, rate: e.target.value })} style={{ ...cInput, width: '130px' }} />
+              </div>
+              <div>
+                <label style={cLabel}>Phí dịch vụ (%)</label>
+                <input type="number" step="any" value={costDefaults.feePct} onChange={(e) => setCostDefaults({ ...costDefaults, feePct: e.target.value })} style={{ ...cInput, width: '110px' }} />
+              </div>
+              <div>
+                <label style={cLabel}>Cước vận chuyển (VNĐ / kg)</label>
+                <input type="number" step="any" value={costDefaults.shipPerKg} onChange={(e) => setCostDefaults({ ...costDefaults, shipPerKg: e.target.value })} style={{ ...cInput, width: '150px' }} />
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b', maxWidth: '380px' }}>
+                Chỉ áp cho dòng mới thêm. Mỗi dòng giữ thông số riêng, nên đổi tỷ giá ở đây không làm thay đổi các dòng cũ.
+              </div>
+            </div>
+
+            {/* 3 ô tổng hợp */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG CỘNG (GIÁ VỐN LÔ HÀNG)</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(costSums.total)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>ĐÃ THANH TOÁN</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(costSums.paid)}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>CÒN NỢ</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626', marginTop: '4px' }}>{vnd(costSums.debt)}</div>
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '420px' }}>
+              <input
+                placeholder="🔍 Tìm theo tên sản phẩm..."
+                value={costSearch}
+                onChange={(e) => setCostSearch(e.target.value)}
+                style={{ ...inputStyle, margin: 0, paddingRight: costSearch ? '36px' : '10px' }}
+              />
+              {costSearch && (
+                <button type="button" onClick={() => setCostSearch('')} title="Xóa tìm kiếm" style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+              )}
+            </div>
+
+            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+              <table style={{ width: '100%', minWidth: '2300px', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left' }}>
+                    {['Tên sản phẩm', 'Số lượng', 'Đơn giá (¥)', 'Tổng (¥)', 'Thành tiền VNĐ (quy đổi)', 'Phí dịch vụ', 'Số kg', 'Cước vận chuyển', 'Tổng cộng', 'Ngày TT lần 1', 'Đã TT lần 1', 'Ngày TT lần 2', 'Đã TT lần 2', 'Còn nợ', 'Giá bán', 'Giá nhập / SP', 'Áp dụng giá nhập', ''].map((h) => (
+                      <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleCostRows.length === 0 ? (
+                    <tr><td colSpan="18" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{costRows.length === 0 ? 'Chưa có dòng nào. Bấm "+ Thêm dòng" để bắt đầu.' : 'Không tìm thấy sản phẩm phù hợp.'}</td></tr>
+                  ) : visibleCostRows.map((r) => {
+                    const c = calcCostRow(r);
+                    const linked = !!r.product_id;
+                    const unit = Math.round(c.unitCost);
+                    const same = !!r.appliedAt && unit === Number(r.appliedCost);
+                    const sub = { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '3px' };
+                    const k = r.name.trim() ? removeAccents(r.name.trim()) : '';
+                    const suggest = costFocusRow === r.id && k && !linked
+                      ? (products || []).filter((p) => removeAccents(p.sku).includes(k) || removeAccents(p.name).includes(k)).slice(0, 8)
+                      : [];
+                    return (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                        <td style={{ padding: '8px 12px', minWidth: '240px' }}>
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              placeholder="Gõ tên / mã sản phẩm..."
+                              value={r.name}
+                              onChange={(e) => { updateCostRow(r.id, { name: e.target.value, product_id: '' }); setCostFocusRow(r.id); }}
+                              onFocus={() => setCostFocusRow(r.id)}
+                              onBlur={() => setTimeout(() => setCostFocusRow(null), 150)}
+                              style={{ ...cInput, borderColor: linked ? '#16a34a' : '#cbd5e1' }}
+                            />
+                            {linked && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '2px' }}>✓ Đã gắn với sản phẩm trong kho</div>}
+                            {suggest.length > 0 && (
+                              <div style={{ position: 'absolute', top: '32px', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', zIndex: 30, boxShadow: '0 4px 10px rgba(0,0,0,0.15)' }}>
+                                {suggest.map((p) => (
+                                  <div key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => pickCostProduct(r.id, p)} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}>
+                                    <b>{p.sku ? p.sku + ' - ' : ''}{p.name}</b>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" min="0" value={r.qty} onChange={(e) => updateCostRow(r.id, { qty: e.target.value })} style={{ ...cCell, width: '70px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" step="any" min="0" value={r.priceCny} onChange={(e) => updateCostRow(r.id, { priceCny: e.target.value })} style={{ ...cCell, width: '90px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{fmtCny(c.totalCny)}</td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: 'bold' }}>{vnd(c.vndAmount)}</div>
+                          <div style={sub}><span>tỷ giá</span><input type="number" step="any" value={r.rate} onChange={(e) => updateCostRow(r.id, { rate: e.target.value })} style={{ ...cCell, width: '70px' }} /></div>
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                          <div>{vnd(c.fee)}</div>
+                          <div style={sub}><input type="number" step="any" value={r.feePct} onChange={(e) => updateCostRow(r.id, { feePct: e.target.value })} style={{ ...cCell, width: '56px' }} /><span>%</span></div>
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" step="any" min="0" value={r.kg} onChange={(e) => updateCostRow(r.id, { kg: e.target.value })} style={{ ...cCell, width: '80px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                          <div>{vnd(c.ship)}</div>
+                          <div style={sub}><input type="number" step="any" value={r.shipPerKg} onChange={(e) => updateCostRow(r.id, { shipPerKg: e.target.value })} style={{ ...cCell, width: '70px' }} /><span>đ/kg</span></div>
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(c.total)}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="date" value={r.date1} onChange={(e) => updateCostRow(r.id, { date1: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" min="0" value={r.paid1} onChange={(e) => updateCostRow(r.id, { paid1: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="date" value={r.date2} onChange={(e) => updateCostRow(r.id, { date2: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" min="0" value={r.paid2} onChange={(e) => updateCostRow(r.id, { paid2: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: c.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(c.debt)}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input type="number" min="0" value={r.sellPrice} onChange={(e) => updateCostRow(r.id, { sellPrice: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: '#0284c7' }}>{vnd(c.unitCost)}</td>
+                        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => applyImportCost(r)}
+                            disabled={!linked || !(c.unitCost > 0)}
+                            title={!linked ? 'Hãy chọn sản phẩm từ danh sách gợi ý trước' : 'Lấy giá nhập này làm giá nhập của sản phẩm'}
+                            style={{ height: '30px', padding: '0 12px', border: 'none', borderRadius: '5px', fontWeight: 'bold', fontSize: '12px', cursor: !linked ? 'not-allowed' : 'pointer', opacity: !linked ? 0.45 : 1, background: same ? '#dcfce7' : '#7c3aed', color: same ? '#16a34a' : '#fff' }}
+                          >
+                            {r.appliedAt ? (same ? '✓ Đã áp dụng' : 'Áp dụng lại') : 'Áp dụng giá nhập'}
+                          </button>
+                          {r.appliedAt && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '3px' }}>{fmtDMY(String(r.appliedAt).slice(0, 10))}: {vnd(r.appliedCost)}</div>}
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <button onClick={() => deleteCostRow(r)} title="Xóa dòng" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {visibleCostRows.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: '#f1f5f9', fontWeight: 'bold' }}>
+                      <td colSpan="3" style={{ padding: '10px 12px', textAlign: 'right', borderTop: '2px solid #0f172a' }}>TỔNG CỘNG</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{fmtCny(costSums.cny)}</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{vnd(costSums.vnd)}</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{vnd(costSums.fee)}</td>
+                      <td style={{ borderTop: '2px solid #0f172a' }}></td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{vnd(costSums.ship)}</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: '#7c3aed' }}>{vnd(costSums.total)}</td>
+                      <td colSpan="4" style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>Đã thanh toán: {vnd(costSums.paid)}</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: costSums.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(costSums.debt)}</td>
+                      <td colSpan="4" style={{ borderTop: '2px solid #0f172a' }}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </FillHeight>
+          </div>
+        )}
+
+        {/* MÀN HÌNH PHIẾU BẢO HÀNH */}
         {currentView === 'warranties' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
@@ -7024,6 +7285,7 @@ const MENU_GROUPS = [
       { view: 'purchases', label: '📥 Nhập hàng' },
       { view: 'purchase-returns', label: '↩️ Trả hàng nhập' },
       { view: 'suppliers', label: '🚚 Nhà cung cấp' },
+      { view: 'import-cost', label: '🧮 Tính giá nhập' },
     ],
   },
   {
