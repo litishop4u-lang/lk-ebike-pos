@@ -155,22 +155,24 @@ const newCostRow = (d) => ({
   vndOverride: null, feeOverride: null, shipOverride: null,
   date1: '', paid1: 0, date2: '', paid2: 0, sellPrice: 0,
   appliedAt: '', appliedCost: 0, appliedSellAt: '', appliedSell: 0,
+  locked: false,
 });
 const fmtCny = (v) => (Number(v) || 0).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + ' ¥';
 const fmtStamp = (s) => (s ? fmtDMY(String(s).slice(0, 10)) + ' ' + String(s).slice(11, 16) : '');
 
 // Ô số tiền: tự tính, cho gõ đè; có nút ↺ để quay về số tự tính
-function MoneyOverride({ auto, over, value, onChange, onReset, width = 120 }) {
+function MoneyOverride({ auto, over, value, onChange, onReset, width = 120, disabled = false }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
       <input
         type="number"
         min="0"
         value={over ? value : Math.round(auto)}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         style={{ ...cCell, width, fontWeight: 'bold', background: over ? '#fffbeb' : '#fff', borderColor: over ? '#f59e0b' : '#cbd5e1' }}
       />
-      {over && (
+      {over && !disabled && (
         <button type="button" onClick={onReset} title="Về số tự tính" style={{ background: '#fef3c7', color: '#d97706', border: 'none', width: '24px', height: '26px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>↺</button>
       )}
     </div>
@@ -340,6 +342,9 @@ const RESPONSIVE_CSS = `
   margin-bottom: 0 !important; box-sizing: border-box;
 }
 .pos-card thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+/* Dòng "Tính giá nhập" đã khóa: ô nhập chuyển xám, không gõ được */
+.cost-locked { background: #f8fafc; }
+.cost-locked input:disabled { background: #f1f5f9 !important; color: #475569; cursor: not-allowed; }
 
 @media (max-width: 900px) {
   .mobile-topbar {
@@ -2672,6 +2677,7 @@ useEffect(() => { loadWarranties(); }, []);
 
   const updateCostRow = (id, patch) => setCostRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addCostRow = () => setCostRows((rows) => [newCostRow(costDefaults), ...rows]);
+  const toggleCostLock = (r) => updateCostRow(r.id, { locked: !r.locked });
   const deleteCostRow = (r) => {
     if (!confirm('Xóa dòng "' + (r.name || 'chưa đặt tên') + '"?')) return;
     setCostRows((rows) => rows.filter((x) => x.id !== r.id));
@@ -5506,23 +5512,25 @@ const goView = (view) => {
                 <tbody>
                   {visibleCostRows.length === 0 ? (
                     <tr><td colSpan="19" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>{costRows.length === 0 ? 'Chưa có dòng nào. Bấm "+ Thêm dòng" để bắt đầu.' : 'Không tìm thấy sản phẩm phù hợp.'}</td></tr>
-                  ) : visibleCostRows.map((r) => {
+                 ) : visibleCostRows.map((r) => {
                     const c = calcCostRow(r);
+                    const lock = !!r.locked;
                     const linked = !!r.product_id;
                     const unit = Math.round(c.unitCost);
                     const same = !!r.appliedAt && unit === Number(r.appliedCost);
                     const sub = { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '3px' };
                     const k = r.name.trim() ? removeAccents(r.name.trim()) : '';
-                    const suggest = costFocusRow === r.id && k && !linked
+                    const suggest = !lock && costFocusRow === r.id && k && !linked
                       ? (products || []).filter((p) => removeAccents(p.sku).includes(k) || removeAccents(p.name).includes(k)).slice(0, 8)
                       : [];
                     return (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                      <tr key={r.id} className={lock ? 'cost-locked' : ''} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
                         <td style={{ padding: '8px 12px', minWidth: '240px' }}>
                           <div style={{ position: 'relative' }}>
                             <input
                               placeholder="Gõ tên / mã sản phẩm..."
                               value={r.name}
+                              disabled={lock}
                               onChange={(e) => { updateCostRow(r.id, { name: e.target.value, product_id: '' }); setCostFocusRow(r.id); }}
                               onFocus={() => setCostFocusRow(r.id)}
                               onBlur={() => setTimeout(() => setCostFocusRow(null), 150)}
@@ -5539,51 +5547,72 @@ const goView = (view) => {
                               </div>
                             )}
                           </div>
+                          {/* Nút khóa / mở khóa dòng */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                            {lock ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCostLock(r)}
+                                  title="Mở khóa để chỉnh sửa dòng này"
+                                  style={{ height: '26px', padding: '0 12px', background: '#fef3c7', color: '#d97706', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                                >✏️ Sửa</button>
+                                <span style={{ fontSize: '11px', color: '#64748b' }}>🔒 Đã khóa</span>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => toggleCostLock(r)}
+                                title="Xác nhận và khóa dòng này"
+                                style={{ height: '26px', padding: '0 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                              >✓ OK</button>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" min="0" value={r.qty} onChange={(e) => updateCostRow(r.id, { qty: e.target.value })} style={{ ...cCell, width: '70px' }} />
+                          <input type="number" min="0" value={r.qty} disabled={lock} onChange={(e) => updateCostRow(r.id, { qty: e.target.value })} style={{ ...cCell, width: '70px' }} />
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" step="any" min="0" value={r.priceCny} onChange={(e) => updateCostRow(r.id, { priceCny: e.target.value })} style={{ ...cCell, width: '90px' }} />
+                          <input type="number" step="any" min="0" value={r.priceCny} disabled={lock} onChange={(e) => updateCostRow(r.id, { priceCny: e.target.value })} style={{ ...cCell, width: '90px' }} />
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{fmtCny(c.totalCny)}</td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <MoneyOverride auto={c.vndAuto} over={c.vndOver} value={r.vndOverride} width={130}
+                          <MoneyOverride auto={c.vndAuto} over={c.vndOver} value={r.vndOverride} width={130} disabled={lock}
                             onChange={(v) => updateCostRow(r.id, { vndOverride: v })}
                             onReset={() => updateCostRow(r.id, { vndOverride: null })} />
-                          <div style={{ ...sub, opacity: c.vndOver ? 0.4 : 1 }}><span>tỷ giá</span><input type="number" step="any" value={r.rate} onChange={(e) => updateCostRow(r.id, { rate: e.target.value })} style={{ ...cCell, width: '70px' }} /></div>
+                          <div style={{ ...sub, opacity: c.vndOver ? 0.4 : 1 }}><span>tỷ giá</span><input type="number" step="any" value={r.rate} disabled={lock} onChange={(e) => updateCostRow(r.id, { rate: e.target.value })} style={{ ...cCell, width: '70px' }} /></div>
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <MoneyOverride auto={c.feeAuto} over={c.feeOver} value={r.feeOverride} width={110}
+                          <MoneyOverride auto={c.feeAuto} over={c.feeOver} value={r.feeOverride} width={110} disabled={lock}
                             onChange={(v) => updateCostRow(r.id, { feeOverride: v })}
                             onReset={() => updateCostRow(r.id, { feeOverride: null })} />
-                          <div style={{ ...sub, opacity: c.feeOver ? 0.4 : 1 }}><input type="number" step="any" value={r.feePct} onChange={(e) => updateCostRow(r.id, { feePct: e.target.value })} style={{ ...cCell, width: '56px' }} /><span>%</span></div>
+                          <div style={{ ...sub, opacity: c.feeOver ? 0.4 : 1 }}><input type="number" step="any" value={r.feePct} disabled={lock} onChange={(e) => updateCostRow(r.id, { feePct: e.target.value })} style={{ ...cCell, width: '56px' }} /><span>%</span></div>
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" step="any" min="0" value={r.kg} onChange={(e) => updateCostRow(r.id, { kg: e.target.value })} style={{ ...cCell, width: '80px' }} />
+                          <input type="number" step="any" min="0" value={r.kg} disabled={lock} onChange={(e) => updateCostRow(r.id, { kg: e.target.value })} style={{ ...cCell, width: '80px' }} />
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                          <MoneyOverride auto={c.shipAuto} over={c.shipOver} value={r.shipOverride} width={110}
+                          <MoneyOverride auto={c.shipAuto} over={c.shipOver} value={r.shipOverride} width={110} disabled={lock}
                             onChange={(v) => updateCostRow(r.id, { shipOverride: v })}
                             onReset={() => updateCostRow(r.id, { shipOverride: null })} />
-                          <div style={{ ...sub, opacity: c.shipOver ? 0.4 : 1 }}><input type="number" step="any" value={r.shipPerKg} onChange={(e) => updateCostRow(r.id, { shipPerKg: e.target.value })} style={{ ...cCell, width: '70px' }} /><span>đ/kg</span></div>
+                          <div style={{ ...sub, opacity: c.shipOver ? 0.4 : 1 }}><input type="number" step="any" value={r.shipPerKg} disabled={lock} onChange={(e) => updateCostRow(r.id, { shipPerKg: e.target.value })} style={{ ...cCell, width: '70px' }} /><span>đ/kg</span></div>
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: '#7c3aed' }}>{vnd(c.total)}</td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="date" value={r.date1} onChange={(e) => updateCostRow(r.id, { date1: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
+                          <input type="date" value={r.date1} disabled={lock} onChange={(e) => updateCostRow(r.id, { date1: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" min="0" value={r.paid1} onChange={(e) => updateCostRow(r.id, { paid1: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                          <input type="number" min="0" value={r.paid1} disabled={lock} onChange={(e) => updateCostRow(r.id, { paid1: e.target.value })} style={{ ...cCell, width: '110px' }} />
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="date" value={r.date2} onChange={(e) => updateCostRow(r.id, { date2: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
+                          <input type="date" value={r.date2} disabled={lock} onChange={(e) => updateCostRow(r.id, { date2: e.target.value })} style={{ ...cCell, width: '130px', textAlign: 'left' }} />
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" min="0" value={r.paid2} onChange={(e) => updateCostRow(r.id, { paid2: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                          <input type="number" min="0" value={r.paid2} disabled={lock} onChange={(e) => updateCostRow(r.id, { paid2: e.target.value })} style={{ ...cCell, width: '110px' }} />
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', fontWeight: 'bold', color: c.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(c.debt)}</td>
                         <td style={{ padding: '8px 12px' }}>
-                          <input type="number" min="0" value={r.sellPrice} onChange={(e) => updateCostRow(r.id, { sellPrice: e.target.value })} style={{ ...cCell, width: '110px' }} />
+                          <input type="number" min="0" value={r.sellPrice} disabled={lock} onChange={(e) => updateCostRow(r.id, { sellPrice: e.target.value })} style={{ ...cCell, width: '110px' }} />
                         </td>
                         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
                           {(() => {
@@ -5617,7 +5646,12 @@ const goView = (view) => {
                           {r.appliedAt && <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '3px' }}>{fmtStamp(r.appliedAt)}: {vnd(r.appliedCost)}</div>}
                         </td>
                         <td style={{ padding: '8px 12px' }}>
-                          <button onClick={() => deleteCostRow(r)} title="Xóa dòng" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+                          <button
+                            onClick={() => deleteCostRow(r)}
+                            disabled={lock}
+                            title={lock ? 'Bấm Sửa để mở khóa trước khi xóa' : 'Xóa dòng'}
+                            style={{ background: '#fee2e2', color: '#dc2626', border: 'none', width: '26px', height: '26px', borderRadius: '4px', cursor: lock ? 'not-allowed' : 'pointer', opacity: lock ? 0.4 : 1, lineHeight: 1 }}
+                          >✕</button>
                         </td>
                       </tr>
                     );
