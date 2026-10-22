@@ -988,13 +988,11 @@ function AppMain() {
   const [warrantyDetail, setWarrantyDetail] = useState(null);
   const [warrantySearch, setWarrantySearch] = useState('');
   const [warrantyFilter, setWarrantyFilter] = useState('all'); // all | valid | soon | expired
-  const [costRows, setCostRows] = useState(() => {
-    try { const v = JSON.parse(localStorage.getItem('import_costs') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
-  });
-  const [costDefaults, setCostDefaults] = useState(() => {
-    try { return { rate: 3600, feePct: 3, shipPerKg: 0, ...JSON.parse(localStorage.getItem('import_cost_defaults') || '{}') }; }
-    catch (e) { return { rate: 3600, feePct: 3, shipPerKg: 0 }; }
-  });
+  const [costRows, setCostRows] = useState([]);
+  const [costDefaults, setCostDefaults] = useState({ rate: 3600, feePct: 3, shipPerKg: 0 });
+  const [costLoaded, setCostLoaded] = useState(false); // chỉ lưu lên server sau khi đã tải xong, tránh ghi đè dữ liệu
+  const costSavedRef = useRef(new Map()); // id dòng -> nội dung (JSON) đã lưu trên server
+  const costDefSavedRef = useRef('');
   const [costSearch, setCostSearch] = useState('');
   const [costFocusRow, setCostFocusRow] = useState(null);
 
@@ -2667,13 +2665,73 @@ useEffect(() => { loadWarranties(); }, []);
     return { total: a.total + total, paid: a.paid + paid, debt: a.debt + debt };
   }, { total: 0, paid: 0, debt: 0 });
 
-    // ----- Tính giá nhập -----
+     // Tải dữ liệu từ server (lần đầu: tự chuyển dữ liệu cũ trong trình duyệt lên server)
+  const loadCosts = async () => {
+    try {
+      const res = await api('/api/import-costs');
+      let rows = Array.isArray(res.rows) ? res.rows : [];
+      let defaults = res.defaults && typeof res.defaults === 'object' ? res.defaults : null;
+
+      if (rows.length === 0) {
+        let old = [];
+        try { old = JSON.parse(localStorage.getItem('import_costs') || '[]'); } catch (e) { /* bỏ qua */ }
+        if (Array.isArray(old) && old.length > 0) {
+          for (const r of [...old].reverse()) { // đẩy từ cũ đến mới để giữ đúng thứ tự
+            try { await api('/api/import-costs/' + r.id, { method: 'PUT', body: JSON.stringify(r) }); } catch (e) { /* bỏ qua */ }
+          }
+          rows = old;
+        }
+      }
+      if (!defaults) {
+        try { defaults = JSON.parse(localStorage.getItem('import_cost_defaults') || 'null'); } catch (e) { /* bỏ qua */ }
+      }
+      const merged = { rate: 3600, feePct: 3, shipPerKg: 0, ...(defaults || {}) };
+
+      costSavedRef.current = new Map(rows.map((r) => [r.id, JSON.stringify(r)]));
+      costDefSavedRef.current = JSON.stringify(merged);
+      setCostRows(rows);
+      setCostDefaults(merged);
+      setCostLoaded(true);
+    } catch (e) {
+      setMsg({ type: 'err', text: 'Không tải được dữ liệu Tính giá nhập: ' + e.message });
+    }
+  };
+
+  useEffect(() => { if (currentView === 'import-cost') loadCosts(); }, [currentView]);
+
+  // Tự lưu: dòng nào thay đổi thì ghi dòng đó, dòng nào bị xóa thì xóa trên server (sau khi ngừng gõ 0,6 giây)
   useEffect(() => {
-    try { localStorage.setItem('import_costs', JSON.stringify(costRows)); } catch (e) { /* bỏ qua */ }
-  }, [costRows]);
+    if (!costLoaded) return;
+    const t = setTimeout(async () => {
+      const saved = costSavedRef.current;
+      const ids = new Set(costRows.map((r) => r.id));
+      for (const r of costRows) {
+        const js = JSON.stringify(r);
+        if (saved.get(r.id) !== js) {
+          try { await api('/api/import-costs/' + r.id, { method: 'PUT', body: js }); saved.set(r.id, js); }
+          catch (e) { console.error('Lỗi lưu dòng tính giá nhập:', e); }
+        }
+      }
+      for (const id of [...saved.keys()]) {
+        if (!ids.has(id)) {
+          try { await api('/api/import-costs/' + id, { method: 'DELETE' }); saved.delete(id); }
+          catch (e) { console.error('Lỗi xóa dòng tính giá nhập:', e); }
+        }
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [costRows, costLoaded]);
+
   useEffect(() => {
-    try { localStorage.setItem('import_cost_defaults', JSON.stringify(costDefaults)); } catch (e) { /* bỏ qua */ }
-  }, [costDefaults]);
+    if (!costLoaded) return;
+    const js = JSON.stringify(costDefaults);
+    if (js === costDefSavedRef.current) return;
+    const t = setTimeout(async () => {
+      try { await api('/api/import-cost-defaults', { method: 'PUT', body: js }); costDefSavedRef.current = js; }
+      catch (e) { console.error('Lỗi lưu thông số mặc định:', e); }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [costDefaults, costLoaded]);
 
   const updateCostRow = (id, patch) => setCostRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addCostRow = () => setCostRows((rows) => [newCostRow(costDefaults), ...rows]);
