@@ -1125,7 +1125,13 @@ export default {
         ];
 
                 // Tạo lại phiếu thu (trừ phần tạm ứng đã có phiếu thu riêng của đơn đặt hàng liên kết)
-        const linkedOrders = (await db.prepare('SELECT code FROM orders WHERE invoice_code = ?').bind(oldInv.code).all()).results || [];
+        const linkedOrders = (await db.prepare(
+          `SELECT code FROM orders
+           WHERE invoice_code = ?1
+              OR (COALESCE(invoice_code, '') = '' AND status LIKE '%Hoàn thành%'
+                  AND ?2 <> '' AND customer_code = ?2 AND ABS(total - ?3) <= 10)`
+        ).bind(oldInv.code, oldInv.customer_code || '', Number(oldInv.total) || 0).all()).results || [];
+        
         let depositRecorded = 0;
         if (linkedOrders.length) {
           const orderCodes = linkedOrders.map((o) => o.code);
