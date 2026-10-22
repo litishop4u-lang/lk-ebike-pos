@@ -2,7 +2,7 @@ import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState } from
 
 const API = import.meta.env.VITE_API_URL || '';
 // Làm tròn về số nguyên đồng để không hiện số lẻ kiểu 35.331.754,667 ₫
-const vnd = (n) => Math.round(Number(n) || 0).toLocaleString('vi-VN') + ' ₫';
+const vnd = (n) => (Math.round(Number(n) || 0) || 0).toLocaleString('vi-VN') + ' ₫';
 // Chuyển chuỗi số kiểu "1,500,000" / "1.500.000 ₫" thành số
 const num = (s) => Number(String(s ?? '').replace(/[.,\s₫]/g, '')) || 0;
 const splitRow = (l) => l.split(/\t|;/).map((x) => x.trim().replace(/^["']|["']$/g, ''));
@@ -467,6 +467,32 @@ const RESPONSIVE_CSS = `
   /* ===== Ô địa chỉ dài: cho phép xuống dòng, không tràn sang cột khác ===== */
   .main-content td[style*="max-width"] { white-space: normal !important; word-break: break-word; min-width: 180px !important; max-width: 220px !important; }
 }
+
+    /* ===== Tính giá nhập trên điện thoại ===== */
+  /* 3 thông số (tỷ giá, phí dịch vụ, cước) cùng 1 hàng, ô nhỏ */
+  .main-content .cost-page .cost-params { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; padding: 8px !important; align-items: start !important; }
+  .main-content .cost-page .cost-params > div { min-width: 0; }
+  .main-content .cost-page .cost-params label { font-size: 11px !important; margin-bottom: 2px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .main-content .cost-page .cost-params input { width: 100% !important; height: 28px !important; padding: 0 6px !important; font-size: 13px !important; }
+  .main-content .cost-page .cost-params .cost-note { grid-column: 1 / -1; max-width: none !important; font-size: 11px !important; line-height: 1.3; }
+
+  /* Ô tìm kiếm gọn */
+  .main-content .cost-page .cost-search { max-width: 100% !important; margin-bottom: 10px !important; }
+  .main-content .cost-page .cost-search input { height: 32px !important; padding: 0 30px 0 10px !important; font-size: 14px !important; }
+  .main-content .cost-page .cost-search button { top: 3px !important; }
+
+  /* Bảng chi tiết: ô nhập, chữ và khoảng cách nhỏ lại */
+  .main-content .cost-page .cost-table table { min-width: 1900px !important; }
+  .main-content .cost-page .cost-table th { padding: 6px 6px !important; font-size: 11px !important; }
+  .main-content .cost-page .cost-table td { padding: 5px 6px !important; font-size: 12px !important; }
+  .main-content .cost-page .cost-table td input { height: 26px !important; padding: 0 5px !important; font-size: 12px !important; }
+  .main-content .cost-page .cost-table td input:not([type="date"]) { width: 80px !important; }
+  .main-content .cost-page .cost-table td input[type="date"] { width: 112px !important; }
+  .main-content .cost-page .cost-table td:first-child { min-width: 180px !important; }
+  .main-content .cost-page .cost-table td:first-child input { width: 100% !important; }
+  .main-content .cost-page .cost-table td button { font-size: 11px !important; }
+  .main-content .cost-page .cost-table tfoot td { font-size: 12px !important; }
+  
   /* Đồng nhất font (áp dụng cả máy tính và điện thoại) */
 .layout, .layout button, .layout input, .layout select, .layout textarea {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -5505,14 +5531,14 @@ const goView = (view) => {
 
                 {/* MÀN HÌNH TÍNH GIÁ NHẬP */}
         {currentView === 'import-cost' && (
-          <div style={cardStyle}>
+            <div style={cardStyle} className="cost-page">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ margin: 0 }}>Tính giá nhập ({visibleCostRows.length}{costKeyword ? '/' + costRows.length : ''})</h2>
               <button onClick={addCostRow} style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm dòng</button>
             </div>
 
             {/* Thông số mặc định cho dòng mới */}
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '15px' }}>
+            <div className="cost-params" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '15px' }}>
               <div>
                 <label style={cLabel}>Tỷ giá (VNĐ / 1 ¥)</label>
                 <input type="number" step="any" value={costDefaults.rate} onChange={(e) => setCostDefaults({ ...costDefaults, rate: e.target.value })} style={{ ...cInput, width: '130px' }} />
@@ -5525,15 +5551,15 @@ const goView = (view) => {
                 <label style={cLabel}>Cước vận chuyển (VNĐ / kg)</label>
                 <input type="number" step="any" value={costDefaults.shipPerKg} onChange={(e) => setCostDefaults({ ...costDefaults, shipPerKg: e.target.value })} style={{ ...cInput, width: '150px' }} />
               </div>
-              <div style={{ fontSize: '12px', color: '#64748b', maxWidth: '380px' }}>
+              <div className="cost-note" style={{ fontSize: '12px', color: '#64748b', maxWidth: '380px' }}>
                 Chỉ áp cho dòng mới thêm. Mỗi dòng giữ thông số riêng, nên đổi tỷ giá ở đây không làm thay đổi các dòng cũ.
               </div>
             </div>
 
             {/* 3 ô tổng hợp */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #7c3aed' }}>
-                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG CỘNG (GIÁ VỐN LÔ HÀNG)</div>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG CỘNG</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#7c3aed', marginTop: '4px' }}>{vnd(costSums.total)}</div>
               </div>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
@@ -5546,7 +5572,7 @@ const goView = (view) => {
               </div>
             </div>
 
-            <div style={{ position: 'relative', marginBottom: '15px', maxWidth: '420px' }}>
+            <div className="cost-search" style={{ position: 'relative', marginBottom: '15px', maxWidth: '420px' }}>
               <input
                 placeholder="🔍 Tìm theo tên sản phẩm..."
                 value={costSearch}
@@ -5558,7 +5584,7 @@ const goView = (view) => {
               )}
             </div>
 
-            <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <FillHeight className="cost-table" style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <table style={{ width: '100%', minWidth: '2500px', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
