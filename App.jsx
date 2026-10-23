@@ -1590,7 +1590,9 @@ useEffect(() => {
 
     const finalTotal = grossTotal - totalDiscount;
     const printPaidAmount = Number(printData.paid_amount) || 0;
-    const debtAmount = finalTotal - printPaidAmount;
+    const debtAmount = printData.debt !== undefined && printData.debt !== null
+      ? Math.max(0, Number(printData.debt) || 0)
+      : finalTotal - printPaidAmount;
 
     // Logo chiếm 1/3 (33%), Thông tin công ty chiếm 2/3 (65%)
     const logoHtml = companyInfo.logoUrl
@@ -3367,9 +3369,39 @@ const goView = (view) => {
                 </table>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '20px' }}>
-                <span>Tổng tiền:</span> <span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
-              </div>
+                           {(() => {
+                const isOrderDoc = (detailData.code || '').startsWith('DH');
+                const paid = Number(detailData.paid_amount) || 0;
+                const debt = detailData.debt !== undefined && detailData.debt !== null
+                  ? Number(detailData.debt) || 0
+                  : (Number(detailData.total) || 0) - paid;
+                const row = { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' };
+                return (
+                  <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                    <div style={{ ...row, fontWeight: 'bold' }}>
+                      <span>Tổng tiền:</span><span style={{ color: '#7c3aed' }}>{vnd(detailData.total)}</span>
+                    </div>
+                    <div style={row}>
+                      <span>{isOrderDoc ? 'Đã tạm ứng:' : 'Đã thanh toán:'}</span>
+                      <b style={{ color: '#16a34a' }}>{vnd(paid)}</b>
+                    </div>
+                    <div style={row}>
+                      <span>Còn nợ:</span>
+                      <b style={{ color: debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debt))}</b>
+                    </div>
+                    <div style={row}>
+                      <span>Phương thức thanh toán:</span>
+                      <span>{detailData.payment_method || 'Tiền mặt'}</span>
+                    </div>
+                    {isOrderDoc && (
+                      <div style={{ ...row, marginBottom: 0 }}>
+                        <span>Trạng thái:</span>
+                        <b style={{ color: isPendingOrder(detailData) ? '#d97706' : '#16a34a' }}>{detailData.status || 'Pending'}</b>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
                 <button
