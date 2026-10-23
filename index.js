@@ -65,8 +65,12 @@ let orderSchemaReady = false;
 async function ensureOrderSchema(db) {
   if (orderSchemaReady) return;
   const { results } = await db.prepare('PRAGMA table_info(orders)').all();
-  if (!(results || []).some((c) => c.name === 'invoice_code')) {
+  const cols = (results || []).map((c) => c.name);
+  if (!cols.includes('invoice_code')) {
     await db.prepare('ALTER TABLE orders ADD COLUMN invoice_code TEXT').run();
+  }
+  if (!cols.includes('address')) {
+    await db.prepare('ALTER TABLE orders ADD COLUMN address TEXT').run();
   }
   orderSchemaReady = true;
 }
@@ -219,6 +223,14 @@ function withCollected(invoices, collections) {
     if (!take) return inv;
     return { ...inv, paid_amount: (Number(inv.paid_amount) || 0) + take, debt: baseDebt(inv) - take, collected: take };
   });
+}
+
+// Phiếu bán kèm số "đã thanh toán / còn nợ" sau khi trừ tiền thu nợ nhập trong Thu chi (cùng cách tính với danh sách)
+async function adjustInvoice(db, inv) {
+  if (!inv || !inv.customer_code) return inv;
+  const same = (await db.prepare('SELECT * FROM invoices WHERE customer_code = ?').bind(inv.customer_code).all()).results || [];
+  const adj = withCollected(same, await loadCollectionsByName(db)).find((x) => x.id === inv.id);
+  return adj || inv;
 }
 // ===== Phiếu bảo hành (lưu trên D1 để dùng chung giữa máy tính và điện thoại) =====
 let warrantyReady = false;
@@ -658,8 +670,8 @@ async function createOrder(db, b) {
 
   const stmts = [
     ...(cus.create ? [cus.create] : []),
-    db.prepare('INSERT INTO orders (code, customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, status, customer_code) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .bind(code, cus.name, cus.phone, total, paid, total - paid, paymentMethod, created_at, 'Pending', cus.code),
+      db.prepare('INSERT INTO orders (code, customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, status, customer_code) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(code, cus.name, cus.phone, cus.address, total, paid, total - paid, paymentMethod, created_at, 'Pending', cus.code),
     ...lines.map((l) =>
       db.prepare('INSERT INTO order_items (order_id, product_id, quantity, price, discount, total, chassis_color) VALUES ((SELECT id FROM orders WHERE code = ?),?,?,?,?,?,?)')
         .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total, l.chassis_color)),
@@ -1000,8 +1012,8 @@ export default {
 
         const stmts = [
           ...(cus.create ? [cus.create] : []),
-          db.prepare('UPDATE orders SET customer_name = ?, customer_phone = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ?, customer_code = ? WHERE id = ?')
-            .bind(customer_name, customer_phone, total, paid_amount, debt, payment_method, created_at, cus.code, id),
+          db.prepare('UPDATE orders SET customer_name = ?, customer_phone = ?, address = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ?, customer_code = ? WHERE id = ?')
+            .bind(customer_name, customer_phone, address, total, paid_amount, debt, payment_method, created_at, cus.code, id),
           db.prepare('DELETE FROM order_items WHERE order_id = ?').bind(id)
         ];
 
@@ -1036,7 +1048,7 @@ export default {
         return json({ success: true, total }, 200, origin);
       }
 
-      // GET /api/orders/:id hoặc /api/invoices/:id (lấy chi tiết kèm items)
+            // GET /api/orders/:id hoặc /api/invoices/:id (lấy chi tiết kèm items)
       if (pathname.match(/^\/api\/(orders|invoices)\/\d+$/) && request.method === 'GET') {
         const parts = pathname.split('/');
         const type = parts[2]; // 'orders' hoặc 'invoices'
@@ -1044,8 +1056,33 @@ export default {
         const itemTable = type === 'orders' ? 'order_items' : 'invoice_items';
         const foreignKey = type === 'orders' ? 'order_id' : 'invoice_id';
 
-        const mainObj = await db.prepare(`SELECT * FROM ${type} WHERE id = ?`).bind(id).first();
+        let mainObj = await db.prepare(`SELECT * FROM ${type} WHERE id = ?`).bind(id).first();
         if (!mainObj) throw new HttpError(404, 'Không tìm thấy dữ liệu');
+
+        // Chứng từ thiếu địa chỉ / SĐT (đơn cũ chưa lưu) thì lấy từ hồ sơ khách hàng
+        if (mainObj.customer_code && (!str(mainObj.address) || !str(mainObj.customer_phone))) {
+          const cu = await db.prepare('SELECT phone, address FROM customers WHERE code = ?').bind(mainObj.customer_code).first();
+          if (cu) {
+            mainObj = {
+              ...mainObj,
+              address: str(mainObj.address) || cu.address || null,
+              customer_phone: str(mainObj.customer_phone) || cu.phone || null,
+            };
+          }
+        }
+
+        // Đã thanh toán / còn nợ: trừ cả tiền thu nợ nhập trong Thu chi
+        if (type === 'invoices') {
+          const adj = await adjustInvoice(db, mainObj);
+          mainObj = { ...mainObj, paid_amount: adj.paid_amount, debt: adj.debt };
+        } else if (!isPendingStatus(mainObj.status) && mainObj.invoice_code) {
+          // Đơn đã xuất thành phiếu bán: công nợ lấy theo phiếu bán
+          const inv = await db.prepare('SELECT * FROM invoices WHERE code = ?').bind(mainObj.invoice_code).first();
+          if (inv) {
+            const adj = await adjustInvoice(db, inv);
+            mainObj = { ...mainObj, debt: Math.max(0, Number(adj.debt) || 0) };
+          }
+        }
 
         const items = await db.prepare(`
           select i.*, p.name as product_name, p.sku
