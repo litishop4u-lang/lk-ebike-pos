@@ -56,6 +56,72 @@ const parseChassisText = (str0) => {
   return out;
 };
 
+// Chuẩn hóa để so sánh số khung / số sườn: in hoa, bỏ dấu cách, gạch ngang...
+const normSerial = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Bảng ghi số khung / số sườn của từng xe lúc nhập hàng
+let unitsReady = false;
+async function ensureUnitSchema(db) {
+  if (unitsReady) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS chassis_units (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    chassis TEXT,
+    frame TEXT,
+    purchase_order_id INTEGER,
+    purchase_code TEXT,
+    created_at TEXT
+  )`).run();
+  unitsReady = true;
+}
+
+// Lấy danh sách xe (số khung / số sườn) từ các dòng hàng client gửi lên. Mỗi dòng chỉ lấy tối đa "số lượng" xe.
+function extractUnits(rawItems, lines) {
+  const units = [];
+  (Array.isArray(rawItems) ? rawItems : []).forEach((raw, i) => {
+    const line = lines[i];
+    if (!line || !raw || !Array.isArray(raw.serials)) return;
+    raw.serials.slice(0, line.quantity).forEach((s) => {
+      const chassis = str(s && s.chassis).toUpperCase().slice(0, 60);
+      const frame = str(s && s.frame).toUpperCase().slice(0, 60);
+      if (!chassis && !frame) return;
+      units.push({ product_id: line.product_id, chassis, frame });
+    });
+  });
+  return units;
+}
+
+// Không cho trùng số khung / số sườn (trong cùng phiếu, hoặc với phiếu nhập khác)
+async function checkUnitsUnique(db, units, excludePurchaseId) {
+  if (!units.length) return;
+  const seen = new Set();
+  for (const u of units) {
+    for (const [label, v] of [['Số khung', u.chassis], ['Số sườn', u.frame]]) {
+      const k = normSerial(v);
+      if (!k) continue;
+      const key = label + ':' + k;
+      if (seen.has(key)) throw new HttpError(400, `${label} "${v}" bị nhập trùng trong phiếu này`);
+      seen.add(key);
+    }
+  }
+  const { results } = await db.prepare('SELECT chassis, frame, purchase_code, purchase_order_id FROM chassis_units').all();
+  for (const r of results || []) {
+    if (excludePurchaseId && Number(r.purchase_order_id) === Number(excludePurchaseId)) continue;
+    const ck = normSerial(r.chassis);
+    const fk = normSerial(r.frame);
+    for (const u of units) {
+      if (ck && ck === normSerial(u.chassis)) throw new HttpError(409, `Số khung "${u.chassis}" đã có ở phiếu nhập ${r.purchase_code}`);
+      if (fk && fk === normSerial(u.frame)) throw new HttpError(409, `Số sườn "${u.frame}" đã có ở phiếu nhập ${r.purchase_code}`);
+    }
+  }
+}
+
+// Các câu lệnh ghi số khung / số sườn kèm mã phiếu nhập (đặt SAU câu lệnh tạo phiếu nhập trong cùng batch)
+const unitStatements = (db, units, purchaseCode, createdAt) =>
+  units.map((u) =>
+    db.prepare('INSERT INTO chassis_units (product_id, chassis, frame, purchase_order_id, purchase_code, created_at) VALUES (?, ?, ?, (SELECT id FROM purchase_orders WHERE code = ?), ?, ?)')
+      .bind(u.product_id, u.chassis, u.frame, purchaseCode, purchaseCode, createdAt));
+
 // ===== Tính giá nhập: lưu trên D1 để dùng chung giữa máy tính và điện thoại =====
 let costReady = false;
 async function ensureCostSchema(db) {
@@ -724,6 +790,7 @@ async function buildPurchase(db, b) {
     supplier_id, lines, ids, total, paid_amount,
     debt: total - paid_amount,
     payment_method: str(b.payment_method) || 'Tiền mặt',
+    units: extractUnits(b.items, lines),
   };
 }
 
@@ -739,6 +806,7 @@ export default {
 
     try {
       if (pathname.startsWith('/api/')) await ensureCustomerCodes(db);
+      if (pathname.startsWith('/api/purchase_orders')) await ensureUnitSchema(db);
       // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
       if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) {
         await ensureChassisColumns(db);
@@ -1805,6 +1873,7 @@ export default {
       if (pathname === '/api/purchase_orders' && method === 'POST') {
         const reqData = await request.json();
         const po = await buildPurchase(db, reqData);
+        await checkUnitsUnique(db, po.units, null);
         const code = await nextCode(db, 'purchase_orders', 'PN', reqData.created_at);
 
         // Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
@@ -1818,6 +1887,8 @@ export default {
               .bind(code, l.product_id, l.quantity, l.price, l.discount, l.total)),
           ...po.lines.map((l) =>
             db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+          // Ghi số khung / số sườn của từng xe kèm mã phiếu nhập
+          ...unitStatements(db, po.units, code, customDate),
         ];
 
         // Tự động sinh phiếu chi nếu có thanh toán tiền ngay trên phiếu nhập
@@ -1852,62 +1923,80 @@ export default {
           FROM purchase_order_items poi LEFT JOIN products p ON poi.product_id = p.id
           WHERE poi.purchase_order_id = ?
         `).bind(id).all();
-        return json({ ...po, items: itemsRes.results || [] }, 200, origin);
+                const unitRows = (await db.prepare('SELECT product_id, chassis, frame FROM chassis_units WHERE purchase_order_id = ? ORDER BY id').bind(id).all()).results || [];
+        const byProduct = new Map();
+        for (const u of unitRows) {
+          const key = String(u.product_id);
+          if (!byProduct.has(key)) byProduct.set(key, []);
+          byProduct.get(key).push({ chassis: u.chassis || '', frame: u.frame || '' });
+        }
+        const itemsWithSerials = (itemsRes.results || []).map((it) => {
+          const key = String(it.product_id);
+          const serials = byProduct.get(key) || [];
+          byProduct.delete(key); // nếu một sản phẩm xuất hiện ở 2 dòng thì chỉ gắn cho dòng đầu
+          return { ...it, serials };
+        });
+        return json({ ...po, items: itemsWithSerials }, 200, origin);
       }
 
       // PUT: trước đây Worker KHÔNG có route này nên nút "Sửa phiếu nhập" không lưu được gì
-      if (is(/^\/api\/purchase_orders\/\d+$/, 'PUT')) {
-  const id = idOf(pathname);
-  // Lấy thêm mã phiếu (code) để tìm đúng phiếu chi trong Sổ quỹ
-  const existing = await db.prepare('SELECT id, code FROM purchase_orders WHERE id = ?').bind(id).first();
-  if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
+            if (is(/^\/api\/purchase_orders\/\d+$/, 'PUT')) {
+        const id = idOf(pathname);
+        // Lấy thêm mã phiếu (code) để tìm đúng phiếu chi trong Sổ quỹ
+        const existing = await db.prepare('SELECT id, code FROM purchase_orders WHERE id = ?').bind(id).first();
+        if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu nhập');
 
-  const reqData = await request.json();
-  const po = await buildPurchase(db, reqData);
-  const customDate = reqData.created_at || new Date().toISOString();
+        const reqData = await request.json();
+        const po = await buildPurchase(db, reqData);
+        await checkUnitsUnique(db, po.units, id);
+        const customDate = reqData.created_at || new Date().toISOString();
 
-  const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
-  const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
+        const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
+        const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
 
-  const stmts = [
-    ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
-    db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
-    db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
-      .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
-    ...po.lines.map((l) =>
-      db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
-        .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
-    ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
+        const stmts = [
+          ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
+          db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+          db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
+            .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
+          ...po.lines.map((l) =>
+            db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
+              .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
+          ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
 
-    // Đồng bộ Sổ quỹ: xóa phiếu chi cũ của phiếu nhập này (chỉ phiếu chi thanh toán tiền hàng)
-    db.prepare("DELETE FROM cash_books WHERE reference_code = ? AND type = 'OUT' AND category = 'Mua hàng / Trả nợ NCC'")
-      .bind(existing.code),
-  ];
+          // Ghi lại số khung / số sườn theo nội dung phiếu mới
+          db.prepare('DELETE FROM chassis_units WHERE purchase_order_id = ?').bind(id),
+          ...unitStatements(db, po.units, existing.code, customDate),
 
-  // Tạo lại phiếu chi theo ngày và số tiền mới (nếu có thanh toán)
-  if (Number(po.paid_amount) > 0) {
-    const sup = await db.prepare('SELECT name FROM suppliers WHERE id = ?').bind(po.supplier_id).first();
-    const supName = sup ? sup.name : 'Nhà cung cấp';
-    stmts.push(
-      db.prepare(`
-        INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
-        VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
-      `).bind(
-        genCode('TC'),
-        po.paid_amount,
-        po.payment_method || 'Chuyển khoản',
-        existing.code,
-        `Thanh toán tiền mua hàng cho ${supName} theo phiếu ${existing.code} (Đã cập nhật)`,
-        customDate
-      )
-    );
-  }
+          // Đồng bộ Sổ quỹ: xóa phiếu chi cũ của phiếu nhập này (chỉ phiếu chi thanh toán tiền hàng)
+          db.prepare("DELETE FROM cash_books WHERE reference_code = ? AND type = 'OUT' AND category = 'Mua hàng / Trả nợ NCC'")
+            .bind(existing.code),
+        ];
 
-  stmts.push(stockGuard(db, ids));
+        // Tạo lại phiếu chi theo ngày và số tiền mới (nếu có thanh toán)
+        if (Number(po.paid_amount) > 0) {
+          const sup = await db.prepare('SELECT name FROM suppliers WHERE id = ?').bind(po.supplier_id).first();
+          const supName = sup ? sup.name : 'Nhà cung cấp';
+          stmts.push(
+            db.prepare(`
+              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+              VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
+            `).bind(
+              genCode('TC'),
+              po.paid_amount,
+              po.payment_method || 'Chuyển khoản',
+              existing.code,
+              `Thanh toán tiền mua hàng cho ${supName} theo phiếu ${existing.code} (Đã cập nhật)`,
+              customDate
+            )
+          );
+        }
 
-  await runBatch(db, stmts, 'Không thể sửa phiếu: một số hàng đã bán nên tồn kho không đủ để hoàn lại');
-  return json({ success: true, code: existing.code }, 200, origin);
-}
+        stmts.push(stockGuard(db, ids));
+
+        await runBatch(db, stmts, 'Không thể sửa phiếu: một số hàng đã bán nên tồn kho không đủ để hoàn lại');
+        return json({ success: true, code: existing.code }, 200, origin);
+      }
 
       if (is(/^\/api\/purchase_orders\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
@@ -1916,6 +2005,7 @@ export default {
         const stmts = [
           ...items.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
           db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
+          db.prepare('DELETE FROM chassis_units WHERE purchase_order_id = ?').bind(id),
           db.prepare('DELETE FROM purchase_orders WHERE id = ?').bind(id),
         ];
         if (ids.length) stmts.push(stockGuard(db, ids));
@@ -2388,12 +2478,24 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
         return json({ success: true }, 200, origin);
       }
 
-            // ===== DANH SÁCH SỐ KHUNG / SỐ SƯỜN =====
+      // ===== DANH SÁCH SỐ KHUNG / SỐ SƯỜN =====
       if (pathname === '/api/chassis-list' && method === 'GET') {
         await ensureChassisColumns(db);
+        await ensureUnitSchema(db);
 
-        // Các dòng hàng của phiếu bán có ghi số khung / số sườn
-        const sold = (await db.prepare(`
+        // 1. Xe đã ghi số khung / số sườn lúc nhập hàng
+        const units = (await db.prepare(`
+          SELECT u.id, u.product_id, u.chassis, u.frame, u.purchase_order_id, u.purchase_code,
+                 s.name AS supplier_name, p.name AS product_name, p.sku
+          FROM chassis_units u
+          LEFT JOIN purchase_orders po ON u.purchase_order_id = po.id
+          LEFT JOIN suppliers s ON po.supplier_id = s.id
+          LEFT JOIN products p ON u.product_id = p.id
+          ORDER BY u.id DESC
+        `).all()).results || [];
+
+        // 2. Dòng hàng của phiếu bán có ghi số khung / số sườn
+        const soldRaw = (await db.prepare(`
           SELECT ii.id, ii.product_id, ii.chassis_color,
                  i.id AS invoice_id, i.code AS invoice_code, i.created_at AS sold_at,
                  i.customer_name, i.customer_code,
@@ -2404,8 +2506,50 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
           WHERE COALESCE(ii.chassis_color, '') <> ''
           ORDER BY i.created_at DESC, ii.id DESC
         `).all()).results || [];
+        const sold = [];
+        for (const s of soldRaw) {
+          const d = parseChassisText(s.chassis_color);
+          if (!d.chassis && !d.frame) continue; // dòng chỉ có màu / ghi chú thì bỏ qua
+          sold.push({ ...s, chassis: d.chassis, frame: d.frame });
+        }
+        const soldByChassis = new Map();
+        const soldByFrame = new Map();
+        for (const s of sold) {
+          const ck = normSerial(s.chassis);
+          const fk = normSerial(s.frame);
+          if (ck && !soldByChassis.has(ck)) soldByChassis.set(ck, s);
+          if (fk && !soldByFrame.has(fk)) soldByFrame.set(fk, s);
+        }
 
-        // Các lần nhập hàng, xếp từ cũ đến mới, để tìm phiếu nhập gần nhất trước ngày bán
+        const rows = [];
+        const matched = new Set();
+
+        // Mỗi xe trong sổ nhập: ghép với phiếu bán có cùng số khung (hoặc số sườn)
+        for (const u of units) {
+          const ck = normSerial(u.chassis);
+          const fk = normSerial(u.frame);
+          const s = (ck && soldByChassis.get(ck)) || (fk && soldByFrame.get(fk)) || null;
+          if (s) matched.add(s.id);
+          rows.push({
+            key: 'u' + u.id,
+            chassis: u.chassis || '',
+            frame: u.frame || '',
+            product_id: u.product_id,
+            product_name: u.product_name || 'Sản phẩm đã xóa',
+            sku: u.sku || '',
+            purchase_id: u.purchase_order_id,
+            purchase_code: u.purchase_code || '',
+            supplier_name: u.supplier_name || '',
+            estimated: false,
+            invoice_id: s ? s.invoice_id : null,
+            invoice_code: s ? s.invoice_code : '',
+            customer_code: s ? s.customer_code || '' : '',
+            customer_name: s ? s.customer_name || '' : '',
+            sold_at: s ? s.sold_at : '',
+          });
+        }
+
+        // 3. Xe đã bán nhưng chưa có trong sổ nhập (phiếu nhập cũ): ước tính phiếu nhập gần nhất trước ngày bán
         const pur = (await db.prepare(`
           SELECT poi.product_id, po.id AS purchase_id, po.code, po.created_at, s.name AS supplier_name
           FROM purchase_order_items poi
@@ -2419,27 +2563,24 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
           if (!lots.has(key)) lots.set(key, []);
           lots.get(key).push(x);
         }
-
-        const rows = [];
         for (const s of sold) {
-          const d = parseChassisText(s.chassis_color);
-          if (!d.chassis && !d.frame) continue; // dòng chỉ có màu / ghi chú thì bỏ qua
+          if (matched.has(s.id)) continue;
           const soldDay = dateOnly(s.sold_at);
           let pick = null;
           for (const x of lots.get(String(s.product_id)) || []) {
             if (dateOnly(x.created_at) <= soldDay) pick = x; else break;
           }
           rows.push({
-            id: s.id,
-            chassis: d.chassis,
-            frame: d.frame,
-            color: d.color,
+            key: 's' + s.id,
+            chassis: s.chassis,
+            frame: s.frame,
             product_id: s.product_id,
             product_name: s.product_name || 'Sản phẩm đã xóa',
             sku: s.sku || '',
             purchase_id: pick ? pick.purchase_id : null,
             purchase_code: pick ? pick.code : '',
             supplier_name: pick ? pick.supplier_name || '' : '',
+            estimated: true,
             invoice_id: s.invoice_id,
             invoice_code: s.invoice_code,
             customer_code: s.customer_code || '',
@@ -2447,6 +2588,7 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
             sold_at: s.sold_at,
           });
         }
+
         return json({ success: true, rows }, 200, origin);
       }
       
