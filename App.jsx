@@ -178,6 +178,67 @@ function MoneyOverride({ auto, over, value, onChange, onReset, width = 120, disa
     </div>
   );
 }
+
+// ===== Đọc số khung / số sườn từ ảnh chụp (OCR chạy ngay trên máy, dùng thư viện Tesseract tải từ CDN) =====
+const loadTesseract = () => new Promise((resolve, reject) => {
+  if (window.Tesseract) { resolve(window.Tesseract); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  s.onload = () => (window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Không tải được thư viện đọc ảnh')));
+  s.onerror = () => reject(new Error('Không tải được thư viện đọc ảnh (hãy kiểm tra kết nối mạng)'));
+  document.head.appendChild(s);
+});
+
+// Thu nhỏ ảnh quá lớn, chuyển xám và kéo giãn độ tương phản để dễ đọc chữ hơn
+const prepareOcrCanvas = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const maxSide = 1800;
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h);
+    const px = data.data;
+    let min = 255;
+    let max = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      px[i] = g; px[i + 1] = g; px[i + 2] = g;
+      if (g < min) min = g;
+      if (g > max) max = g;
+    }
+    const range = Math.max(1, max - min);
+    for (let i = 0; i < px.length; i += 4) {
+      const v = ((px[i] - min) * 255) / range;
+      px[i] = v; px[i + 1] = v; px[i + 2] = v;
+    }
+    ctx.putImageData(data, 0, 0);
+    URL.revokeObjectURL(url);
+    resolve(canvas);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Không mở được ảnh')); };
+  img.src = url;
+});
+
+// Lọc các cụm ký tự giống số khung / số sườn (6-25 ký tự chữ + số, có ít nhất 1 chữ số)
+const extractSerialCandidates = (text) => {
+  const found = [];
+  String(text || '').split(/[\s,;:|]+/).forEach((tok) => {
+    const t = tok.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/^-+|-+$/g, '');
+    const core = t.replace(/-/g, '');
+    if (core.length < 6 || core.length > 25) return;
+    if (!/[0-9]/.test(core)) return;
+    if (!found.includes(t)) found.push(t);
+  });
+  return found.sort((a, b) => b.length - a.length).slice(0, 8);
+};
+
 async function api(path, options) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -951,6 +1012,12 @@ function AppMain() {
     created_at: nowLocalISO().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
   });
   const [purchaseItems, setPurchaseItems] = useState([]);
+  // Nhập số khung / số sườn trong phiếu nhập (có chụp ảnh)
+  const [serialEditIdx, setSerialEditIdx] = useState(null); // vị trí dòng sản phẩm trong phiếu nhập đang nhập số khung
+  const [scanTarget, setScanTarget] = useState(null); // { unitIdx, field } ô đang chờ ảnh
+  const [scanState, setScanState] = useState({ busy: false, status: '', preview: '', candidates: [], error: '' });
+  const scanTargetRef = useRef(null);
+  const scanInputRef = useRef(null);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [supplierListSearch, setSupplierListSearch] = useState('');
@@ -2170,6 +2237,7 @@ useEffect(() => {
         quantity: i.quantity,
         price: i.price,
         discount: i.discount || 0,
+        serials: Array.isArray(i.serials) ? i.serials : [],
       })));
       const foundSup = (suppliers || []).find((s) => s.id === details.supplier_id);
       setSupplierSearchKeyword(foundSup ? `${foundSup.name} (${foundSup.code})` : '');
@@ -2233,6 +2301,60 @@ useEffect(() => {
 
   const updatePurchaseItem = (index, patch) =>
     setPurchaseItems((items) => items.map((it, idx) => (idx === index ? { ...it, ...patch } : it)));
+
+    // Ghi 1 ô số khung / số sườn của xe thứ unitIdx trong dòng sản phẩm itemIdx
+  const setSerial = (itemIdx, unitIdx, field, value) =>
+    setPurchaseItems((items) => items.map((it, idx) => {
+      if (idx !== itemIdx) return it;
+      const list = [...(it.serials || [])];
+      while (list.length <= unitIdx) list.push({ chassis: '', frame: '' });
+      list[unitIdx] = { ...list[unitIdx], [field]: value };
+      return { ...it, serials: list };
+    }));
+
+  // Các xe đã nhập ít nhất 1 trong 2 mã (chỉ tính trong phạm vi số lượng)
+  const serialFilled = (item) =>
+    (item.serials || []).slice(0, Number(item.quantity) || 0)
+      .filter((s) => String((s && s.chassis) || '').trim() || String((s && s.frame) || '').trim());
+
+  // Người dùng vừa chụp / chọn ảnh -> đọc chữ -> hiện các mã gợi ý
+  const handleScanFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setScanState({ busy: true, status: 'Đang xử lý ảnh...', preview: URL.createObjectURL(file), candidates: [], error: '' });
+    try {
+      const canvas = await prepareOcrCanvas(file);
+      setScanState((s) => ({ ...s, status: 'Đang tải bộ đọc chữ (lần đầu sẽ lâu hơn)...' }));
+      const T = await loadTesseract();
+      const worker = await T.createWorker('eng', 1, {
+        logger: (m) => {
+          if (m.status === 'recognizing text') {
+            setScanState((s) => ({ ...s, status: 'Đang đọc... ' + Math.round((m.progress || 0) * 100) + '%' }));
+          }
+        },
+      });
+      try {
+        await worker.setParameters({
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
+          tessedit_pageseg_mode: T.PSM.SPARSE_TEXT,
+        });
+        const result = await worker.recognize(canvas);
+        const cands = extractSerialCandidates(result.data.text);
+        setScanState((s) => ({
+          ...s,
+          busy: false,
+          status: '',
+          candidates: cands,
+          error: cands.length ? '' : 'Không đọc được mã nào. Hãy chụp gần hơn, đủ sáng, thẳng góc rồi thử lại, hoặc gõ tay.',
+        }));
+      } finally {
+        await worker.terminate();
+      }
+    } catch (err) {
+      setScanState((s) => ({ ...s, busy: false, status: '', error: err.message || 'Không đọc được ảnh' }));
+    }
+  };
 
   // ===== Import =====
   const runImport = async ({ text, endpoint, mapRow, label, close }) => {
@@ -2568,7 +2690,7 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
   } catch (e) { console.error('Lỗi tải phiếu bảo hành:', e); }
 };
 useEffect(() => { loadWarranties(); }, []);
-    const loadChassis = async () => {
+      const loadChassis = async () => {
     setChassisLoading(true);
     try {
       const res = await api('/api/chassis-list');
@@ -5596,8 +5718,9 @@ const goView = (view) => {
         {currentView === 'chassis' && (() => {
           const k = removeAccents(chassisSearch.trim());
 
-          // Gắn tình trạng bảo hành: phiếu bảo hành cùng mã phiếu bán và có đúng sản phẩm này
+          // Xe chưa bán -> "instock"; xe đã bán -> theo phiếu bảo hành của phiếu bán đó
           const all = chassisRows.map((r) => {
+            if (!r.invoice_code) return { ...r, warranty: null, wst: null, wkey: 'instock' };
             const w = (warranties || []).find((x) =>
               x.invoice_code === r.invoice_code && (x.items || []).some((it) => String(it.product_id) === String(r.product_id)));
             const st = w ? warrantyStatus(w.expiry_date) : null;
@@ -5611,6 +5734,7 @@ const goView = (view) => {
           });
 
           const stView = (r) => {
+            if (r.wkey === 'instock') return { text: 'Trong kho (chưa bán)', bg: '#e0f2fe', color: '#0284c7', sub: '' };
             if (!r.warranty || !r.wst) return { text: 'Chưa có phiếu BH', bg: '#f1f5f9', color: '#64748b', sub: '' };
             if (r.wkey === 'valid') return { text: 'Còn bảo hành', bg: r.wst.bg, color: r.wst.color, sub: 'đến ' + fmtDMY(r.warranty.expiry_date) };
             if (r.wkey === 'soon') return { text: 'Sắp hết (' + r.wst.days + ' ngày)', bg: r.wst.bg, color: r.wst.color, sub: 'đến ' + fmtDMY(r.warranty.expiry_date) };
@@ -5641,10 +5765,11 @@ const goView = (view) => {
                 </div>
                 <select value={chassisFilter} onChange={(e) => setChassisFilter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
                   <option value="all">Tất cả tình trạng</option>
+                  <option value="instock">Trong kho (chưa bán)</option>
                   <option value="valid">Còn bảo hành</option>
                   <option value="soon">Sắp hết hạn (≤ 30 ngày)</option>
                   <option value="expired">Hết bảo hành</option>
-                  <option value="none">Chưa có phiếu bảo hành</option>
+                  <option value="none">Đã bán, chưa có phiếu bảo hành</option>
                 </select>
               </div>
 
@@ -5660,12 +5785,12 @@ const goView = (view) => {
                   <tbody>
                     {rows.length === 0 ? (
                       <tr><td colSpan="8" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
-                        {chassisLoading ? 'Đang tải...' : (all.length === 0 ? 'Chưa có phiếu bán nào ghi số khung / số sườn.' : 'Không tìm thấy kết quả phù hợp.')}
+                        {chassisLoading ? 'Đang tải...' : (all.length === 0 ? 'Chưa có xe nào ghi số khung / số sườn.' : 'Không tìm thấy kết quả phù hợp.')}
                       </td></tr>
                     ) : rows.map((r) => {
                       const sv = stView(r);
                       return (
-                        <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                        <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
                           <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.frame || '-'}</td>
                           <td style={{ padding: '10px 12px', minWidth: '180px', maxWidth: '240px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
@@ -5677,23 +5802,27 @@ const goView = (view) => {
                               <>
                                 <span
                                   onClick={() => viewPurchaseFromSupplier({ id: r.purchase_id })}
-                                  title="Phiếu nhập gần nhất của sản phẩm này trước ngày bán (ước tính)"
+                                  title={r.estimated ? 'Ước tính: phiếu nhập gần nhất của sản phẩm này trước ngày bán (phiếu nhập này chưa ghi số khung)' : 'Phiếu nhập đã ghi số khung này'}
                                   style={{ color: '#0284c7', fontWeight: 'bold', cursor: 'pointer' }}
-                                >{r.purchase_code}</span>
+                                >{r.estimated ? '~ ' : ''}{r.purchase_code}</span>
                                 {r.supplier_name && <div style={{ fontSize: '11px', color: '#64748b' }}>{r.supplier_name}</div>}
                               </>
                             ) : <span style={{ color: '#94a3b8' }}>-</span>}
                           </td>
                           <td
-                            onClick={() => handleViewDetail('invoices', r.invoice_id)}
-                            style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                            title="Bấm để xem chi tiết phiếu bán"
-                          >{r.invoice_code}</td>
+                            onClick={() => { if (r.invoice_id) handleViewDetail('invoices', r.invoice_id); }}
+                            style={{ padding: '10px 12px', fontWeight: 'bold', color: r.invoice_code ? '#0284c7' : '#94a3b8', cursor: r.invoice_code ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
+                            title={r.invoice_code ? 'Bấm để xem chi tiết phiếu bán' : ''}
+                          >{r.invoice_code || '-'}</td>
                           <td style={{ padding: '10px 12px' }}>
-                            <b style={{ color: '#0284c7' }}>{r.customer_code || '-'}</b>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>{r.customer_name}</div>
+                            {r.customer_name ? (
+                              <>
+                                <b style={{ color: '#0284c7' }}>{r.customer_code || '-'}</b>
+                                <div style={{ fontSize: '11px', color: '#64748b' }}>{r.customer_name}</div>
+                              </>
+                            ) : <span style={{ color: '#94a3b8' }}>-</span>}
                           </td>
-                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.sold_at ? new Date(r.sold_at).toLocaleDateString('vi-VN') : '---'}</td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.sold_at ? new Date(r.sold_at).toLocaleDateString('vi-VN') : '-'}</td>
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                             <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: sv.bg, color: sv.color }}>{sv.text}</span>
                             {sv.sub && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>{sv.sub}</div>}
@@ -6208,7 +6337,14 @@ const goView = (view) => {
                     {(selectedPurchaseOrder.items || []).map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '8px' }}>{item.sku}</td>
-                        <td style={{ padding: '8px', fontWeight: '500' }}>{item.product_name}</td>
+                        <td style={{ padding: '8px', fontWeight: '500' }}>
+                          {item.product_name}
+                          {(item.serials || []).map((s, si) => (
+                            <div key={si} style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', fontWeight: 'normal' }}>
+                              {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số sườn: ' + s.frame : ''].filter(Boolean).join(' | ')}
+                            </div>
+                          ))}
+                        </td>
                         <td style={{ padding: '8px', textAlign: 'center' }}>{item.quantity}</td>
                         <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
                         <td style={{ padding: '8px' }}>{vnd(item.discount)}</td>
@@ -6429,7 +6565,24 @@ const goView = (view) => {
                   return (
                     <tr key={item.product_id ?? index} style={{ borderTop: '1px solid #eef0f5' }}>
                       <td style={cTd}>{item.sku}</td>
-                      <td style={{ ...cTd, fontWeight: 500 }}>{item.name}</td>
+                                            <td style={{ ...cTd, fontWeight: 500 }}>
+                        <div>{item.name}</div>
+                        {serialFilled(item).slice(0, 3).map((s, si) => (
+                          <div key={si} style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', fontWeight: 'normal' }}>
+                            {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số sườn: ' + s.frame : ''].filter(Boolean).join(' | ')}
+                          </div>
+                        ))}
+                        {serialFilled(item).length > 3 && (
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>+ {serialFilled(item).length - 3} xe khác</div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setSerialEditIdx(index)}
+                          style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px dashed #d8b4fe', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
+                        >
+                          ✏️ + Thêm số khung, số sườn ({serialFilled(item).length}/{item.quantity})
+                        </button>
+                      </td>
                       <td style={cTd}>{item.unit}</td>
                       <td style={cTd}>
                         <input type="number" min="1" value={item.quantity} onChange={(e) => updatePurchaseItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} style={{ ...cCell, width: '52px', textAlign: 'center' }} />
@@ -7088,6 +7241,126 @@ const goView = (view) => {
                   </button>
                 </div>
 
+              </div>
+            </div>
+          );
+        })()}
+
+                {/* POPUP NHẬP SỐ KHUNG / SỐ SƯỜN CHO SẢN PHẨM TRONG PHIẾU NHẬP (có chụp ảnh để đọc mã) */}
+        {serialEditIdx !== null && purchaseItems[serialEditIdx] && (() => {
+          const item = purchaseItems[serialEditIdx];
+          const qty = Math.max(1, Number(item.quantity) || 1);
+          const list = Array.from({ length: qty }, (_, i) => (item.serials || [])[i] || { chassis: '', frame: '' });
+          const closeSerial = () => {
+            setSerialEditIdx(null);
+            setScanTarget(null);
+            scanTargetRef.current = null;
+            setScanState({ busy: false, status: '', preview: '', candidates: [], error: '' });
+          };
+          const startScan = (unitIdx, field) => {
+            scanTargetRef.current = { unitIdx, field };
+            setScanTarget({ unitIdx, field });
+            setScanState({ busy: false, status: '', preview: '', candidates: [], error: '' });
+            if (scanInputRef.current) {
+              scanInputRef.current.value = '';
+              scanInputRef.current.click(); // điện thoại: mở camera sau; máy tính: mở hộp chọn ảnh
+            }
+          };
+          const applyScan = (code) => {
+            const t = scanTargetRef.current;
+            if (!t) return;
+            setSerial(serialEditIdx, t.unitIdx, t.field, code);
+            setScanState({ busy: false, status: '', preview: '', candidates: [], error: '' });
+          };
+          const camBtn = (unitIdx, field) => (
+            <button
+              type="button"
+              onClick={() => startScan(unitIdx, field)}
+              title="Chụp ảnh để đọc mã"
+              style={{ height: '30px', width: '34px', flexShrink: 0, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+            >📷</button>
+          );
+          const chip = { background: '#ede9fe', color: '#5b21b6', border: '1px solid #c4b5fd', padding: '4px 10px', borderRadius: '14px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' };
+
+          return (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200 }}>
+              <div style={{ background: '#fff', width: '680px', maxWidth: '96vw', maxHeight: '90vh', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', boxSizing: 'border-box' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, color: '#0f172a' }}>Số khung / số sườn</h4>
+                  <button onClick={closeSerial} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+                </div>
+
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c3aed', marginBottom: '8px' }}>
+                  Sản phẩm: {item.name} — số lượng {qty}
+                </div>
+
+                {/* Ô chọn ảnh ẩn: điện thoại sẽ mở camera sau */}
+                <input ref={scanInputRef} type="file" accept="image/*" capture="environment" onChange={handleScanFile} style={{ display: 'none' }} />
+
+                {/* Kết quả đọc ảnh */}
+                {(scanState.busy || scanState.preview || scanState.error) && (
+                  <div style={{ border: '1px dashed #c4b5fd', background: '#faf5ff', borderRadius: '8px', padding: '10px', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                      {scanState.preview && (
+                        <img src={scanState.preview} alt="Ảnh vừa chụp" style={{ width: '110px', height: '80px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
+                      )}
+                      <div style={{ flex: 1, minWidth: '180px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#6d28d9', marginBottom: '4px' }}>
+                          Đang đọc cho: {scanTarget ? 'xe #' + (scanTarget.unitIdx + 1) + ' - ' + (scanTarget.field === 'chassis' ? 'số khung' : 'số sườn') : ''}
+                        </div>
+                        {scanState.busy && <div style={{ fontSize: '12px', color: '#64748b' }}>⏳ {scanState.status}</div>}
+                        {!scanState.busy && scanState.error && <div style={{ fontSize: '12px', color: '#dc2626' }}>{scanState.error}</div>}
+                        {scanState.candidates.length > 0 && (
+                          <>
+                            <div style={{ fontSize: '12px', color: '#475569', marginBottom: '4px' }}>
+                              Bấm vào mã đúng để điền. Hãy kiểm tra kỹ chữ O / số 0 và chữ I / số 1.
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {scanState.candidates.map((c) => (
+                                <button key={c} type="button" onClick={() => applyScan(c)} style={chip}>{c}</button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Danh sách từng xe: mỗi xe 1 ô số khung + 1 ô số sườn */}
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: '2px' }}>
+                  {list.map((u, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                      <span style={{ width: '26px', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>#{i + 1}</span>
+                      <div style={{ display: 'flex', gap: '4px', flex: '1 1 190px', minWidth: 0 }}>
+                        <input
+                          placeholder="Số khung"
+                          value={u.chassis || ''}
+                          onChange={(e) => setSerial(serialEditIdx, i, 'chassis', e.target.value.toUpperCase())}
+                          style={cInput}
+                        />
+                        {camBtn(i, 'chassis')}
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px', flex: '1 1 190px', minWidth: 0 }}>
+                        <input
+                          placeholder="Số sườn"
+                          value={u.frame || ''}
+                          onChange={(e) => setSerial(serialEditIdx, i, 'frame', e.target.value.toUpperCase())}
+                          style={cInput}
+                        />
+                        {camBtn(i, 'frame')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ fontSize: '11px', color: '#64748b', margin: '6px 0 10px' }}>
+                  Không bắt buộc nhập đủ cho mọi xe. Mã được lưu in hoa và không được trùng với xe đã nhập ở phiếu khác. Bấm "Hoàn tất" ở phiếu nhập để ghi lại.
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={closeSerial} style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xong</button>
+                </div>
               </div>
             </div>
           );
