@@ -4781,11 +4781,8 @@ const goView = (view) => {
                 </div>
               )}
 
-            </div>
-          </div>
-        )}
-
-                      {/* Nội dung Tab 3: Số khung / số máy */}
+          
+              {/* Nội dung Tab 3: Số khung / số máy */}
               {activeProductTab === 'serials' && (
                 <div style={{ overflowY: 'auto', flex: 1 }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
@@ -4836,6 +4833,10 @@ const goView = (view) => {
                   </table>
                 </div>
               )}
+
+              </div>
+          </div>
+        )}
 
         {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
