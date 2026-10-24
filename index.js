@@ -2579,6 +2579,7 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
             sku: s.sku || '',
             purchase_id: pick ? pick.purchase_id : null,
             purchase_code: pick ? pick.code : '',
+            purchase_date: pick ? pick.created_at : '',
             supplier_name: pick ? pick.supplier_name || '' : '',
             estimated: true,
             invoice_id: s.invoice_id,
