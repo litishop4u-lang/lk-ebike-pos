@@ -998,6 +998,8 @@ function AppMain() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [activeProductTab, setActiveProductTab] = useState('info'); // 'info' hoặc 'card'
   const [stockCardList, setStockCardList] = useState([]);
+  const [productSerials, setProductSerials] = useState([]); // số khung / số máy của sản phẩm đang xem
+  const [productSerialsLoading, setProductSerialsLoading] = useState(false);
   const [productListSearch, setProductListSearch] = useState('');
   const [showProductSuggest, setShowProductSuggest] = useState(false);
 
@@ -1599,6 +1601,15 @@ useEffect(() => {
     setSelectedProduct(product);
     setActiveProductTab('info');
     setStockCardList([]);
+    setProductSerials([]);
+    setProductSerialsLoading(true);
+    api('/api/chassis-list')
+      .then((res) => {
+        const rows = Array.isArray(res.rows) ? res.rows : [];
+        setProductSerials(rows.filter((r) => String(r.product_id) === String(product.id)));
+      })
+      .catch(() => setProductSerials([]))
+      .finally(() => setProductSerialsLoading(false));
 
     try {
       const res = await api(`/api/products/stock-card?productId=${product.id}`);
@@ -4706,6 +4717,12 @@ const goView = (view) => {
                 >
                   2. Thẻ kho chi tiết
                 </button>
+                <button
+                  onClick={() => setActiveProductTab('serials')}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'serials' ? '#7c3aed' : '#f1f5f9', color: activeProductTab === 'serials' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  3. Số khung / số máy ({productSerials.length})
+                </button>
               </div>
 
               {/* Nội dung Tab 1: Thông tin sản phẩm */}
@@ -4767,6 +4784,58 @@ const goView = (view) => {
             </div>
           </div>
         )}
+
+                      {/* Nội dung Tab 3: Số khung / số máy */}
+              {activeProductTab === 'serials' && (
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>Số khung</th>
+                        <th style={{ padding: '10px' }}>Số máy</th>
+                        <th style={{ padding: '10px' }}>Ngày nhập</th>
+                        <th style={{ padding: '10px' }}>Phiếu nhập</th>
+                        <th style={{ padding: '10px' }}>Phiếu bán</th>
+                        <th style={{ padding: '10px' }}>Ngày bán</th>
+                        <th style={{ padding: '10px' }}>Khách hàng</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productSerialsLoading ? (
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Đang tải...</td></tr>
+                      ) : productSerials.length === 0 ? (
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Sản phẩm này chưa có số khung / số máy nào được ghi nhận.</td></tr>
+                      ) : productSerials.map((r, i) => (
+                        <tr key={r.key || r.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#7c3aed', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{r.frame || '-'}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{r.purchase_date ? new Date(r.purchase_date).toLocaleDateString('vi-VN') : '-'}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
+                            {r.purchase_code ? (
+                              <span
+                                onClick={() => { setSelectedProduct(null); viewPurchaseFromSupplier({ id: r.purchase_id }); }}
+                                title="Bấm để xem chi tiết phiếu nhập"
+                                style={{ color: '#0284c7', fontWeight: 'bold', cursor: 'pointer' }}
+                              >{r.estimated ? '~ ' : ''}{r.purchase_code}</span>
+                            ) : <span style={{ color: '#94a3b8' }}>-</span>}
+                          </td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
+                            {r.invoice_code ? (
+                              <span
+                                onClick={() => { setSelectedProduct(null); handleViewDetail('invoices', r.invoice_id); }}
+                                title="Bấm để xem chi tiết phiếu bán"
+                                style={{ color: '#0284c7', fontWeight: 'bold', cursor: 'pointer' }}
+                              >{r.invoice_code}</span>
+                            ) : <span style={{ padding: '2px 8px', borderRadius: '12px', background: '#e0f2fe', color: '#0284c7', fontSize: '11px', fontWeight: 'bold' }}>Trong kho</span>}
+                          </td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{r.sold_at ? new Date(r.sold_at).toLocaleDateString('vi-VN') : '-'}</td>
+                          <td style={{ padding: '10px' }}>{r.customer_name || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
         {/* 3. MÀN HÌNH QUẢN LÝ NHÀ CUNG CẤP */}
         {currentView === 'suppliers' && (
