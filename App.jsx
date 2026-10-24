@@ -598,6 +598,15 @@ function AppMain() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoiceOriginalQty, setEditingInvoiceOriginalQty] = useState({}); // SL cũ của phiếu đang sửa (để kiểm tra tồn kho)
   const [activeChassisProduct, setActiveChassisProduct] = useState(null);
+  const [serialPool, setSerialPool] = useState([]); // toàn bộ số khung / số máy đã ghi nhận (còn trong kho + đã bán)
+  const loadSerialPool = async () => {
+    try {
+      const res = await api('/api/chassis-list');
+      setSerialPool(Array.isArray(res.rows) ? res.rows : []);
+    } catch (e) {
+      setSerialPool([]); // lỗi thì vẫn cho gõ tay
+    }
+  };
   // Tìm kiếm + lọc thời gian cho màn hình Tạo đơn hàng
   const [posSearch, setPosSearch] = useState('');
   const [posPeriod, setPosPeriod] = useState('all'); // 'all' | 'month' | 'quarter' | 'year' | 'custom'
@@ -2671,6 +2680,10 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
   };
 
   useEffect(() => { if (!showOrderModal) { setDepositFromOrder(0); setSourceOrderId(null); setLinkedOrder(null); } }, [showOrderModal]);
+    // Mở phiếu bán hàng thì tải danh sách số khung / số máy để chọn
+  useEffect(() => {
+    if (showOrderModal && modalOrderType === 'invoices') loadSerialPool();
+  }, [showOrderModal, modalOrderType]);
 
     // ----- Phiếu bảo hành -----
   const loadWarranties = async () => {
@@ -7167,72 +7180,146 @@ const goView = (view) => {
         )}
 
         {/* POPUP TÙY CHỌN THÔNG TIN SẢN PHẨM (SỐ KHUNG, SỐ SƯỜN, MÀU SẮC, GHI CHÚ) */}
-        {activeChassisProduct && (() => {
+                {activeChassisProduct && (() => {
           const prod = cartLines.find(l => l.id === activeChassisProduct);
           if (!prod) return null;
 
+          const up = (v) => String(v || '').trim().toUpperCase();
+          const curCh = up(cart[prod.id + '_chassis']);
+          const curFr = up(cart[prod.id + '_frame']);
+
+          // Xe còn trong kho của đúng sản phẩm này (chưa gắn phiếu bán nào)
+          const inStock = serialPool.filter((r) => !r.invoice_code && String(r.product_id) === String(prod.id));
+          // Gõ vào ô số khung / số máy thì danh sách tự lọc theo
+          const shown = inStock
+            .filter((r) => (!curCh || up(r.chassis).includes(curCh)) && (!curFr || up(r.frame).includes(curFr)))
+            .slice(0, 30);
+          const picked = inStock.some((r) => (curCh && up(r.chassis) === curCh) || (curFr && up(r.frame) === curFr));
+          // Mã đang nhập trùng xe ĐÃ BÁN (không tính chính phiếu đang sửa)
+          const soldHit = serialPool.find((r) =>
+            r.invoice_code &&
+            String(r.invoice_id) !== String(editingInvoiceId) &&
+            ((curCh && up(r.chassis) === curCh) || (curFr && up(r.frame) === curFr)));
+
+          const pickSerial = (r) => setCart((c) => ({ ...c, [prod.id + '_chassis']: r.chassis || '', [prod.id + '_frame']: r.frame || '' }));
+          const fieldRow = { marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' };
+          const fieldInput = { flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' };
+
           return (
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200 }}>
-              <div style={{ background: '#fff', width: '450px', borderRadius: '10px', padding: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+              <div style={{ background: '#fff', width: '520px', maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', borderRadius: '10px', padding: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', boxSizing: 'border-box' }}>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px' }}>
                   <h4 style={{ margin: 0, color: '#0f172a' }}>Tùy chọn thông tin sản phẩm</h4>
                   <button onClick={() => setActiveChassisProduct(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
                 </div>
 
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c3aed', marginBottom: '15px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c3aed', marginBottom: '12px' }}>
                   Sản phẩm: {prod.name}
                 </div>
 
-                {/* Ô nhập Số khung */}
-                <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Danh sách xe còn trong kho */}
+                <div style={{ border: '1px solid #ddd6fe', background: '#faf5ff', borderRadius: '8px', padding: '8px 10px', marginBottom: '14px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#6d28d9', marginBottom: '6px' }}>
+                    Xe còn trong kho: {inStock.length} {inStock.length > 0 && <span style={{ fontWeight: 'normal', color: '#64748b' }}>(bấm vào xe để chọn, hoặc gõ vào ô bên dưới để lọc)</span>}
+                  </div>
+                  {inStock.length === 0 ? (
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>Kho chưa ghi nhận số khung / số máy nào của sản phẩm này. Bạn gõ tay bên dưới.</div>
+                  ) : shown.length === 0 ? (
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>Không có xe nào khớp với mã đang gõ.</div>
+                  ) : (
+                    <div style={{ maxHeight: '170px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {shown.map((r) => {
+                        const on = curCh && up(r.chassis) === curCh;
+                        return (
+                          <div
+                            key={r.key || r.id}
+                            onClick={() => pickSerial(r)}
+                            style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', border: on ? '1px solid #7c3aed' : '1px solid #e2e8f0', background: on ? '#ede9fe' : '#fff', display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px' }}
+                          >
+                            <span>
+                              <b style={{ color: '#7c3aed' }}>{r.chassis || '-'}</b>
+                              <span style={{ color: '#64748b' }}> / {r.frame || '-'}</span>
+                              {r.color ? <span style={{ color: '#64748b' }}> · {r.color}</span> : null}
+                            </span>
+                            <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>{r.purchase_code || ''}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Số khung */}
+                <div style={fieldRow}>
                   <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số khung:</label>
                   <input
                     type="text"
-                    placeholder="Nhập số khung..."
+                    placeholder="Chọn ở trên hoặc gõ số khung..."
                     value={cart[prod.id + '_chassis'] || ''}
-                    onChange={(e) => setCart(c => ({ ...c, [prod.id + '_chassis']: e.target.value }))}
-                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    onChange={(e) => setCart((c) => ({ ...c, [prod.id + '_chassis']: e.target.value.toUpperCase() }))}
+                    style={fieldInput}
                   />
                 </div>
 
-                {/* Ô nhập Số sườn */}
-                <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Số máy */}
+                <div style={fieldRow}>
                   <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số máy:</label>
                   <input
                     type="text"
-                    placeholder="Nhập số máy..."
+                    placeholder="Chọn ở trên hoặc gõ số máy..."
                     value={cart[prod.id + '_frame'] || ''}
-                    onChange={(e) => setCart(c => ({ ...c, [prod.id + '_frame']: e.target.value }))}
-                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    onChange={(e) => setCart((c) => ({ ...c, [prod.id + '_frame']: e.target.value.toUpperCase() }))}
+                    style={fieldInput}
                   />
                 </div>
 
-                {/* Ô nhập Màu sắc */}
-                <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Trạng thái mã đang nhập */}
+                {soldHit && (
+                  <div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', marginBottom: '12px' }}>
+                    ⚠️ Mã này đã bán ở phiếu <b>{soldHit.invoice_code}</b>. Hãy kiểm tra lại trước khi lưu.
+                  </div>
+                )}
+                {!soldHit && (curCh || curFr) && !picked && (
+                  <div style={{ background: '#fef3c7', color: '#92400e', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', marginBottom: '12px' }}>
+                    Mã này chưa có trong kho, sẽ được ghi nhận theo số bạn gõ.
+                  </div>
+                )}
+                {(curCh || curFr) && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setCart((c) => ({ ...c, [prod.id + '_chassis']: '', [prod.id + '_frame']: '' }))}
+                      style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}
+                    >Xóa số khung / số máy</button>
+                  </div>
+                )}
+
+                {/* Màu sắc */}
+                <div style={fieldRow}>
                   <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Màu sắc:</label>
                   <input
                     type="text"
                     placeholder="Nhập màu sắc..."
                     value={cart[prod.id + '_color'] || ''}
-                    onChange={(e) => setCart(c => ({ ...c, [prod.id + '_color']: e.target.value }))}
-                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    onChange={(e) => setCart((c) => ({ ...c, [prod.id + '_color']: e.target.value }))}
+                    style={fieldInput}
                   />
                 </div>
 
-                {/* Ô nhập Ghi chú */}
-                <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Ghi chú */}
+                <div style={{ ...fieldRow, marginBottom: '20px' }}>
                   <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Ghi chú:</label>
                   <input
                     type="text"
                     placeholder="Nhập ghi chú khác..."
                     value={cart[prod.id + '_note'] || ''}
-                    onChange={(e) => setCart(c => ({ ...c, [prod.id + '_note']: e.target.value }))}
-                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    onChange={(e) => setCart((c) => ({ ...c, [prod.id + '_note']: e.target.value }))}
+                    style={fieldInput}
                   />
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     onClick={() => setActiveChassisProduct(null)}
                     style={{ padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
@@ -7240,12 +7327,10 @@ const goView = (view) => {
                     Xong
                   </button>
                 </div>
-
               </div>
             </div>
           );
         })()}
-
                 {/* POPUP NHẬP SỐ KHUNG / SỐ SƯỜN CHO SẢN PHẨM TRONG PHIẾU NHẬP (có chụp ảnh để đọc mã) */}
         {serialEditIdx !== null && purchaseItems[serialEditIdx] && (() => {
           const item = purchaseItems[serialEditIdx];
