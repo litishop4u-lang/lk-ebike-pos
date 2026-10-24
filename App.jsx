@@ -1024,6 +1024,11 @@ function AppMain() {
   const costDefSavedRef = useRef('');
   const [costSearch, setCostSearch] = useState('');
   const [costFocusRow, setCostFocusRow] = useState(null);
+  // ===== Số khung / số sườn =====
+  const [chassisRows, setChassisRows] = useState([]);
+  const [chassisSearch, setChassisSearch] = useState('');
+  const [chassisFilter, setChassisFilter] = useState('all'); // all | valid | soon | expired | none
+  const [chassisLoading, setChassisLoading] = useState(false);
 
   // ===== States cho Thu chi (Sổ quỹ) =====
   const [showCashModal, setShowCashModal] = useState(false);
@@ -2563,6 +2568,22 @@ const allCashItems = sortDesc([...(cashItems || []), ...orderDepositItems]);
   } catch (e) { console.error('Lỗi tải phiếu bảo hành:', e); }
 };
 useEffect(() => { loadWarranties(); }, []);
+    const loadChassis = async () => {
+    setChassisLoading(true);
+    try {
+      const res = await api('/api/chassis-list');
+      setChassisRows(Array.isArray(res.rows) ? res.rows : []);
+    } catch (e) {
+      setMsg({ type: 'err', text: 'Không tải được danh sách số khung / số sườn: ' + e.message });
+    } finally {
+      setChassisLoading(false);
+    }
+  };
+
+  // Vào màn hình thì tải số khung + phiếu bảo hành mới nhất để tính tình trạng bảo hành
+  useEffect(() => {
+    if (currentView === 'chassis') { loadChassis(); loadWarranties(); }
+  }, [currentView]);
 
   const openWarrantyModal = (draft) => {
     setEditingWarrantyId(null);
@@ -5571,7 +5592,123 @@ const goView = (view) => {
             </div>
         )}
 
-                {/* MÀN HÌNH TÍNH GIÁ NHẬP */}
+        {/* MÀN HÌNH SỐ KHUNG / SỐ SƯỜN */}
+        {currentView === 'chassis' && (() => {
+          const k = removeAccents(chassisSearch.trim());
+
+          // Gắn tình trạng bảo hành: phiếu bảo hành cùng mã phiếu bán và có đúng sản phẩm này
+          const all = chassisRows.map((r) => {
+            const w = (warranties || []).find((x) =>
+              x.invoice_code === r.invoice_code && (x.items || []).some((it) => String(it.product_id) === String(r.product_id)));
+            const st = w ? warrantyStatus(w.expiry_date) : null;
+            return { ...r, warranty: w || null, wst: st, wkey: st ? st.key : 'none' };
+          });
+
+          const rows = all.filter((r) => {
+            if (chassisFilter !== 'all' && r.wkey !== chassisFilter) return false;
+            if (!k) return true;
+            return removeAccents([r.chassis, r.frame, r.product_name, r.sku, r.purchase_code, r.supplier_name, r.invoice_code, r.customer_code, r.customer_name].join(' ')).includes(k);
+          });
+
+          const stView = (r) => {
+            if (!r.warranty || !r.wst) return { text: 'Chưa có phiếu BH', bg: '#f1f5f9', color: '#64748b', sub: '' };
+            if (r.wkey === 'valid') return { text: 'Còn bảo hành', bg: r.wst.bg, color: r.wst.color, sub: 'đến ' + fmtDMY(r.warranty.expiry_date) };
+            if (r.wkey === 'soon') return { text: 'Sắp hết (' + r.wst.days + ' ngày)', bg: r.wst.bg, color: r.wst.color, sub: 'đến ' + fmtDMY(r.warranty.expiry_date) };
+            if (r.wkey === 'expired') return { text: 'Hết bảo hành', bg: r.wst.bg, color: r.wst.color, sub: 'hết hạn ' + fmtDMY(r.warranty.expiry_date) };
+            return { text: '---', bg: '#f1f5f9', color: '#64748b', sub: '' };
+          };
+
+          return (
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+                <h2 style={{ margin: 0 }}>Số khung / số sườn ({rows.length}{(k || chassisFilter !== 'all') ? '/' + all.length : ''})</h2>
+                <button onClick={() => { loadChassis(); loadWarranties(); }} disabled={chassisLoading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', opacity: chassisLoading ? 0.6 : 1 }}>
+                  {chassisLoading ? 'Đang tải...' : '🔄 Làm mới'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
+                <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
+                  <input
+                    placeholder="🔍 Tìm theo số khung, số sườn, mã phiếu, khách hàng..."
+                    value={chassisSearch}
+                    onChange={(e) => setChassisSearch(e.target.value)}
+                    style={{ ...inputStyle, margin: 0, paddingRight: chassisSearch ? '36px' : '10px' }}
+                  />
+                  {chassisSearch && (
+                    <button type="button" onClick={() => setChassisSearch('')} title="Xóa tìm kiếm" style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}>✕</button>
+                  )}
+                </div>
+                <select value={chassisFilter} onChange={(e) => setChassisFilter(e.target.value)} style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+                  <option value="all">Tất cả tình trạng</option>
+                  <option value="valid">Còn bảo hành</option>
+                  <option value="soon">Sắp hết hạn (≤ 30 ngày)</option>
+                  <option value="expired">Hết bảo hành</option>
+                  <option value="none">Chưa có phiếu bảo hành</option>
+                </select>
+              </div>
+
+              <FillHeight style={{ border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left' }}>
+                      {['Số khung', 'Số sườn', 'Sản phẩm', 'Phiếu nhập', 'Mã phiếu bán', 'Mã / tên KH', 'Ngày bán', 'Tình trạng'].map((h) => (
+                        <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr><td colSpan="8" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
+                        {chassisLoading ? 'Đang tải...' : (all.length === 0 ? 'Chưa có phiếu bán nào ghi số khung / số sườn.' : 'Không tìm thấy kết quả phù hợp.')}
+                      </td></tr>
+                    ) : rows.map((r) => {
+                      const sv = stView(r);
+                      return (
+                        <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#7c3aed', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.frame || '-'}</td>
+                          <td style={{ padding: '10px 12px', minWidth: '180px', maxWidth: '240px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            {r.product_name}
+                            {r.sku && <div style={{ fontSize: '11px', color: '#64748b' }}>{r.sku}</div>}
+                          </td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                            {r.purchase_code ? (
+                              <>
+                                <span
+                                  onClick={() => viewPurchaseFromSupplier({ id: r.purchase_id })}
+                                  title="Phiếu nhập gần nhất của sản phẩm này trước ngày bán (ước tính)"
+                                  style={{ color: '#0284c7', fontWeight: 'bold', cursor: 'pointer' }}
+                                >{r.purchase_code}</span>
+                                {r.supplier_name && <div style={{ fontSize: '11px', color: '#64748b' }}>{r.supplier_name}</div>}
+                              </>
+                            ) : <span style={{ color: '#94a3b8' }}>-</span>}
+                          </td>
+                          <td
+                            onClick={() => handleViewDetail('invoices', r.invoice_id)}
+                            style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            title="Bấm để xem chi tiết phiếu bán"
+                          >{r.invoice_code}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <b style={{ color: '#0284c7' }}>{r.customer_code || '-'}</b>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>{r.customer_name}</div>
+                          </td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.sold_at ? new Date(r.sold_at).toLocaleDateString('vi-VN') : '---'}</td>
+                          <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                            <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', background: sv.bg, color: sv.color }}>{sv.text}</span>
+                            {sv.sub && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>{sv.sub}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </FillHeight>
+            </div>
+          );
+        })()}
+
+        {/* MÀN HÌNH TÍNH GIÁ NHẬP */}
         {currentView === 'import-cost' && (
             <div style={cardStyle} className="cost-page">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
@@ -7521,6 +7658,7 @@ const MENU_GROUPS = [
     title: 'Kho hàng',
     items: [
       { view: 'products', label: '🏷️ Sản phẩm' },
+      { view: 'chassis', label: '🔢 Số khung / số sườn' },
       { view: 'purchases', label: '📥 Nhập hàng' },
       { view: 'purchase-returns', label: '↩️ Trả hàng nhập' },
       { view: 'suppliers', label: '🚚 Nhà cung cấp' },
