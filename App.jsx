@@ -22,7 +22,7 @@ const parseItemDetails = (str) => {
     const t = part.trim();
     if (!t) return;
     if (t.startsWith('Số khung:')) out.chassis = t.slice('Số khung:'.length).trim();
-    else if (t.startsWith('Số sườn:')) out.frame = t.slice('Số sườn:'.length).trim();
+    else if (t.startsWith('Số máy:')) out.frame = t.slice('Số máy:'.length).trim();
     else if (t.startsWith('Màu:')) out.color = t.slice('Màu:'.length).trim();
     else if (t.startsWith('Ghi chú:')) out.note = t.slice('Ghi chú:'.length).trim();
     else out.note = out.note ? `${out.note} | ${t}` : t; // chuỗi cũ không theo định dạng -> đưa vào ghi chú
@@ -46,7 +46,7 @@ const putItemIntoCart = (cartObj, item) => {
 // Gộp số khung / số sườn / màu / ghi chú của 1 dòng hàng thành 1 chuỗi để lưu vào DB
 const buildItemDetails = (cartObj, id) => [
   cartObj[id + '_chassis'] ? `Số khung: ${cartObj[id + '_chassis']}` : '',
-  cartObj[id + '_frame'] ? `Số sườn: ${cartObj[id + '_frame']}` : '',
+  cartObj[id + '_frame'] ? `Số máy: ${cartObj[id + '_frame']}` : '',
   cartObj[id + '_color'] ? `Màu: ${cartObj[id + '_color']}` : '',
   cartObj[id + '_note'] ? `Ghi chú: ${cartObj[id + '_note']}` : '',
 ].filter(Boolean).join(' | ');
@@ -2696,7 +2696,7 @@ useEffect(() => { loadWarranties(); }, []);
       const res = await api('/api/chassis-list');
       setChassisRows(Array.isArray(res.rows) ? res.rows : []);
     } catch (e) {
-      setMsg({ type: 'err', text: 'Không tải được danh sách số khung / số sườn: ' + e.message });
+      setMsg({ type: 'err', text: 'Không tải được danh sách số khung / số máy: ' + e.message });
     } finally {
       setChassisLoading(false);
     }
@@ -5745,7 +5745,7 @@ const goView = (view) => {
           return (
             <div style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-                <h2 style={{ margin: 0 }}>Số khung / số sườn ({rows.length}{(k || chassisFilter !== 'all') ? '/' + all.length : ''})</h2>
+                <h2 style={{ margin: 0 }}>Số khung / số máy ({rows.length}{(k || chassisFilter !== 'all') ? '/' + all.length : ''})</h2>
                 <button onClick={() => { loadChassis(); loadWarranties(); }} disabled={chassisLoading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', opacity: chassisLoading ? 0.6 : 1 }}>
                   {chassisLoading ? 'Đang tải...' : '🔄 Làm mới'}
                 </button>
@@ -5754,7 +5754,7 @@ const goView = (view) => {
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px' }}>
                 <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '460px' }}>
                   <input
-                    placeholder="🔍 Tìm theo số khung, số sườn, mã phiếu, khách hàng..."
+                    placeholder="🔍 Tìm theo số khung, số máy, mã phiếu, khách hàng..."
                     value={chassisSearch}
                     onChange={(e) => setChassisSearch(e.target.value)}
                     style={{ ...inputStyle, margin: 0, paddingRight: chassisSearch ? '36px' : '10px' }}
@@ -5777,7 +5777,7 @@ const goView = (view) => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ textAlign: 'left' }}>
-                      {['Số khung', 'Số sườn', 'Sản phẩm', 'Phiếu nhập', 'Mã phiếu bán', 'Mã / tên KH', 'Ngày bán', 'Tình trạng'].map((h) => (
+                      {['Số khung', 'Số máy', 'Sản phẩm', 'Phiếu nhập', 'Mã phiếu bán', 'Mã / tên KH', 'Ngày bán', 'Tình trạng'].map((h) => (
                         <th key={h} style={{ padding: '10px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -5785,7 +5785,7 @@ const goView = (view) => {
                   <tbody>
                     {rows.length === 0 ? (
                       <tr><td colSpan="8" style={{ textAlign: 'center', padding: '25px', color: '#94a3b8' }}>
-                        {chassisLoading ? 'Đang tải...' : (all.length === 0 ? 'Chưa có xe nào ghi số khung / số sườn.' : 'Không tìm thấy kết quả phù hợp.')}
+                        {chassisLoading ? 'Đang tải...' : (all.length === 0 ? 'Chưa có xe nào ghi số khung / số máy.' : 'Không tìm thấy kết quả phù hợp.')}
                       </td></tr>
                     ) : rows.map((r) => {
                       const sv = stView(r);
@@ -6220,7 +6220,7 @@ const goView = (view) => {
                   <th style={cTh}>Mã SP</th>
                   <th style={cTh}>Tên sản phẩm</th>
                   <th style={{ ...cTh, width: '64px' }}>SL</th>
-                  <th style={cTh}>Số khung / số sườn / ghi chú</th>
+                  <th style={cTh}>Số khung / số máy / ghi chú</th>
                   <th style={{ ...cTh, width: '40px', textAlign: 'center' }}>Bỏ</th>
                 </tr>
               </thead>
@@ -6285,7 +6285,7 @@ const goView = (view) => {
                   {w.note ? <div><b>Ghi chú:</b> {w.note}</div> : null}
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead><tr style={{ background: '#f1f5f9', textAlign: 'left' }}><th style={{ padding: '8px' }}>Sản phẩm</th><th style={{ padding: '8px' }}>SL</th><th style={{ padding: '8px' }}>Số khung / số sườn / ghi chú</th></tr></thead>
+                  <thead><tr style={{ background: '#f1f5f9', textAlign: 'left' }}><th style={{ padding: '8px' }}>Sản phẩm</th><th style={{ padding: '8px' }}>SL</th><th style={{ padding: '8px' }}>Số khung / số máy / ghi chú</th></tr></thead>
                   <tbody>
                     {(w.items || []).map((it, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -6341,7 +6341,7 @@ const goView = (view) => {
                           {item.product_name}
                           {(item.serials || []).map((s, si) => (
                             <div key={si} style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', fontWeight: 'normal' }}>
-                              {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số sườn: ' + s.frame : ''].filter(Boolean).join(' | ')}
+                              {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số máy: ' + s.frame : ''].filter(Boolean).join(' | ')}
                             </div>
                           ))}
                         </td>
@@ -6569,7 +6569,7 @@ const goView = (view) => {
                         <div>{item.name}</div>
                         {serialFilled(item).slice(0, 3).map((s, si) => (
                           <div key={si} style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', fontWeight: 'normal' }}>
-                            {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số sườn: ' + s.frame : ''].filter(Boolean).join(' | ')}
+                            {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số máy: ' + s.frame : ''].filter(Boolean).join(' | ')}
                           </div>
                         ))}
                         {serialFilled(item).length > 3 && (
@@ -6580,7 +6580,7 @@ const goView = (view) => {
                           onClick={() => setSerialEditIdx(index)}
                           style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px dashed #d8b4fe', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
                         >
-                          ✏️ + Thêm số khung, số sườn ({serialFilled(item).length}/{item.quantity})
+                          ✏️ + Thêm số khung, số máy ({serialFilled(item).length}/{item.quantity})
                         </button>
                       </td>
                       <td style={cTd}>{item.unit}</td>
@@ -6999,7 +6999,7 @@ const goView = (view) => {
                           <div style={{ fontSize: '11px', color: '#7c3aed', fontStyle: 'italic', margin: '2px 0' }}>
                             {[
                               cart[l.id + '_chassis'] ? `Số khung: ${cart[l.id + '_chassis']}` : '',
-                              cart[l.id + '_frame'] ? `Số sườn: ${cart[l.id + '_frame']}` : '',
+                              cart[l.id + '_frame'] ? `Số máy: ${cart[l.id + '_frame']}` : '',
                               cart[l.id + '_color'] ? `Màu: ${cart[l.id + '_color']}` : '',
                               cart[l.id + '_note'] ? `Ghi chú: ${cart[l.id + '_note']}` : ''
                             ].filter(Boolean).join(' | ')}
@@ -7010,7 +7010,7 @@ const goView = (view) => {
                           onClick={() => setActiveChassisProduct(l.id)}
                           style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px dashed #d8b4fe', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
                         >
-                          ✏️ + Thêm số khung, số sườn, ghi chú
+                          ✏️ + Thêm số khung, số máy, ghi chú
                         </button>
                       </td>
                       <td style={cTd}>
@@ -7198,10 +7198,10 @@ const goView = (view) => {
 
                 {/* Ô nhập Số sườn */}
                 <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số sườn:</label>
+                  <label style={{ width: '90px', fontSize: '13px', fontWeight: '500' }}>Số máy:</label>
                   <input
                     type="text"
-                    placeholder="Nhập số sườn..."
+                    placeholder="Nhập số máy..."
                     value={cart[prod.id + '_frame'] || ''}
                     onChange={(e) => setCart(c => ({ ...c, [prod.id + '_frame']: e.target.value }))}
                     style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
@@ -7286,7 +7286,7 @@ const goView = (view) => {
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200 }}>
               <div style={{ background: '#fff', width: '680px', maxWidth: '96vw', maxHeight: '90vh', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', boxSizing: 'border-box' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px', marginBottom: '10px' }}>
-                  <h4 style={{ margin: 0, color: '#0f172a' }}>Số khung / số sườn</h4>
+                  <h4 style={{ margin: 0, color: '#0f172a' }}>Số khung / số máy</h4>
                   <button onClick={closeSerial} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
                 </div>
 
@@ -7306,7 +7306,7 @@ const goView = (view) => {
                       )}
                       <div style={{ flex: 1, minWidth: '180px' }}>
                         <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#6d28d9', marginBottom: '4px' }}>
-                          Đang đọc cho: {scanTarget ? 'xe #' + (scanTarget.unitIdx + 1) + ' - ' + (scanTarget.field === 'chassis' ? 'số khung' : 'số sườn') : ''}
+                          Đang đọc cho: {scanTarget ? 'xe #' + (scanTarget.unitIdx + 1) + ' - ' + (scanTarget.field === 'chassis' ? 'số khung' : 'số máy') : ''}
                         </div>
                         {scanState.busy && <div style={{ fontSize: '12px', color: '#64748b' }}>⏳ {scanState.status}</div>}
                         {!scanState.busy && scanState.error && <div style={{ fontSize: '12px', color: '#dc2626' }}>{scanState.error}</div>}
@@ -7343,7 +7343,7 @@ const goView = (view) => {
                       </div>
                       <div style={{ display: 'flex', gap: '4px', flex: '1 1 190px', minWidth: 0 }}>
                         <input
-                          placeholder="Số sườn"
+                          placeholder="Số máy"
                           value={u.frame || ''}
                           onChange={(e) => setSerial(serialEditIdx, i, 'frame', e.target.value.toUpperCase())}
                           style={cInput}
@@ -7931,7 +7931,7 @@ const MENU_GROUPS = [
     title: 'Kho hàng',
     items: [
       { view: 'products', label: '🏷️ Sản phẩm' },
-      { view: 'chassis', label: '🔢 Số khung / số sườn' },
+      { view: 'chassis', label: '🔢 Số khung / số máy' },
       { view: 'purchases', label: '📥 Nhập hàng' },
       { view: 'purchase-returns', label: '↩️ Trả hàng nhập' },
       { view: 'suppliers', label: '🚚 Nhà cung cấp' },
