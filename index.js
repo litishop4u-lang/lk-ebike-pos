@@ -1982,7 +1982,7 @@ export default {
               INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
               VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
             `).bind(
-              genCode('TC'),
+              await nextCode(db, 'cash_books', 'TC', customDate),
               po.paid_amount,
               po.payment_method || 'Chuyển khoản',
               existing.code,
@@ -2486,6 +2486,7 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
         // 1. Xe đã ghi số khung / số sườn lúc nhập hàng
         const units = (await db.prepare(`
           SELECT u.id, u.product_id, u.chassis, u.frame, u.purchase_order_id, u.purchase_code,
+                 po.created_at AS purchase_date,
                  s.name AS supplier_name, p.name AS product_name, p.sku
           FROM chassis_units u
           LEFT JOIN purchase_orders po ON u.purchase_order_id = po.id
@@ -2539,6 +2540,7 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
             sku: u.sku || '',
             purchase_id: u.purchase_order_id,
             purchase_code: u.purchase_code || '',
+            purchase_date: u.purchase_date || '',
             supplier_name: u.supplier_name || '',
             estimated: false,
             invoice_id: s ? s.invoice_id : null,
