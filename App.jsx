@@ -4254,7 +4254,7 @@ const goView = (view) => {
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1 }}>
                     <th style={cellStyle}>Mã sản phẩm (SKU)</th>
-                    <th style={cellStyle}>Tên sản phẩm</th>
+                    <th style={{ ...cellStyle, width: '260px' }}>Tên sản phẩm</th>
                     <th style={cellStyle}>Đơn vị tính</th>
                     <th style={cellStyle}>Giá nhập</th>
                     <th style={cellStyle}>Giá bán lẻ</th>
@@ -4280,7 +4280,7 @@ const goView = (view) => {
 
                       {/* Bấm vào Tên sản phẩm sẽ mở popup chi tiết & thẻ kho */}
                       <td
-                        style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
+                        style={{ ...cellStyle, width: '260px', maxWidth: '260px', whiteSpace: 'normal', wordBreak: 'break-word', fontSize: '13px', lineHeight: 1.35, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
                         onClick={() => handleOpenProductModal(p)}
                         title="Bấm để xem chi tiết & thẻ kho"
                       >
