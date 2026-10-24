@@ -42,6 +42,20 @@ const idOf = (pathname) => Number(pathname.split('/')[3]);
 const dateOnly = (v) => String(v || '').slice(0, 10);
 // Phiếu trả hàng đã hoàn thành (có cộng lại kho): "Hoàn Thành", "Đã hoàn thành", "Hoàn Thành (Cộng kho & trừ nợ)"
 const isCompletedReturn = (s) => /hoàn thành/i.test(String(s || ''));
+// Tách chuỗi "Số khung: A | Số sườn: B | Màu: C | Ghi chú: D" thành từng trường
+const parseChassisText = (str0) => {
+  const out = { chassis: '', frame: '', color: '', note: '' };
+  String(str0 || '').split(' | ').forEach((part) => {
+    const t = part.trim();
+    if (!t) return;
+    if (t.startsWith('Số khung:')) out.chassis = t.slice('Số khung:'.length).trim();
+    else if (t.startsWith('Số sườn:')) out.frame = t.slice('Số sườn:'.length).trim();
+    else if (t.startsWith('Màu:')) out.color = t.slice('Màu:'.length).trim();
+    else if (t.startsWith('Ghi chú:')) out.note = t.slice('Ghi chú:'.length).trim();
+  });
+  return out;
+};
+
 // ===== Tính giá nhập: lưu trên D1 để dùng chung giữa máy tính và điện thoại =====
 let costReady = false;
 async function ensureCostSchema(db) {
@@ -2372,6 +2386,68 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
         await ensureCostSchema(db);
         await db.prepare('DELETE FROM import_costs WHERE id = ?').bind(pathname.split('/')[3]).run();
         return json({ success: true }, 200, origin);
+      }
+
+            // ===== DANH SÁCH SỐ KHUNG / SỐ SƯỜN =====
+      if (pathname === '/api/chassis-list' && method === 'GET') {
+        await ensureChassisColumns(db);
+
+        // Các dòng hàng của phiếu bán có ghi số khung / số sườn
+        const sold = (await db.prepare(`
+          SELECT ii.id, ii.product_id, ii.chassis_color,
+                 i.id AS invoice_id, i.code AS invoice_code, i.created_at AS sold_at,
+                 i.customer_name, i.customer_code,
+                 p.name AS product_name, p.sku
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          LEFT JOIN products p ON ii.product_id = p.id
+          WHERE COALESCE(ii.chassis_color, '') <> ''
+          ORDER BY i.created_at DESC, ii.id DESC
+        `).all()).results || [];
+
+        // Các lần nhập hàng, xếp từ cũ đến mới, để tìm phiếu nhập gần nhất trước ngày bán
+        const pur = (await db.prepare(`
+          SELECT poi.product_id, po.id AS purchase_id, po.code, po.created_at, s.name AS supplier_name
+          FROM purchase_order_items poi
+          JOIN purchase_orders po ON poi.purchase_order_id = po.id
+          LEFT JOIN suppliers s ON po.supplier_id = s.id
+          ORDER BY po.created_at ASC, po.id ASC
+        `).all()).results || [];
+        const lots = new Map();
+        for (const x of pur) {
+          const key = String(x.product_id);
+          if (!lots.has(key)) lots.set(key, []);
+          lots.get(key).push(x);
+        }
+
+        const rows = [];
+        for (const s of sold) {
+          const d = parseChassisText(s.chassis_color);
+          if (!d.chassis && !d.frame) continue; // dòng chỉ có màu / ghi chú thì bỏ qua
+          const soldDay = dateOnly(s.sold_at);
+          let pick = null;
+          for (const x of lots.get(String(s.product_id)) || []) {
+            if (dateOnly(x.created_at) <= soldDay) pick = x; else break;
+          }
+          rows.push({
+            id: s.id,
+            chassis: d.chassis,
+            frame: d.frame,
+            color: d.color,
+            product_id: s.product_id,
+            product_name: s.product_name || 'Sản phẩm đã xóa',
+            sku: s.sku || '',
+            purchase_id: pick ? pick.purchase_id : null,
+            purchase_code: pick ? pick.code : '',
+            supplier_name: pick ? pick.supplier_name || '' : '',
+            invoice_id: s.invoice_id,
+            invoice_code: s.invoice_code,
+            customer_code: s.customer_code || '',
+            customer_name: s.customer_name || '',
+            sold_at: s.sold_at,
+          });
+        }
+        return json({ success: true, rows }, 200, origin);
       }
       
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
