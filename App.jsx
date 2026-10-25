@@ -226,18 +226,78 @@ const prepareOcrCanvas = (file) => new Promise((resolve, reject) => {
   img.src = url;
 });
 
-// Lọc các cụm ký tự giống số khung / số sườn (6-25 ký tự chữ + số, có ít nhất 1 chữ số)
-const extractSerialCandidates = (text) => {
-  const found = [];
-  String(text || '').split(/[\s,;:|]+/).forEach((tok) => {
-    const t = tok.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/^-+|-+$/g, '');
-    const core = t.replace(/-/g, '');
-    if (core.length < 6 || core.length > 25) return;
-    if (!/[0-9]/.test(core)) return;
-    if (!found.includes(t)) found.push(t);
-  });
-  return found.sort((a, b) => b.length - a.length).slice(0, 8);
+// Sửa lỗi OCR hay nhầm: với chuỗi chủ yếu là số (>= 70%) thì chữ giống số được đổi về số
+const LOOK_ALIKE = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2' };
+const fixSerialToken = (t) => {
+  const core = t.replace(/-/g, '');
+  const digits = (core.match(/[0-9]/g) || []).length;
+  if (core.length && digits / core.length >= 0.7) return t.replace(/[OQDILSBZ]/g, (c) => LOOK_ALIKE[c]);
+  return t;
 };
+
+// Lọc các cụm giống số khung / số máy. Trả về [{ v: mã, tag: ghi chú }]; bản đã sửa xếp trước bản nguyên gốc
+const extractSerialCandidates = (text) => {
+  const out = [];
+  const seen = new Set();
+  const add = (v, tag) => { if (v && !seen.has(v)) { seen.add(v); out.push({ v, tag }); } };
+  String(text || '').split(/[\s,;:|]+/).forEach((tok) => {
+    const raw = tok.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/^-+|-+$/g, '');
+    const core = raw.replace(/-/g, '');
+    if (core.length < 6 || core.length > 25 || !/[0-9]/.test(core)) return;
+    const fixed = fixSerialToken(raw);
+    if (fixed !== raw) { add(fixed, 'đã sửa chữ → số'); add(raw, 'nguyên bản'); }
+    else add(raw, '');
+  });
+  return out.sort((a, b) => b.v.length - a.v.length).slice(0, 10);
+};
+
+// Chuyển xám + kéo giãn độ tương phản theo phân vị 2%-98% (ít bị nhiễu hơn kéo theo min/max)
+const enhanceCanvas = (canvas) => {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = img.data;
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < px.length; i += 4) {
+    const g = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
+    px[i] = g; px[i + 1] = g; px[i + 2] = g; hist[g]++;
+  }
+  const total = px.length / 4;
+  let acc = 0, lo = 0, hi = 255;
+  for (let g = 0; g < 256; g++) { acc += hist[g]; if (acc >= total * 0.02) { lo = g; break; } }
+  acc = 0;
+  for (let g = 255; g >= 0; g--) { acc += hist[g]; if (acc >= total * 0.02) { hi = g; break; } }
+  const range = Math.max(1, hi - lo);
+  for (let i = 0; i < px.length; i += 4) {
+    const v = Math.max(0, Math.min(255, ((px[i] - lo) * 255) / range));
+    px[i] = v; px[i + 1] = v; px[i + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+};
+
+// Bản đảo màu (chữ sáng trên nền tối)
+const invertCanvas = (src) => {
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = 255 - img.data[i]; img.data[i + 1] = 255 - img.data[i + 1]; img.data[i + 2] = 255 - img.data[i + 2];
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+};
+
+// Thư viện quét mã vạch dự phòng (cho trình duyệt không có BarcodeDetector, ví dụ iPhone)
+const loadZxing = () => new Promise((resolve, reject) => {
+  if (window.ZXing) { resolve(window.ZXing); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+  s.onload = () => (window.ZXing ? resolve(window.ZXing) : reject(new Error('Không tải được thư viện quét mã')));
+  s.onerror = () => reject(new Error('Không tải được thư viện quét mã'));
+  document.head.appendChild(s);
+});
 
 async function api(path, options) {
   const res = await fetch(API + path, {
@@ -1029,6 +1089,13 @@ function AppMain() {
   const [scanState, setScanState] = useState({ busy: false, status: '', preview: '', candidates: [], error: '' });
   const scanTargetRef = useRef(null);
   const scanInputRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [camErr, setCamErr] = useState('');
+  const [torchOk, setTorchOk] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const videoRef = useRef(null);
+  const camBoxRef = useRef(null);
+  const streamRef = useRef(null);
   const [supplierSearchKeyword, setSupplierSearchKeyword] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [supplierListSearch, setSupplierListSearch] = useState('');
@@ -2357,15 +2424,10 @@ useEffect(() => {
     (item.serials || []).slice(0, Number(item.quantity) || 0)
       .filter((s) => String((s && s.chassis) || '').trim() || String((s && s.frame) || '').trim());
 
-  // Người dùng vừa chụp / chọn ảnh -> đọc chữ -> hiện các mã gợi ý
-  const handleScanFile = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = '';
-    if (!file) return;
-    setScanState({ busy: true, status: 'Đang xử lý ảnh...', preview: URL.createObjectURL(file), candidates: [], error: '' });
+    // Đọc chữ trên 1 canvas đã cắt sẵn: đọc cả bản thường và bản đảo màu rồi gộp kết quả
+  const runOcr = async (canvas, preview) => {
+    setScanState({ busy: true, status: 'Đang tải bộ đọc chữ (lần đầu sẽ lâu hơn)...', preview, candidates: [], error: '' });
     try {
-      const canvas = await prepareOcrCanvas(file);
-      setScanState((s) => ({ ...s, status: 'Đang tải bộ đọc chữ (lần đầu sẽ lâu hơn)...' }));
       const T = await loadTesseract();
       const worker = await T.createWorker('eng', 1, {
         logger: (m) => {
@@ -2379,14 +2441,12 @@ useEffect(() => {
           tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
           tessedit_pageseg_mode: T.PSM.SPARSE_TEXT,
         });
-        const result = await worker.recognize(canvas);
-        const cands = extractSerialCandidates(result.data.text);
+        const r1 = await worker.recognize(canvas);
+        const r2 = await worker.recognize(invertCanvas(canvas));
+        const cands = extractSerialCandidates(r1.data.text + ' ' + r2.data.text);
         setScanState((s) => ({
-          ...s,
-          busy: false,
-          status: '',
-          candidates: cands,
-          error: cands.length ? '' : 'Không đọc được mã nào. Hãy chụp gần hơn, đủ sáng, thẳng góc rồi thử lại, hoặc gõ tay.',
+          ...s, busy: false, status: '', candidates: cands,
+          error: cands.length ? '' : 'Không đọc được mã nào. Hãy chụp gần hơn, đủ sáng, thẳng góc (có thể bật đèn) rồi thử lại, hoặc gõ tay.',
         }));
       } finally {
         await worker.terminate();
@@ -2395,6 +2455,129 @@ useEffect(() => {
       setScanState((s) => ({ ...s, busy: false, status: '', error: err.message || 'Không đọc được ảnh' }));
     }
   };
+
+  // Chọn ảnh có sẵn từ máy
+  const handleScanFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setCameraOpen(false);
+    try {
+      const canvas = await prepareOcrCanvas(file);
+      await runOcr(canvas, URL.createObjectURL(file));
+    } catch (err) {
+      setScanState({ busy: false, status: '', preview: '', candidates: [], error: err.message || 'Không mở được ảnh' });
+    }
+  };
+
+  const openCamera = () => { setCamErr(''); setTorchOn(false); setTorchOk(false); setCameraOpen(true); };
+  const closeCamera = () => setCameraOpen(false);
+
+  // Quét được mã vạch / QR: điền thẳng vào ô đang chọn
+  const onBarcodeFound = (raw) => {
+    const t = scanTargetRef.current;
+    const val = String(raw || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 60);
+    if (!t || !val) return;
+    setSerial(serialEditIdx, t.unitIdx, t.field, val);
+    try { navigator.vibrate && navigator.vibrate(200); } catch (e) { /* bỏ qua */ }
+    setScanState({ busy: false, status: '', preview: '', candidates: [], error: '' });
+    setCameraOpen(false);
+  };
+
+  // Bấm chụp: cắt đúng vùng trong khung ngắm rồi đọc chữ
+  const captureFrame = () => {
+    const v = videoRef.current;
+    const box = camBoxRef.current;
+    if (!v || !box || !v.videoWidth) return;
+    const bw = box.clientWidth, bh = box.clientHeight;
+    const scale = Math.max(bw / v.videoWidth, bh / v.videoHeight); // video đang object-fit: cover
+    const offX = (v.videoWidth * scale - bw) / 2;
+    const offY = (v.videoHeight * scale - bh) / 2;
+    const sx = (bw * 0.07 + offX) / scale, sy = (bh * 0.38 + offY) / scale;
+    const sw = (bw * 0.86) / scale, sh = (bh * 0.24) / scale;
+    const up = sw < 1000 ? 2 : 1; // ảnh nhỏ thì phóng to cho dễ đọc
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(sw * up);
+    canvas.height = Math.round(sh * up);
+    canvas.getContext('2d').drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    enhanceCanvas(canvas);
+    const preview = canvas.toDataURL('image/jpeg', 0.6);
+    setCameraOpen(false);
+    runOcr(canvas, preview);
+  };
+
+  const toggleTorch = async () => {
+    try {
+      const track = streamRef.current && streamRef.current.getVideoTracks()[0];
+      if (!track) return;
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      setTorchOn(!torchOn);
+    } catch (e) { /* thiết bị không hỗ trợ */ }
+  };
+
+  // Mở camera + quét mã vạch liên tục khi camera đang bật
+  useEffect(() => {
+    if (!cameraOpen) return;
+    let stopped = false;
+    let timer = null;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Trình duyệt không hỗ trợ camera (cần mở app bằng https).');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        if (stopped) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        const v = videoRef.current;
+        v.srcObject = stream;
+        await v.play();
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        setTorchOk(!!caps.torch);
+        try {
+          if (caps.focusMode && caps.focusMode.includes('continuous')) await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        } catch (e) { /* bỏ qua */ }
+
+        let detector = null;
+        if ('BarcodeDetector' in window) {
+          try { detector = new window.BarcodeDetector({ formats: ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'itf', 'qr_code', 'data_matrix'] }); } catch (e) { detector = null; }
+        }
+        let zx = null;
+        let reader = null;
+        const grab = document.createElement('canvas');
+
+        const tick = async () => {
+          if (stopped) return;
+          try {
+            let val = '';
+            if (detector) {
+              const res = await detector.detect(v);
+              if (res.length) val = res[0].rawValue;
+            } else if (v.videoWidth) {
+              if (!zx) { zx = await loadZxing(); reader = new zx.MultiFormatReader(); }
+              const k = Math.min(1, 800 / v.videoWidth);
+              grab.width = Math.round(v.videoWidth * k);
+              grab.height = Math.round(v.videoHeight * k);
+              grab.getContext('2d').drawImage(v, 0, 0, grab.width, grab.height);
+              const bmp = new zx.BinaryBitmap(new zx.HybridBinarizer(new zx.HTMLCanvasElementLuminanceSource(grab)));
+              val = reader.decode(bmp).getText();
+            }
+            if (val) { onBarcodeFound(val); return; }
+          } catch (e) { /* chưa thấy mã, quét tiếp */ }
+          timer = setTimeout(tick, 350);
+        };
+        tick();
+      } catch (e) {
+        setCamErr(e && e.name === 'NotAllowedError' ? 'Chưa được cấp quyền camera. Hãy cho phép camera cho trang web này rồi mở lại.' : (e.message || 'Không mở được camera'));
+      }
+    })();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    };
+  }, [cameraOpen]);
 
   // ===== Import =====
   const runImport = async ({ text, endpoint, mapRow, label, close }) => {
@@ -7444,10 +7627,7 @@ const goView = (view) => {
             scanTargetRef.current = { unitIdx, field };
             setScanTarget({ unitIdx, field });
             setScanState({ busy: false, status: '', preview: '', candidates: [], error: '' });
-            if (scanInputRef.current) {
-              scanInputRef.current.value = '';
-              scanInputRef.current.click(); // điện thoại: mở camera sau; máy tính: mở hộp chọn ảnh
-            }
+            openCamera();
           };
           const applyScan = (code) => {
             const t = scanTargetRef.current;
@@ -7478,7 +7658,7 @@ const goView = (view) => {
                 </div>
 
                 {/* Ô chọn ảnh ẩn: điện thoại sẽ mở camera sau */}
-                <input ref={scanInputRef} type="file" accept="image/*" capture="environment" onChange={handleScanFile} style={{ display: 'none' }} />
+                <input ref={scanInputRef} type="file" accept="image/*" onChange={handleScanFile} style={{ display: 'none' }} />
 
                 {/* Kết quả đọc ảnh */}
                 {(scanState.busy || scanState.preview || scanState.error) && (
@@ -7500,7 +7680,9 @@ const goView = (view) => {
                             </div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {scanState.candidates.map((c) => (
-                                <button key={c} type="button" onClick={() => applyScan(c)} style={chip}>{c}</button>
+                                <button key={c.v} type="button" onClick={() => applyScan(c.v)} style={chip}>
+                                  {c.v}{c.tag ? <small style={{ fontWeight: 'normal', color: '#7c3aed' }}> ({c.tag})</small> : null}
+                                </button>
                               ))}
                             </div>
                           </>
@@ -7548,6 +7730,43 @@ const goView = (view) => {
             </div>
           );
         })()}
+
+                {/* POPUP CAMERA: khung ngắm + tự quét mã vạch */}
+        {cameraOpen && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.88)', zIndex: 1300, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px', boxSizing: 'border-box' }}>
+            <div style={{ width: 'min(560px, 100%)', color: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <b>
+                  📷 Quét {scanTarget ? (scanTarget.field === 'chassis' ? 'số khung' : 'số máy') + ' xe #' + (scanTarget.unitIdx + 1) : ''}
+                </b>
+                <button onClick={closeCamera} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              {camErr ? (
+                <div style={{ background: '#7f1d1d', padding: '12px', borderRadius: '8px', fontSize: '13px' }}>{camErr}</div>
+              ) : (
+                <div ref={camBoxRef} style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', background: '#000', borderRadius: '10px', overflow: 'hidden' }}>
+                  <video ref={videoRef} playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  {/* Khung ngắm: vùng ngoài khung được làm tối */}
+                  <div style={{ position: 'absolute', left: '7%', top: '38%', width: '86%', height: '24%', border: '2px solid #a78bfa', borderRadius: '8px', boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', pointerEvents: 'none' }} />
+                </div>
+              )}
+
+              <div style={{ fontSize: '12px', color: '#cbd5e1', margin: '8px 2px', lineHeight: 1.5 }}>
+                • Đặt dãy số khung / số máy nằm gọn trong khung, chụp thẳng góc, cách khoảng 15-20cm, tránh lóa.<br />
+                • Nếu có tem <b>mã vạch / QR</b>, chỉ cần đưa vào camera, app tự quét và điền, không cần bấm chụp.
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button onClick={captureFrame} disabled={!!camErr} style={{ flex: '1 1 160px', height: '42px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', opacity: camErr ? 0.5 : 1 }}>📸 Chụp & đọc chữ</button>
+                {torchOk && (
+                  <button onClick={toggleTorch} style={{ height: '42px', padding: '0 14px', background: torchOn ? '#facc15' : '#334155', color: torchOn ? '#000' : '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>🔦 {torchOn ? 'Tắt đèn' : 'Bật đèn'}</button>
+                )}
+                <button onClick={() => scanInputRef.current && scanInputRef.current.click()} style={{ height: '42px', padding: '0 14px', background: '#334155', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>🖼️ Chọn ảnh</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* MODAL IMPORT SẢN PHẨM */}
         {showProductImportModal && (
