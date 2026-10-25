@@ -1971,6 +1971,26 @@ useEffect(() => {
     setShowCashModal(true);
   };
 
+    // Mở phiếu thu sẵn dữ liệu để thu công nợ còn thiếu của khách (dùng chung popup Thu chi)
+  const openDebtPayment = (inv) => {
+    const cus = (customers || []).find((c) => c.code === inv.customer_code);
+    if (!cus) { alert('Phiếu này chưa gắn với khách hàng nào (thiếu mã khách) nên không thể thu nợ.'); return; }
+    const debt = Number(cus.total_debt) > 0 ? Number(cus.total_debt) : Number(inv.debt) || 0;
+    if (debt <= 0) { alert('Khách hàng này không còn công nợ.'); return; }
+    setEditingCashId(null);
+    setCashPartnerSearch('');
+    setCashForm({
+      type: 'IN',
+      amount: Math.round(debt),
+      category: 'Bán hàng / Thu nợ KH',
+      payment_method: 'Chuyển khoản',
+      reference_code: cus.code,
+      note: `Thu công nợ khách ${cus.name} (phiếu ${inv.code})`,
+      created_at: todayLocal(),
+    });
+    setShowCashModal(true);
+  };
+
   // Đóng popup NCC rồi mở popup xem / sửa (để popup mới không bị che)
   const viewPurchaseFromSupplier = async (p) => {
     try {
@@ -3418,6 +3438,13 @@ const goView = (view) => {
                         <td style={{ padding: '10px', color: inv.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(inv.debt)}</td>
                         <td style={{ padding: '10px' }}>{inv.payment_method || 'Tiền mặt'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
+                          {Number(inv.debt) > 0 && (
+                            <button
+                              onClick={() => openDebtPayment(inv)}
+                              title="Thanh toán công nợ còn thiếu của khách"
+                              style={{ background: '#fef3c7', color: '#b45309', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '4px', fontWeight: 'bold', fontSize: '12px' }}
+                            >💵 Thu nợ</button>
+                          )}
                           {(() => {
                             const hasWarranty = warrantiedInvoices.has(inv.code);
                             return (
@@ -6886,6 +6913,7 @@ const goView = (view) => {
                       setEditingCashId(null);
                       setCashForm(newCashForm());
                       loadCashBook();
+                      loadData();
                     } catch (err) {
                       alert('Lỗi: ' + err.message);
                     }
