@@ -2594,6 +2594,50 @@ if (pathname === '/api/reports/revenue-detail' && method === 'GET') {
 
         return json({ success: true, rows }, 200, origin);
       }
+
+            // ===== SẢN PHẨM ĐẶT HÀNG (tổng hợp từ các đơn đặt hàng) =====
+      if (pathname === '/api/ordered-products' && method === 'GET') {
+        const includeAll = new URL(request.url).searchParams.get('status') === 'all';
+        const { results } = await db.prepare(`
+          SELECT oi.product_id, oi.quantity,
+                 o.id AS order_id, o.code AS order_code, o.customer_name, o.created_at, o.status,
+                 p.sku, p.name, p.unit, p.stock
+          FROM order_items oi
+          JOIN orders o ON oi.order_id = o.id
+          LEFT JOIN products p ON oi.product_id = p.id
+          ORDER BY o.created_at DESC, o.id DESC
+        `).all();
+
+        const map = new Map();
+        for (const r of results || []) {
+          if (!includeAll && !isPendingStatus(r.status)) continue; // mặc định chỉ lấy đơn chưa xuất bán
+          const key = String(r.product_id);
+          if (!map.has(key)) {
+            map.set(key, {
+              product_id: r.product_id,
+              sku: r.sku || '',
+              name: r.name || 'Sản phẩm đã xóa',
+              unit: r.unit || 'Cái',
+              stock: Number(r.stock) || 0,
+              total_qty: 0,
+              orders: [],
+            });
+          }
+          const m = map.get(key);
+          const q = Number(r.quantity) || 0;
+          m.total_qty += q;
+          m.orders.push({
+            id: r.order_id,
+            code: r.order_code,
+            customer_name: r.customer_name || '',
+            quantity: q,
+            created_at: r.created_at,
+            status: r.status || 'Pending',
+          });
+        }
+        const rows = [...map.values()].map((m) => ({ ...m, order_count: m.orders.length }));
+        return json({ success: true, rows }, 200, origin);
+      }
       
       // ===== Route /api không tồn tại: trả 404 JSON, KHÔNG rơi xuống ASSETS =====
       // (trước đây request lạ như PUT /api/purchase_orders/1 nhận về index.html với status 200 -> frontend báo "thành công" giả)
