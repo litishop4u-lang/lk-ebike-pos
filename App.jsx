@@ -462,6 +462,11 @@ const RESPONSIVE_CSS = `
   flex: 1 1 0; min-height: 180px; overflow-y: auto;
   margin-bottom: 0 !important; box-sizing: border-box;
 }
+
+/* Bảng gọn của màn Sản phẩm (cần selector dài để thắng rule padding chung có !important) */
+.main-content > div:not([style*="position: fixed"]) table.compact-table { font-size: 12.5px !important; }
+.main-content > div:not([style*="position: fixed"]) table.compact-table th,
+.main-content > div:not([style*="position: fixed"]) table.compact-table td { padding: 7px 6px !important; }
 .pos-card thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
 /* Dòng "Tính giá nhập" đã khóa: ô nhập chuyển xám, không gõ được */
 .cost-locked { background: #f8fafc; }
@@ -1062,6 +1067,11 @@ function AppMain() {
   const [productSerialsLoading, setProductSerialsLoading] = useState(false);
   const [productListSearch, setProductListSearch] = useState('');
   const [showProductSuggest, setShowProductSuggest] = useState(false);
+  // Sản phẩm đặt hàng (bên phải màn Sản phẩm)
+  const [orderedRows, setOrderedRows] = useState([]);
+  const [orderedAll, setOrderedAll] = useState(false); // false: chỉ đơn chưa xuất bán | true: tất cả đơn
+  const [orderedOpen, setOrderedOpen] = useState(null); // id sản phẩm đang mở danh sách đơn
+  const [orderedLoading, setOrderedLoading] = useState(false);
 
   // ===== States cho Nhà cung cấp & Nhập hàng =====
   const [suppliers, setSuppliers] = useState([]);
@@ -1451,6 +1461,23 @@ useEffect(() => {
   };
 
   useEffect(() => { loadData(); }, []);
+
+    const loadOrderedProducts = async () => {
+    setOrderedLoading(true);
+    try {
+      const res = await api('/api/ordered-products?status=' + (orderedAll ? 'all' : 'pending'));
+      setOrderedRows(Array.isArray(res.rows) ? res.rows : []);
+    } catch (e) {
+      setMsg({ type: 'err', text: 'Không tải được sản phẩm đặt hàng: ' + e.message });
+    } finally {
+      setOrderedLoading(false);
+    }
+  };
+
+  // Vào màn Sản phẩm (hoặc đổi bộ lọc đơn) thì tải lại danh sách sản phẩm đặt hàng
+  useEffect(() => {
+    if (currentView === 'products') loadOrderedProducts();
+  }, [currentView, orderedAll]);
 
   // Tự tắt thông báo sau 5 giây
   useEffect(() => {
@@ -4570,126 +4597,225 @@ const goView = (view) => {
           </div>
         )}
 
-        {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM */}
-        {currentView === 'products' && (
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Quản lý Sản phẩm ({products.length})</h2>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={() => { setProductImportText(''); setShowProductImportModal(true); }}
-                  style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                >
-                  📁 Nhập Excel / Dán dữ liệu
-                </button>
-                <button
-                  onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
-                  style={{ padding: '10px 20px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                >
-                  + Thêm sản phẩm mới
-                </button>
+               {/* 2. MÀN HÌNH QUẢN LÝ SẢN PHẨM (chia đôi: danh sách sản phẩm | sản phẩm đặt hàng) */}
+        {currentView === 'products' && (() => {
+          const cellS = { padding: '7px 6px', fontSize: '13px' };
+          const thS = { ...cellS, textAlign: 'left', whiteSpace: 'nowrap', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1 };
+          const iconBtn = (bg, color) => ({ background: bg, color, border: 'none', width: '28px', height: '26px', borderRadius: '4px', cursor: 'pointer', marginLeft: '4px', lineHeight: 1 });
+
+          // Sản phẩm đặt hàng: tồn kho lấy theo danh sách sản phẩm hiện tại để luôn mới nhất
+          const orderedView = (orderedRows || []).map((r) => {
+            const live = (products || []).find((p) => String(p.id) === String(r.product_id));
+            const stock = live ? Number(live.stock) || 0 : Number(r.stock) || 0;
+            const qty = Number(r.total_qty) || 0;
+            return { ...r, stock, shortage: Math.max(0, qty - stock) };
+          }).sort((a, b) => b.shortage - a.shortage || b.total_qty - a.total_qty);
+          const totalShort = orderedView.reduce((s, r) => s + r.shortage, 0);
+
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
+
+              {/* ===== BÊN TRÁI: DANH SÁCH SẢN PHẨM ===== */}
+              <div style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                  <h2 style={{ margin: 0 }}>Quản lý Sản phẩm ({products.length})</h2>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => { setProductImportText(''); setShowProductImportModal(true); }}
+                      style={{ padding: '8px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      📁 Nhập Excel
+                    </button>
+                    <button
+                      onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
+                      style={{ padding: '8px 12px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      + Thêm sản phẩm
+                    </button>
+                  </div>
+                </div>
+
+                {/* Ô tìm kiếm sản phẩm có gợi ý */}
+                <div style={{ position: 'relative', marginBottom: '12px' }}>
+                  <input
+                    placeholder="🔍 Tìm theo mã SP hoặc tên sản phẩm..."
+                    value={productListSearch}
+                    onChange={(e) => { setProductListSearch(e.target.value); setShowProductSuggest(true); }}
+                    onFocus={() => setShowProductSuggest(true)}
+                    onBlur={() => setTimeout(() => setShowProductSuggest(false), 150)}
+                    style={{ ...inputStyle, margin: 0, paddingRight: productListSearch ? '36px' : '10px' }}
+                  />
+                  {productListSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setProductListSearch('')}
+                      title="Xóa tìm kiếm"
+                      style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
+                    >✕</button>
+                  )}
+                  {showProductSuggest && productSuggestions.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '260px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '4px' }}>
+                      {productSuggestions.map((p) => (
+                        <div
+                          key={p.id}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setProductListSearch(p.sku || p.name); setShowProductSuggest(false); }}
+                          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', gap: '10px' }}
+                        >
+                          <span><b style={{ color: '#0284c7' }}>{p.sku || '(chưa có mã)'}</b> - {p.name}</span>
+                          <small style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Tồn: {p.stock}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                  <table className="compact-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thS, width: '78px' }}>Mã SP</th>
+                        <th style={thS}>Tên sản phẩm</th>
+                        <th style={{ ...thS, width: '44px' }}>ĐVT</th>
+                        <th style={thS}>Giá nhập</th>
+                        <th style={thS}>Giá bán lẻ</th>
+                        <th style={{ ...thS, width: '44px', whiteSpace: 'normal' }}>Tồn kho</th>
+                        <th style={{ ...thS, width: '72px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleProducts.length === 0 && (
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Không tìm thấy sản phẩm nào.</td></tr>
+                      )}
+                      {visibleProducts.map((p) => (
+                        <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td
+                            style={{ ...cellS, cursor: 'pointer', color: '#0284c7', fontWeight: '500', whiteSpace: 'nowrap' }}
+                            onClick={() => handleOpenProductModal(p)}
+                            title="Bấm để xem chi tiết & thẻ kho"
+                          >{p.sku}</td>
+                          <td
+                            style={{ ...cellS, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}
+                            onClick={() => handleOpenProductModal(p)}
+                            title="Bấm để xem chi tiết & thẻ kho"
+                          >{p.name}</td>
+                          <td style={{ ...cellS, whiteSpace: 'nowrap' }}>{p.unit || 'Cái'}</td>
+                          <td style={{ ...cellS, whiteSpace: 'nowrap' }}>{vnd(p.import_price)}</td>
+                          <td style={{ ...cellS, color: '#16a34a', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{vnd(p.price)}</td>
+                          <td style={{ ...cellS, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
+                          <td style={{ ...cellS, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button
+                              title="Sửa"
+                              onClick={() => {
+                                setEditingProduct(p);
+                                setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
+                                setShowProductModal(true);
+                              }}
+                              style={iconBtn('#e0f2fe', '#0284c7')}
+                            >✏️</button>
+                            <button title="Xóa" onClick={() => handleDeleteProduct(p.id)} style={iconBtn('#fee2e2', '#dc2626')}>🗑️</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ===== BÊN PHẢI: SẢN PHẨM ĐẶT HÀNG (lấy từ các đơn đặt hàng) ===== */}
+              <div style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <h2 style={{ margin: 0 }}>Sản phẩm đặt hàng ({orderedView.length})</h2>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px' }}>
+                      Lấy từ các đơn đặt hàng · Tổng số cần nhập thêm:{' '}
+                      <b style={{ color: totalShort > 0 ? '#dc2626' : '#16a34a' }}>{totalShort}</b>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <select
+                      value={orderedAll ? 'all' : 'pending'}
+                      onChange={(e) => setOrderedAll(e.target.value === 'all')}
+                      style={{ padding: '7px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                    >
+                      <option value="pending">Đơn chưa xuất bán</option>
+                      <option value="all">Tất cả đơn đặt hàng</option>
+                    </select>
+                    <button
+                      onClick={loadOrderedProducts}
+                      disabled={orderedLoading}
+                      title="Làm mới"
+                      style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '7px 10px', borderRadius: '6px', cursor: 'pointer', opacity: orderedLoading ? 0.6 : 1 }}
+                    >🔄</button>
+                  </div>
+                </div>
+
+                <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                  <table className="compact-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thS}>Sản phẩm</th>
+                        <th style={{ ...thS, textAlign: 'center' }}>SL đặt</th>
+                        <th style={{ ...thS, textAlign: 'center' }}>Tồn kho</th>
+                        <th style={{ ...thS, textAlign: 'center' }}>Thiếu</th>
+                        <th style={{ ...thS, textAlign: 'center' }}>Số đơn</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orderedView.length === 0 ? (
+                        <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
+                          {orderedLoading ? 'Đang tải...' : (orderedAll ? 'Chưa có đơn đặt hàng nào.' : 'Không có đơn đặt hàng nào đang chờ xuất bán.')}
+                        </td></tr>
+                      ) : orderedView.flatMap((r) => {
+                        const open = orderedOpen === r.product_id;
+                        const mainRow = (
+                          <tr
+                            key={'o' + r.product_id}
+                            onClick={() => setOrderedOpen(open ? null : r.product_id)}
+                            title="Bấm để xem các đơn đặt sản phẩm này"
+                            style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer', background: open ? '#faf5ff' : 'transparent' }}
+                          >
+                            <td style={{ ...cellS, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                              <span style={{ color: '#7c3aed', marginRight: '4px' }}>{open ? '▾' : '▸'}</span>
+                              <b style={{ color: '#0f172a' }}>{r.name}</b>
+                              {r.sku && <div style={{ fontSize: '11px', color: '#64748b', marginLeft: '14px' }}>{r.sku}</div>}
+                            </td>
+                            <td style={{ ...cellS, textAlign: 'center', fontWeight: 'bold', color: '#7c3aed' }}>{r.total_qty}</td>
+                            <td style={{ ...cellS, textAlign: 'center', color: r.stock < r.total_qty ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{r.stock}</td>
+                            <td style={{ ...cellS, textAlign: 'center', fontWeight: 'bold', color: r.shortage > 0 ? '#dc2626' : '#16a34a' }}>{r.shortage > 0 ? r.shortage : '✓'}</td>
+                            <td style={{ ...cellS, textAlign: 'center' }}>{r.order_count}</td>
+                          </tr>
+                        );
+                        if (!open) return [mainRow];
+                        const detailRow = (
+                          <tr key={'d' + r.product_id} style={{ borderBottom: '1px solid #e2e8f0', background: '#faf5ff' }}>
+                            <td colSpan="5" style={{ ...cellS, paddingLeft: '20px' }}>
+                              {(r.orders || []).map((o) => (
+                                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '3px 0', fontSize: '12.5px' }}>
+                                  <span>
+                                    <b
+                                      onClick={(e) => { e.stopPropagation(); handleViewDetail('orders', o.id); }}
+                                      title="Xem chi tiết đơn"
+                                      style={{ color: '#7c3aed', cursor: 'pointer' }}
+                                    >{o.code}</b>
+                                    {' · '}{o.customer_name || 'Khách lẻ'}
+                                    {o.created_at ? ' · ' + new Date(o.created_at).toLocaleDateString('vi-VN') : ''}
+                                  </span>
+                                  <b>x{o.quantity}</b>
+                                </div>
+                              ))}
+                            </td>
+                          </tr>
+                        );
+                        return [mainRow, detailRow];
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-
-            {/* Ô tìm kiếm sản phẩm có gợi ý */}
-<div style={{ position: 'relative', marginBottom: '15px', maxWidth: '520px' }}>
-  <input
-    placeholder="🔍 Tìm theo mã SP hoặc tên sản phẩm..."
-    value={productListSearch}
-    onChange={(e) => { setProductListSearch(e.target.value); setShowProductSuggest(true); }}
-    onFocus={() => setShowProductSuggest(true)}
-    onBlur={() => setTimeout(() => setShowProductSuggest(false), 150)}
-    style={{ ...inputStyle, margin: 0, paddingRight: productListSearch ? '36px' : '10px' }}
-  />
-  {productListSearch && (
-    <button
-      type="button"
-      onClick={() => setProductListSearch('')}
-      title="Xóa tìm kiếm"
-      style={{ position: 'absolute', right: '6px', top: '6px', background: 'transparent', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#64748b' }}
-    >✕</button>
-  )}
-  {showProductSuggest && productSuggestions.length > 0 && (
-    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', maxHeight: '260px', overflowY: 'auto', zIndex: 20, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '4px' }}>
-      {productSuggestions.map((p) => (
-        <div
-          key={p.id}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => { setProductListSearch(p.sku || p.name); setShowProductSuggest(false); }}
-          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', gap: '10px' }}
-        >
-          <span><b style={{ color: '#0284c7' }}>{p.sku || '(chưa có mã)'}</b> - {p.name}</span>
-          <small style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Tồn: {p.stock}</small>
-        </div>
-      ))}
-    </div>
-  )}
-</div>
-            
-            <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1 }}>
-                    <th style={cellStyle}>Mã sản phẩm (SKU)</th>
-                    <th style={{ ...cellStyle, width: '260px' }}>Tên sản phẩm</th>
-                    <th style={cellStyle}>Đơn vị tính</th>
-                    <th style={cellStyle}>Giá nhập</th>
-                    <th style={cellStyle}>Giá bán lẻ</th>
-                    <th style={cellStyle}>Giá bán sỉ</th>
-                    <th style={cellStyle}>Tồn kho</th>
-                    <th style={{ ...cellStyle, textAlign: 'center' }}>Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleProducts.length === 0 && (
-  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Không tìm thấy sản phẩm nào.</td></tr>
-)}
-{visibleProducts.map((p) => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      {/* Bấm vào SKU cũng mở popup chi tiết */}
-                      <td
-                        style={{ ...cellStyle, cursor: 'pointer', color: '#0284c7', fontWeight: '500' }}
-                        onClick={() => handleOpenProductModal(p)}
-                        title="Bấm để xem chi tiết & thẻ kho"
-                      >
-                        {p.sku}
-                      </td>
-
-                      {/* Bấm vào Tên sản phẩm sẽ mở popup chi tiết & thẻ kho */}
-                      <td
-                        style={{ ...cellStyle, width: '260px', maxWidth: '260px', whiteSpace: 'normal', wordBreak: 'break-word', fontSize: '13px', lineHeight: 1.35, fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }}
-                        onClick={() => handleOpenProductModal(p)}
-                        title="Bấm để xem chi tiết & thẻ kho"
-                      >
-                        {p.name}
-                      </td>
-
-                      <td style={cellStyle}>{p.unit || 'Cái'}</td>
-                      <td style={cellStyle}>{vnd(p.import_price)}</td>
-                      <td style={{ ...cellStyle, color: '#16a34a', fontWeight: 'bold' }}>{vnd(p.price)}</td>
-                      <td style={{ ...cellStyle, color: '#0284c7' }}>{vnd(p.wholesale_price)}</td>
-                      <td style={{ ...cellStyle, color: p.stock <= 3 ? '#dc2626' : 'inherit', fontWeight: p.stock <= 3 ? 'bold' : 'normal' }}>{p.stock}</td>
-                      <td style={{ ...cellStyle, textAlign: 'center' }}>
-                        <button
-                          onClick={() => {
-                            setEditingProduct(p);
-                            setProductForm({ sku: p.sku || '', name: p.name, unit: p.unit || 'Cái', import_price: p.import_price || 0, price: p.price || 0, wholesale_price: p.wholesale_price || 0, stock: p.stock || 0 });
-                            setShowProductModal(true);
-                          }}
-                          style={{ padding: '6px 12px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: '500' }}
-                        >Sửa</button>
-                        <button
-                          onClick={() => handleDeleteProduct(p.id)}
-                          style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '500' }}
-                        >Xóa</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* MÀN HÌNH QUẢN LÝ THU CHI */}
         {currentView === 'cash-book' && (
