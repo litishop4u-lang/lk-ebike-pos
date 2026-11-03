@@ -2018,21 +2018,19 @@ export default {
         const ids = [...new Set([...oldItems.map((i) => i.product_id), ...po.ids])];
 
         const stmts = [
-          releasePrepay(db, existing.code), // gỡ hết phiếu trả trước cũ, bên dưới gắn lại theo lựa chọn mới
+          releasePrepay(db, existing.code),
           ...oldItems.map((i) => db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').bind(i.quantity, i.product_id)),
           db.prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?').bind(id),
-          db.prepare('UPDATE purchase_orders SET supplier_id = ?
+          db.prepare('UPDATE purchase_orders SET supplier_id = ?, total = ?, paid_amount = ?, debt = ?, payment_method = ?, created_at = ? WHERE id = ?')
             .bind(po.supplier_id, po.total, po.paid_amount, po.debt, po.payment_method, customDate, id),
           ...po.lines.map((l) =>
             db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, price, discount, total) VALUES (?,?,?,?,?,?)')
               .bind(id, l.product_id, l.quantity, l.price, l.discount, l.total)),
           ...po.lines.map((l) => db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').bind(l.quantity, l.product_id)),
 
-          // Ghi lại số khung / số sườn theo nội dung phiếu mới
           db.prepare('DELETE FROM chassis_units WHERE purchase_order_id = ?').bind(id),
           ...unitStatements(db, po.units, existing.code, customDate),
 
-          // Đồng bộ Sổ quỹ: xóa phiếu chi cũ của phiếu nhập này (chỉ phiếu chi thanh toán tiền hàng)
           db.prepare("DELETE FROM cash_books WHERE reference_code = ? AND type = 'OUT' AND category = 'Mua hàng / Trả nợ NCC' AND prepaid_supplier IS NULL")
             .bind(existing.code),
           ...prepay.stmts,
