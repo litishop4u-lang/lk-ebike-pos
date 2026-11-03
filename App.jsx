@@ -7109,19 +7109,19 @@ const goView = (view) => {
           <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debtAmount))}</b></div>
         </div>
 
-        <button
-          onClick={handleSavePurchase}
-          style={{ height: '32px', padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
-        >
-          💾 Hoàn tất
-        </button>
-      </div>
-    </>
-  );
-})()}
-        </div>      {/* đóng khung cuộn (padding 10px 14px) */}
+              <button
+                onClick={handleSavePurchase}
+                style={{ height: '32px', padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                💾 Hoàn tất
+              </button>
+            </div>
+          </>
+        );
+        })()}
+      </div>      {/* đóng khung cuộn (padding 10px 14px) */}
     </div>        {/* đóng thẻ trắng của popup */}
-  </div>          {/* đóng overlay */}
+  </div>         
 )}
 
                 {/* POPUP TẠO PHIẾU THU / CHI */}
