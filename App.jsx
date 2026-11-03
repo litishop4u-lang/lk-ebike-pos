@@ -1093,6 +1093,8 @@ function AppMain() {
     created_at: nowLocalISO().slice(0, 16), // Khởi tạo sẵn thời gian hiện tại
   });
   const [purchaseItems, setPurchaseItems] = useState([]);
+  const [prepaySel, setPrepaySel] = useState([]);           // id các phiếu chi trả trước đã chọn
+  const [prepaidApplied, setPrepaidApplied] = useState([]); // phiếu đã gắn sẵn vào phiếu nhập đang sửa
   // Nhập số khung / số sườn trong phiếu nhập (có chụp ảnh)
   const [serialEditIdx, setSerialEditIdx] = useState(null); // vị trí dòng sản phẩm trong phiếu nhập đang nhập số khung
   const [scanTarget, setScanTarget] = useState(null); // { unitIdx, field } ô đang chờ ảnh
@@ -2339,6 +2341,9 @@ useEffect(() => {
   };
 
   const openCreatePurchase = () => {
+    setPrepaySel([]);
+    setPrepaidApplied([]);
+    loadCashBook(); // lấy phiếu chi mới nhất
     setEditingPurchaseId(null);
     setPurchaseItems([]);
     setPurchaseForm({
@@ -2356,11 +2361,15 @@ useEffect(() => {
     try {
       const details = await api(`/api/purchase_orders/${po.id}`);
       setEditingPurchaseId(po.id);
+      const applied = Array.isArray(details.prepaid) ? details.prepaid : [];
+      const appliedSum = applied.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      setPrepaidApplied(applied);
+      setPrepaySel(applied.map((c) => c.id));
+      loadCashBook();
       setPurchaseForm({
         supplier_id: details.supplier_id,
         payment_method: details.payment_method || 'Tiền mặt',
-        paid_amount: details.paid_amount || 0,
-        // Nạp ngày nhập cũ vào form để khi lưu không bị ghi đè thành ngày hiện tại
+        paid_amount: Math.max(0, (Number(details.paid_amount) || 0) - appliedSum), // chỉ phần tiền thanh toán thêm
         created_at: details.created_at ? details.created_at.slice(0, 16) : nowLocalISO().slice(0, 16),
       });
       setPurchaseItems((details.items || []).map((i) => ({
@@ -2383,28 +2392,37 @@ useEffect(() => {
   };
 
   const handleSavePurchase = async () => {
-    if (!purchaseForm.supplier_id) return alert('Vui lòng chọn nhà cung cấp!');
-    if (purchaseItems.length === 0) return alert('Vui lòng chọn sản phẩm nhập kho!');
-    try {
-      const url = editingPurchaseId ? `/api/purchase_orders/${editingPurchaseId}` : '/api/purchase_orders';
-      await api(url, {
-        method: editingPurchaseId ? 'PUT' : 'POST',
-        body: JSON.stringify({
-          supplier_id: purchaseForm.supplier_id,
-          payment_method: purchaseForm.payment_method,
-          paid_amount: Number(purchaseForm.paid_amount) || 0,
-          created_at: purchaseForm.created_at, // Gửi chính xác giá trị ngày chọn từ input datetime-local lên
-          items: purchaseItems,
-        }),
-      });
-      setMsg({ type: 'ok', text: editingPurchaseId ? 'Cập nhật phiếu nhập thành công!' : 'Lưu phiếu nhập hàng thành công!' });
-      setShowCreatePurchaseModal(false);
-      setEditingPurchaseId(null);
-      loadData();
-    } catch (err) {
-      alert('Lỗi: ' + err.message);
-    }
-  };
+  if (!purchaseForm.supplier_id) return alert('Vui lòng chọn nhà cung cấp!');
+  if (purchaseItems.length === 0) return alert('Vui lòng chọn sản phẩm nhập kho!');
+
+  const totalAmount = purchaseItems.reduce((s, it) => s + ((it.quantity * it.price) - it.discount), 0);
+  const prepaySum = getPrepaySum();
+  const paidTotal = prepaySum + (Number(purchaseForm.paid_amount) || 0);
+  if (paidTotal > totalAmount) return alert('Tổng tiền đã thanh toán (gồm trả trước) đang lớn hơn tổng tiền phiếu nhập!');
+
+  try {
+    const url = editingPurchaseId ? `/api/purchase_orders/${editingPurchaseId}` : '/api/purchase_orders';
+    await api(url, {
+      method: editingPurchaseId ? 'PUT' : 'POST',
+      body: JSON.stringify({
+        supplier_id: purchaseForm.supplier_id,
+        payment_method: purchaseForm.payment_method,
+        paid_amount: paidTotal,                 // gồm cả tiền trả trước
+        prepay_ids: prepaySel.filter((id) => getPrepayCandidates().some((c) => c.id === id)),
+        created_at: purchaseForm.created_at,
+        items: purchaseItems,
+      }),
+    });
+    setMsg({ type: 'ok', text: editingPurchaseId ? 'Cập nhật phiếu nhập thành công!' : 'Lưu phiếu nhập hàng thành công!' });
+    setShowCreatePurchaseModal(false);
+    setEditingPurchaseId(null);
+    setPrepaySel([]); setPrepaidApplied([]);
+    loadData();
+    loadCashBook();
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  }
+};
 
   // ===== Thêm nhanh nhà cung cấp (trong popup phiếu nhập) =====
   const [showQuickAddSupplierModal, setShowQuickAddSupplierModal] = useState(false);
@@ -2435,6 +2453,20 @@ useEffect(() => {
 
   const updatePurchaseItem = (index, patch) =>
     setPurchaseItems((items) => items.map((it, idx) => (idx === index ? { ...it, ...patch } : it)));
+
+  // Phiếu chi trả trước của NCC đang chọn (chưa gắn phiếu nhập nào) + các phiếu đã gắn vào phiếu đang sửa
+  const getPrepayCandidates = () => {
+    const sup = (suppliers || []).find((s) => String(s.id) === String(purchaseForm.supplier_id));
+    if (!sup) return [];
+    const map = new Map();
+    (cashItems || []).forEach((c) => {
+      if (c.type === 'OUT' && c.reference_code === sup.code && String(c.category || '').includes('NCC')) map.set(c.id, c);
+    });
+    (prepaidApplied || []).forEach((c) => map.set(c.id, c));
+    return [...map.values()].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  };
+  const getPrepaySum = () =>
+    getPrepayCandidates().filter((c) => prepaySel.includes(c.id)).reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
     // Ghi 1 ô số khung / số sườn của xe thứ unitIdx trong dòng sản phẩm itemIdx
   const setSerial = (itemIdx, unitIdx, field, value) =>
@@ -6862,6 +6894,7 @@ const goView = (view) => {
                 onChange={(e) => {
                   setSupplierSearchKeyword(e.target.value);
                   setPurchaseForm((f) => ({ ...f, supplier_id: '' }));
+                  setPrepaySel([]); setPrepaidApplied([]);
                   setShowSupplierDropdown(true);
                 }}
                 onFocus={() => setShowSupplierDropdown(true)}
@@ -6889,6 +6922,7 @@ const goView = (view) => {
                     onClick={() => {
                       setPurchaseForm((f) => ({ ...f, supplier_id: s.id }));
                       setSupplierSearchKeyword(`${s.name} (${s.code})`);
+                      setPrepaySel([]); setPrepaidApplied([]);
                       setShowSupplierDropdown(false);
                     }}
                     style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}
@@ -7024,35 +7058,67 @@ const goView = (view) => {
           </table>
         </div>
 
-        {/* Chân phiếu: Tổng / Đã trả / Nợ / Hoàn tất */}
-        {(() => {
-          const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
-          const debtAmount = totalAmount - (Number(purchaseForm.paid_amount) || 0);
+        {/* Chân phiếu: trả trước + thanh toán thêm / Nợ / Hoàn tất */}
+{(() => {
+  const totalAmount = purchaseItems.reduce((sum, item) => sum + ((item.quantity * item.price) - item.discount), 0);
+  const candidates = getPrepayCandidates();
+  const prepaySum = getPrepaySum();
+  const cashNow = Number(purchaseForm.paid_amount) || 0;
+  const paidTotal = prepaySum + cashNow;
+  const debtAmount = totalAmount - paidTotal;
 
-          return (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div><span style={{ color: '#64748b' }}>Tổng: </span><b>{vnd(totalAmount)}</b></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ color: '#64748b' }}>Đã trả: </span>
-                  <input type="number" value={purchaseForm.paid_amount} onChange={(e) => setPurchaseForm({ ...purchaseForm, paid_amount: e.target.value })} style={{ ...cCell, width: '110px', fontWeight: 'bold' }} />
-                </div>
-                <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debtAmount))}</b></div>
-              </div>
-
-              <button
-                onClick={handleSavePurchase}
-                style={{ height: '32px', padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
-              >
-                💾 Hoàn tất
-              </button>
+  return (
+    <>
+      {/* Phiếu chi trả trước của NCC */}
+      {purchaseForm.supplier_id && (
+        <div style={{ marginBottom: '8px', border: '1px solid #bbf7d0', background: '#f0fdf4', borderRadius: '6px', padding: '8px 10px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', marginBottom: '4px' }}>
+            Phiếu chi đã thanh toán trước cho NCC này ({candidates.length})
+            <span style={{ fontWeight: 'normal', color: '#64748b' }}> — tích chọn để tính vào phiếu nhập này, không tạo thêm phiếu chi</span>
+          </div>
+          {candidates.length === 0 ? (
+            <div style={{ fontSize: '12px', color: '#94a3b8' }}>Không có phiếu chi trả trước nào chưa được sử dụng.</div>
+          ) : (
+            <div style={{ maxHeight: '110px', overflowY: 'auto' }}>
+              {candidates.map((c) => (
+                <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', cursor: 'pointer', fontSize: '13px' }}>
+                  <input
+                    type="checkbox"
+                    checked={prepaySel.includes(c.id)}
+                    onChange={() => setPrepaySel((sel) => (sel.includes(c.id) ? sel.filter((x) => x !== c.id) : [...sel, c.id]))}
+                  />
+                  <b style={{ color: '#7c3aed' }}>{c.code}</b>
+                  <span style={{ color: '#64748b' }}>{c.created_at ? String(c.created_at).slice(0, 10).split('-').reverse().join('/') : ''}</span>
+                  <span style={{ fontWeight: 'bold', color: '#16a34a' }}>{vnd(c.amount)}</span>
+                  <span style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.note || ''}</span>
+                </label>
+              ))}
             </div>
-          );
-        })()}
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div><span style={{ color: '#64748b' }}>Tổng: </span><b>{vnd(totalAmount)}</b></div>
+          {prepaySum > 0 && <div><span style={{ color: '#64748b' }}>Trả trước: </span><b style={{ color: '#16a34a' }}>{vnd(prepaySum)}</b></div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ color: '#64748b' }}>{prepaySum > 0 ? 'Thanh toán thêm: ' : 'Đã trả: '}</span>
+            <input type="number" value={purchaseForm.paid_amount} onChange={(e) => setPurchaseForm({ ...purchaseForm, paid_amount: e.target.value })} style={{ ...cCell, width: '110px', fontWeight: 'bold' }} />
+          </div>
+          <div><span style={{ color: '#64748b' }}>Nợ: </span><b style={{ color: debtAmount > 0 ? '#dc2626' : '#16a34a' }}>{vnd(Math.max(0, debtAmount))}</b></div>
+        </div>
+
+        <button
+          onClick={handleSavePurchase}
+          style={{ height: '32px', padding: '0 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+        >
+          💾 Hoàn tất
+        </button>
       </div>
-    </div>
-  </div>
-)}
+    </>
+  );
+})()}
 
                 {/* POPUP TẠO PHIẾU THU / CHI */}
         {showCashModal && (
