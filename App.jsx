@@ -7119,6 +7119,10 @@ const goView = (view) => {
     </>
   );
 })()}
+        </div>      {/* đóng khung cuộn (padding 10px 14px) */}
+    </div>        {/* đóng thẻ trắng của popup */}
+  </div>          {/* đóng overlay */}
+)}
 
                 {/* POPUP TẠO PHIẾU THU / CHI */}
         {showCashModal && (
