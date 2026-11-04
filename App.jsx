@@ -379,7 +379,7 @@ function SalesChart({ data }) {
   const line = data.map((d, i) => `${i ? 'L' : 'M'}${x(i)},${y(d.revenue)}`).join(' ');
   const area = `${line} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', color: 'var(--accent-text)' }}>
       {[0, 1, 2, 3, 4].map((i) => {
         const v = step * i;
         return (
@@ -389,14 +389,14 @@ function SalesChart({ data }) {
           </g>
         );
       })}
-      <path d={area} fill="#fef9c3" opacity="0.7" />
-      <path d={line} fill="none" stroke="#facc15" strokeWidth="2.5" strokeLinejoin="round" />
+      <path d={area} fill="currentColor" opacity="0.15" />
+      <path d={line} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
       {data.map((d, i) => {
         const [yy, mm, dd] = d.date.split('-');
         const wd = WEEKDAY[new Date(Number(yy), Number(mm) - 1, Number(dd)).getDay()];
         return (
           <g key={d.date}>
-            <circle cx={x(i)} cy={y(d.revenue)} r="4.5" fill="#fff" stroke="#facc15" strokeWidth="2">
+            <circle cx={x(i)} cy={y(d.revenue)} r="4.5" fill="var(--card)" stroke="currentColor" strokeWidth="2">
               <title>{`${dd}/${mm}: ${vnd(d.revenue)} (${d.orders} đơn)`}</title>
             </circle>
             <text x={x(i)} y={H - 18} textAnchor="middle" fontSize="11" fill="#475569">{wd}</text>
@@ -433,44 +433,68 @@ class ErrorBoundary extends Component {
 const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
-/* ===== Giao diện tối: đảo màu toàn trang, giữ nguyên ảnh và thanh menu ===== */
-html.theme-dark { background: #e6ebfb; filter: invert(1) hue-rotate(180deg); }
-html.theme-dark img,
-html.theme-dark video,
-html.theme-dark canvas,
-html.theme-dark .sidebar,
-html.theme-dark .mobile-topbar { filter: invert(1) hue-rotate(180deg); }
-
-/* ===== Giao diện tối: giữ vàng sáng #facc15 ===== */
-/* Chữ vàng (mã phiếu, số khung, tổng giá trị...) */
-html.theme-dark [style*="color: rgb(250, 204, 21)"]:not([style*="background"]) {
-  filter: invert(1) hue-rotate(180deg);
-}
-/* Nút nền vàng */
-html.theme-dark [style*="background: rgb(250, 204, 21)"] {
-  filter: invert(1) hue-rotate(180deg);
-  color: #1a1a1a !important;
-}
-/* Menu trái đã đảo lại sẵn, không đảo thêm */
-html.theme-dark .sidebar [style*="rgb(250, 204, 21)"] {
-  filter: none !important;
+/* ============ BỘ MÀU SÁNG ============ */
+:root {
+  --page: #f1f5f9;  --card: #ffffff;  --card2: #f8fafc;  --border: #cbd5e1;
+  --text: #0f172a;  --muted: #475569;
+  --accent: #eab308;  --accent-text: #a16207;  --on-accent: #1a1400;  --accent-bg: #fef9c3;
+  --green-text: #15803d;  --green-btn: #15803d;  --green-bg: #dcfce7;
+  --red-text: #b91c1c;    --red-btn: #dc2626;    --red-bg: #fee2e2;
+  --blue-text: #1d4ed8;   --blue-btn: #0369a1;   --blue-bg: #dbeafe;
+  --sidebar: #14532d;
 }
 
-/* ===== GIAO DIỆN SÁNG: nền phải trắng, menu trái xanh lá đậm ===== */
-html:not(.theme-dark) .layout,
-html:not(.theme-dark) .main-content { background: #ffffff !important; }
-html:not(.theme-dark) .sidebar { background: #052e16 !important; }
+/* ============ BỘ MÀU TỐI ============ */
+html.theme-dark {
+  color-scheme: dark;
+  --page: #0b1220;  --card: #131c2e;  --card2: #1a2438;  --border: #2d3a55;
+  --text: #f1f5f9;  --muted: #a3b2c8;
+  --accent: #facc15;  --accent-text: #facc15;  --on-accent: #111827;  --accent-bg: rgba(250,204,21,.16);
+  --green-text: #4ade80;  --green-btn: #16a34a;  --green-bg: rgba(74,222,128,.16);
+  --red-text: #f87171;    --red-btn: #dc2626;    --red-bg: rgba(248,113,113,.16);
+  --blue-text: #60a5fa;   --blue-btn: #0284c7;   --blue-bg: rgba(96,165,250,.16);
+  --sidebar: #0a1020;
+}
 
-/* ===== GIAO DIỆN TỐI: nền phải + menu trái xanh navy đậm ===== */
-/* Lưu ý: vì cả trang bị đảo màu nên các màu "nền/thẻ" dưới đây là màu TRƯỚC khi đảo */
-html.theme-dark .layout,
-html.theme-dark .main-content { background: #e6ebfb !important; }       /* sau đảo ≈ #0f1424 */
-html.theme-dark [style*="background: rgb(255, 255, 255)"] { background: #dadff3 !important; }  /* thẻ/bảng/popup ≈ #1a1f33 */
-html.theme-dark [style*="background: rgb(248, 250, 252)"] { background: #d5daed !important; }  /* tiêu đề bảng, ô KPI ≈ #1f2437 */
-html.theme-dark .scroll-table thead th,
-html.theme-dark .pos-card thead th { background: #d5daed; }
-/* Menu trái đã được đảo ngược lại nên dùng màu thật */
-html.theme-dark .sidebar { background: #101830 !important; border-right: 1px solid #232b4a; }
+/* ===== Nền chung ===== */
+.layout, .main-content { background: var(--page) !important; color: var(--text); }
+.sidebar { background: var(--sidebar) !important; }
+
+/* ===== Nền thẻ / bảng / popup ===== */
+[style*="background: rgb(255, 255, 255)"] { background: var(--card) !important; }
+:is([style*="background: rgb(248, 250, 252)"], [style*="background: rgb(241, 245, 249)"]) { background: var(--card2) !important; }
+[style*="background: rgb(226, 232, 240)"] { background: var(--border) !important; }
+.scroll-table thead th, .pos-card thead th { background: var(--card2) !important; }
+:is([style*="rgb(226, 232, 240)"], [style*="rgb(203, 213, 225)"], [style*="rgb(241, 245, 249)"]) { border-color: var(--border) !important; }
+
+/* ===== Chữ chính / chữ phụ ===== */
+:is([style*="color: rgb(15, 23, 42)"], [style*="color: rgb(30, 41, 59)"], [style*="color: rgb(51, 65, 85)"], [style*="color: rgb(55, 65, 81)"]) { color: var(--text) !important; }
+:is([style*="color: rgb(71, 85, 105)"], [style*="color: rgb(100, 116, 139)"], [style*="color: rgb(148, 163, 184)"]) { color: var(--muted) !important; }
+
+/* ===== Chữ màu chức năng ===== */
+:is([style*="color: rgb(250, 204, 21)"], [style*="color: rgb(202, 138, 4)"], [style*="color: rgb(161, 98, 7)"], [style*="color: rgb(217, 119, 6)"], [style*="color: rgb(180, 83, 9)"], [style*="color: rgb(146, 64, 14)"], [style*="color: rgb(133, 77, 14)"]) { color: var(--accent-text) !important; }
+:is([style*="color: rgb(22, 163, 74)"], [style*="color: rgb(22, 101, 52)"], [style*="color: rgb(21, 128, 61)"]) { color: var(--green-text) !important; }
+:is([style*="color: rgb(220, 38, 38)"], [style*="color: rgb(153, 27, 27)"], [style*="color: rgb(185, 28, 28)"]) { color: var(--red-text) !important; }
+:is([style*="color: rgb(2, 132, 199)"], [style*="color: rgb(37, 99, 235)"], [style*="color: rgb(29, 78, 216)"]) { color: var(--blue-text) !important; }
+
+/* ===== Nút đặc (chữ trắng trên nền màu) ===== */
+:is([style*="background: rgb(250, 204, 21)"], [style*="background: rgb(202, 138, 4)"]) { background: var(--accent) !important; color: var(--on-accent) !important; }
+[style*="background: rgb(22, 163, 74)"] { background: var(--green-btn) !important; }
+[style*="background: rgb(2, 132, 199)"] { background: var(--blue-btn) !important; }
+[style*="background: rgb(220, 38, 38)"] { background: var(--red-btn) !important; }
+
+/* ===== Nền nhạt (nút biểu tượng ✏️ 🗑️ 👁️, nhãn trạng thái) ===== */
+:is([style*="background: rgb(220, 252, 231)"], [style*="background: rgb(240, 253, 244)"]) { background: var(--green-bg) !important; }
+[style*="background: rgb(254, 226, 226)"] { background: var(--red-bg) !important; }
+:is([style*="background: rgb(224, 242, 254)"], [style*="background: rgb(219, 234, 254)"]) { background: var(--blue-bg) !important; }
+:is([style*="background: rgb(254, 243, 199)"], [style*="background: rgb(254, 249, 195)"], [style*="background: rgb(254, 252, 232)"], [style*="background: rgb(255, 251, 235)"]) { background: var(--accent-bg) !important; }
+
+/* ===== Ô nhập liệu, danh sách chọn (chỉ giao diện tối) ===== */
+html.theme-dark input, html.theme-dark select, html.theme-dark textarea {
+  background: var(--card2) !important; color: var(--text) !important; border-color: var(--border) !important;
+}
+html.theme-dark option { background: var(--card); color: var(--text); }
+html.theme-dark ::placeholder { color: var(--muted); opacity: 1; }
 
 /* ===== Đồng bộ font bảng + tiêu đề các màn hình (giống mục Nhà cung cấp) ===== */
 .main-content > div:not([style*="position: fixed"]) table { font-size: 13px !important; }
