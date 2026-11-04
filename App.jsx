@@ -390,13 +390,13 @@ function SalesChart({ data }) {
         );
       })}
       <path d={area} fill="#fef9c3" opacity="0.7" />
-      <path d={line} fill="none" stroke="#ca8a04" strokeWidth="2.5" strokeLinejoin="round" />
+      <path d={line} fill="none" stroke="#facc15" strokeWidth="2.5" strokeLinejoin="round" />
       {data.map((d, i) => {
         const [yy, mm, dd] = d.date.split('-');
         const wd = WEEKDAY[new Date(Number(yy), Number(mm) - 1, Number(dd)).getDay()];
         return (
           <g key={d.date}>
-            <circle cx={x(i)} cy={y(d.revenue)} r="4.5" fill="#fff" stroke="#ca8a04" strokeWidth="2">
+            <circle cx={x(i)} cy={y(d.revenue)} r="4.5" fill="#fff" stroke="#facc15" strokeWidth="2">
               <title>{`${dd}/${mm}: ${vnd(d.revenue)} (${d.orders} đơn)`}</title>
             </circle>
             <text x={x(i)} y={H - 18} textAnchor="middle" fontSize="11" fill="#475569">{wd}</text>
@@ -3458,7 +3458,7 @@ const goView = (view) => {
     </div>
   );
   const rank = (i) => (
-    <span style={{ width: '22px', height: '22px', flexShrink: 0, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', background: i < 3 ? '#ca8a04' : '#e2e8f0', color: i < 3 ? '#fff' : '#475569' }}>{i + 1}</span>
+    <span style={{ width: '22px', height: '22px', flexShrink: 0, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', background: i < 3 ? '#facc15' : '#e2e8f0', color: i < 3 ? '#fff' : '#475569' }}>{i + 1}</span>
   );
 
   return (
@@ -3476,7 +3476,7 @@ const goView = (view) => {
       {/* 3 ô KPI */}
       <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
         {kpi('DOANH THU 7 NGÀY QUA', vnd(dash.revenue), '#16a34a')}
-        {kpi('LỢI NHUẬN 7 NGÀY QUA', vnd(dash.profit), dash.profit >= 0 ? '#ca8a04' : '#dc2626')}
+        {kpi('LỢI NHUẬN 7 NGÀY QUA', vnd(dash.profit), dash.profit >= 0 ? '#facc15' : '#dc2626')}
         {kpi('ĐƠN HÀNG 7 NGÀY QUA', Number(dash.orders) || 0, '#0284c7')}
       </div>
 
@@ -3490,7 +3490,7 @@ const goView = (view) => {
         <div style={card}>
           <div style={cardHead}>
             <h3 style={{ margin: 0, color: '#0f172a' }}>Đơn hàng gần nhất</h3>
-            <button onClick={() => goView('pos')} style={{ background: 'none', border: 'none', color: '#ca8a04', cursor: 'pointer', fontSize: '13px' }}>Xem tất cả</button>
+            <button onClick={() => goView('pos')} style={{ background: 'none', border: 'none', color: '#facc15', cursor: 'pointer', fontSize: '13px' }}>Xem tất cả</button>
           </div>
           {(dash.recent || []).length === 0 ? (
             <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có đơn hàng nào.</div>
@@ -3546,7 +3546,7 @@ const goView = (view) => {
                 <div style={{ fontSize: '11px', color: '#64748b' }}>{p.sku || '---'}</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#ca8a04' : '#16a34a' }}>
+  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#facc15' : '#16a34a' }}>
     {dashSort === 'qty' ? `${Number(p.qty) || 0} cái` : vnd(p.revenue)}
   </div>
   <div style={{ fontSize: '11px', color: '#64748b' }}>
@@ -3569,7 +3569,7 @@ const goView = (view) => {
                 <div style={{ fontSize: '11px', color: '#64748b' }}>{c.code ? `${c.code} · ` : ''}{Number(c.orders) || 0} đơn</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#ca8a04' : '#16a34a' }}>
+  <div style={{ fontWeight: 'bold', fontSize: '13px', color: dashSort === 'qty' ? '#facc15' : '#16a34a' }}>
     {dashSort === 'qty' ? `${Number(c.qty) || 0} sp` : vnd(c.total)}
   </div>
   <div style={{ fontSize: '11px', color: '#64748b' }}>
@@ -3598,7 +3598,7 @@ const goView = (view) => {
                 </button>
                 <button
                   onClick={() => { setPosTab('orders'); setEditingOrderId(null); setEditingInvoiceId(null); setEditingInvoiceOriginalQty({}); setModalOrderType('orders'); setCart({}); setPosCustomer({ name: '', phone: '', address: '' }); setCustomerSearch(''); setPaidAmount(0); setShowOrderModal(true); }}
-                  style={{ padding: '10px 16px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '10px 16px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Đơn Đặt Hàng
                 </button>
@@ -3671,9 +3671,9 @@ const goView = (view) => {
       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ BÁN</div>
       <div style={{ fontSize: '18px', fontWeight: '900', color: '#16a34a', marginTop: '4px' }}>{vnd(posSums.invoiceTotal)}</div>
     </div>
-    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ ĐẶT HÀNG</div>
-      <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(posSums.orderTotal)}</div>
+      <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(posSums.orderTotal)}</div>
     </div>
     <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #0284c7' }}>
       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG PHIẾU BÁN</div>
@@ -3690,7 +3690,7 @@ const goView = (view) => {
 <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
   {[
     { key: 'invoices', label: `📦 Phiếu bán hàng (${visibleInvoices.length})`, color: '#16a34a' },
-    { key: 'orders', label: `📝 Đơn đặt hàng (${visibleOrders.length})`, color: '#ca8a04' },
+    { key: 'orders', label: `📝 Đơn đặt hàng (${visibleOrders.length})`, color: '#facc15' },
   ].map((t) => (
     <button
       key={t.key}
@@ -3731,7 +3731,7 @@ const goView = (view) => {
                           {inv.code}
                           {(() => {
                           const src = (ordersList || []).find((o) => o.invoice_code === inv.code);
-                          return src ? <div style={{ fontSize: '11px', fontWeight: 'normal', color: '#ca8a04' }}>📝 từ {src.code}</div> : null;
+                          return src ? <div style={{ fontSize: '11px', fontWeight: 'normal', color: '#facc15' }}>📝 từ {src.code}</div> : null;
                           })()}
                         </td>
                         <td style={{ padding: '10px' }}>{inv.created_at ? new Date(inv.created_at).toLocaleDateString('vi-VN') : '---'}</td>
@@ -3778,7 +3778,7 @@ const goView = (view) => {
 
             {/* Bảng Danh sách Đơn Đặt Hàng */}
             <div className="pos-card" style={{ display: posTab === 'orders' ? 'block' : 'none', background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              <h3 style={{ marginTop: 0, color: '#ca8a04' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
+              <h3 style={{ marginTop: 0, color: '#facc15' }}>📝 Danh sách Đơn Đặt Hàng ({visibleOrders.length}{posFiltering ? `/${ordersList.length}` : ''})</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -3798,7 +3798,7 @@ const goView = (view) => {
                   ) : (
                     visibleOrders.map(ord => (
                       <tr key={ord.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px', fontWeight: 'bold', color: '#ca8a04' }}>{ord.code}</td>
+                        <td style={{ padding: '10px', fontWeight: 'bold', color: '#facc15' }}>{ord.code}</td>
                         <td style={{ padding: '10px' }}>{ord.created_at ? new Date(ord.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                         <td style={{ padding: '10px', fontWeight: '500' }}>{ord.customer_name}</td>
                         <td style={{ padding: '10px', fontWeight: 'bold' }}>{vnd(ord.total)}</td>
@@ -3828,7 +3828,7 @@ const goView = (view) => {
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
             <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#ca8a04' }}>Chi tiết: {detailData.code}</h3>
+                <h3 style={{ margin: 0, color: '#facc15' }}>Chi tiết: {detailData.code}</h3>
                 <button onClick={() => setShowDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
 
@@ -3854,7 +3854,7 @@ const goView = (view) => {
                       <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '8px' }}>
                           <div>{item.product_name}</div>
-                          {item.chassis_color && <div style={{ fontSize: '11px', color: '#ca8a04', fontStyle: 'italic' }}>{item.chassis_color}</div>}
+                          {item.chassis_color && <div style={{ fontSize: '11px', color: '#facc15', fontStyle: 'italic' }}>{item.chassis_color}</div>}
                         </td>
                         <td style={{ padding: '8px' }}>{item.quantity}</td>
                         <td style={{ padding: '8px' }}>{vnd(item.price)}</td>
@@ -3876,7 +3876,7 @@ const goView = (view) => {
                 return (
                   <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
                     <div style={{ ...row, fontWeight: 'bold' }}>
-                      <span>Tổng tiền:</span><span style={{ color: '#ca8a04' }}>{vnd(detailData.total)}</span>
+                      <span>Tổng tiền:</span><span style={{ color: '#facc15' }}>{vnd(detailData.total)}</span>
                     </div>
                     <div style={row}>
                       <span>{isOrderDoc ? 'Đã tạm ứng:' : 'Đã thanh toán:'}</span>
@@ -3927,7 +3927,7 @@ const goView = (view) => {
                 </button>
                 <button
                   onClick={openCreateReturn}
-                  style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ background: '#facc15', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Tạo Phiếu Trả Hàng
                 </button>
@@ -3950,7 +3950,7 @@ const goView = (view) => {
               </div>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '8px' }}>Tổng tiền hoàn</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ca8a04' }}>{vnd(returnOrdersData.stats.totalRefund)}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#facc15' }}>{vnd(returnOrdersData.stats.totalRefund)}</div>
               </div>
             </div>
 
@@ -4007,7 +4007,7 @@ const goView = (view) => {
               <div style={overlayStyle}>
                 <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                    <h3 style={{ margin: 0, color: '#ca8a04' }}>Chi tiết: {returnDetail.code}</h3>
+                    <h3 style={{ margin: 0, color: '#facc15' }}>Chi tiết: {returnDetail.code}</h3>
                     <button onClick={() => setReturnDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
                   </div>
                   <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
@@ -4042,7 +4042,7 @@ const goView = (view) => {
                     return (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '6px' }}>
-                          <span>Tổng giá trị hàng trả:</span><span style={{ color: '#ca8a04' }}>{vnd(tv)}</span>
+                          <span>Tổng giá trị hàng trả:</span><span style={{ color: '#facc15' }}>{vnd(tv)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '6px' }}>
                           <span>Đã hoàn tiền cho khách:</span><span style={{ color: '#16a34a' }}>{vnd(rf)}</span>
@@ -4241,7 +4241,7 @@ const goView = (view) => {
                                 style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9' }}
                               >
                                 <span><b>{p.sku ? `${p.sku} - ` : ''}{p.name}</b></span>
-                                <span style={{ color: '#ca8a04', fontWeight: 'bold' }}>{vnd(p.price)} &nbsp;<span style={{ color: '#0284c7' }}>+ Thêm</span></span>
+                                <span style={{ color: '#facc15', fontWeight: 'bold' }}>{vnd(p.price)} &nbsp;<span style={{ color: '#0284c7' }}>+ Thêm</span></span>
                               </div>
                             ))}
                           </div>
@@ -4309,7 +4309,7 @@ const goView = (view) => {
                                 />
                               </td>
 
-                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#ca8a04' }}>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#facc15' }}>
                                 {vnd(it.quantity * it.price)}
                               </td>
                               <td style={{ padding: '10px 14px', textAlign: 'center' }}>
@@ -4325,7 +4325,7 @@ const goView = (view) => {
                   {/* Tổng giá trị và nút hành động */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
                     <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
-                      Tổng giá trị hàng trả: <span style={{ color: '#ca8a04' }}>{vnd(calcReturnTotal(returnForm.items))}</span>
+                      Tổng giá trị hàng trả: <span style={{ color: '#facc15' }}>{vnd(calcReturnTotal(returnForm.items))}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button
@@ -4336,7 +4336,7 @@ const goView = (view) => {
                       </button>
                       <button
                         onClick={handleCreateReturnOrder}
-                        style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                        style={{ background: '#facc15', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                       >
                         {editingReturnId ? 'Cập Nhật Phiếu Trả' : 'Tạo Phiếu Trả'}
                       </button>
@@ -4368,7 +4368,7 @@ const goView = (view) => {
                   <button onClick={loadPurchaseReturns} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>🔄 Làm mới</button>
                   <button
                     onClick={openCreatePr}
-                    style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                    style={{ background: '#facc15', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                   >+ Tạo Phiếu Trả Nhập</button>
                 </div>
               </div>
@@ -4574,7 +4574,7 @@ const goView = (view) => {
                       ) : list.map((p) => (
                         <div key={p.id} onClick={() => addPrProduct(p)} style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}>
                           <span><b>{p.sku ? `${p.sku} - ` : ''}{p.name}</b> <small style={{ color: '#64748b' }}>(Tồn: {p.stock})</small></span>
-                          <span style={{ color: '#ca8a04', fontWeight: 'bold' }}>{vnd(p.import_price)} <span style={{ color: '#0284c7' }}>+ Thêm</span></span>
+                          <span style={{ color: '#facc15', fontWeight: 'bold' }}>{vnd(p.import_price)} <span style={{ color: '#0284c7' }}>+ Thêm</span></span>
                         </div>
                       ))}
                     </div>
@@ -4619,7 +4619,7 @@ const goView = (view) => {
                           <input type="number" min="0" value={it.price} onChange={(e) => updatePrItem(idx, { price: Number(e.target.value) || 0 })}
                             style={{ width: '120px', padding: '6px', textAlign: 'right', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }} />
                         </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#ca8a04' }}>{vnd(it.quantity * it.price)}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', color: '#facc15' }}>{vnd(it.quantity * it.price)}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                           <button onClick={() => removePrItem(idx)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>✕</button>
                         </td>
@@ -4631,14 +4631,14 @@ const goView = (view) => {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
                 <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
-                  Tổng giá trị hàng trả NCC: <span style={{ color: '#ca8a04' }}>{vnd(calcPrTotal(prForm.items))}</span>
+                  Tổng giá trị hàng trả NCC: <span style={{ color: '#facc15' }}>{vnd(calcPrTotal(prForm.items))}</span>
                   <span style={{ marginLeft: '18px', fontSize: '14px' }}>
                     Còn lại trừ công nợ NCC: <span style={{ color: '#dc2626' }}>{vnd(Math.max(0, calcPrTotal(prForm.items) - (Number(prForm.refund_received) || 0)))}</span>
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button onClick={closePrModal} style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Hủy</button>
-                  <button onClick={handleCreatePurchaseReturn} style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>{editingPrId ? 'Cập Nhật Phiếu Trả' : 'Tạo Phiếu Trả'}</button>
+                  <button onClick={handleCreatePurchaseReturn} style={{ background: '#facc15', color: '#fff', border: 'none', padding: '10px 25px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>{editingPrId ? 'Cập Nhật Phiếu Trả' : 'Tạo Phiếu Trả'}</button>
                 </div>
               </div>
             </div>
@@ -4650,7 +4650,7 @@ const goView = (view) => {
           <div style={overlayStyle}>
             <div style={{ background: '#fff', width: '700px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#ca8a04' }}>Chi tiết: {prDetail.code}</h3>
+                <h3 style={{ margin: 0, color: '#facc15' }}>Chi tiết: {prDetail.code}</h3>
                 <button onClick={() => setPrDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
               <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
@@ -4869,11 +4869,11 @@ const goView = (view) => {
                             style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer', background: open ? '#fefce8' : 'transparent' }}
                           >
                             <td style={{ ...cellS, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
-                              <span style={{ color: '#ca8a04', marginRight: '4px' }}>{open ? '▾' : '▸'}</span>
+                              <span style={{ color: '#facc15', marginRight: '4px' }}>{open ? '▾' : '▸'}</span>
                               <b style={{ color: '#0f172a' }}>{r.name}</b>
                               {r.sku && <div style={{ fontSize: '11px', color: '#64748b', marginLeft: '14px' }}>{r.sku}</div>}
                             </td>
-                            <td style={{ ...cellS, textAlign: 'center', fontWeight: 'bold', color: '#ca8a04' }}>{r.total_qty}</td>
+                            <td style={{ ...cellS, textAlign: 'center', fontWeight: 'bold', color: '#facc15' }}>{r.total_qty}</td>
                             <td style={{ ...cellS, textAlign: 'center', color: r.stock < r.total_qty ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{r.stock}</td>
                             <td style={{ ...cellS, textAlign: 'center', fontWeight: 'bold', color: r.shortage > 0 ? '#dc2626' : '#16a34a' }}>{r.shortage > 0 ? r.shortage : '✓'}</td>
                             <td style={{ ...cellS, textAlign: 'center' }}>{r.order_count}</td>
@@ -4889,7 +4889,7 @@ const goView = (view) => {
                                     <b
                                       onClick={(e) => { e.stopPropagation(); handleViewDetail('orders', o.id); }}
                                       title="Xem chi tiết đơn"
-                                      style={{ color: '#ca8a04', cursor: 'pointer' }}
+                                      style={{ color: '#facc15', cursor: 'pointer' }}
                                     >{o.code}</b>
                                     {' · '}{o.customer_name || 'Khách lẻ'}
                                     {o.created_at ? ' · ' + new Date(o.created_at).toLocaleDateString('vi-VN') : ''}
@@ -4918,7 +4918,7 @@ const goView = (view) => {
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => { setEditingCashId(null); setCashForm(newCashForm()); setShowCashModal(true); }}
-                  style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ background: '#facc15', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   + Thêm Thu Chi
                 </button>
@@ -5001,9 +5001,9 @@ const goView = (view) => {
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>LỢI NHUẬN RÒNG (THU - CHI)</div>
                 <div style={{ fontSize: '18px', fontWeight: '900', color: '#2563eb', marginTop: '4px' }}>{vnd(cashSums.netProfit || 0)}</div>
               </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>SỐ DƯ (TÍCH LŨY)</div>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(cashSums.balance || 0)}</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(cashSums.balance || 0)}</div>
               </div>
             </div>
 
@@ -5037,7 +5037,7 @@ const goView = (view) => {
                     ) : (
                       visibleCashItems.map((item) => (
                         <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                          <td style={{ padding: '12px', fontWeight: 'bold', color: '#ca8a04' }}>{item.code}</td>
+                          <td style={{ padding: '12px', fontWeight: 'bold', color: '#facc15' }}>{item.code}</td>
                           <td style={{ padding: '12px' }}>{item.created_at ? item.created_at.slice(0, 10) : ''}</td>
                           <td style={{ padding: '12px' }}>
                             {(() => {
@@ -5045,7 +5045,7 @@ const goView = (view) => {
                               if (!pt) return <span style={{ color: '#94a3b8' }}>-</span>;
                               return (
                                 <div title={pt.name}>
-                                  <b style={{ color: pt.kind === 'ncc' ? '#ca8a04' : '#0284c7' }}>{pt.code}</b>
+                                  <b style={{ color: pt.kind === 'ncc' ? '#facc15' : '#0284c7' }}>{pt.code}</b>
                                   <div style={{ fontSize: '11px', color: '#64748b' }}>{pt.name}</div>
                                 </div>
                               );
@@ -5136,19 +5136,19 @@ const goView = (view) => {
               <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px' }}>
                 <button
                   onClick={() => setActiveProductTab('info')}
-                  style={{ padding: '8px 20px', background: activeProductTab === 'info' ? '#ca8a04' : '#f1f5f9', color: activeProductTab === 'info' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'info' ? '#facc15' : '#f1f5f9', color: activeProductTab === 'info' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   1. Thông tin sản phẩm
                 </button>
                 <button
                   onClick={() => setActiveProductTab('card')}
-                  style={{ padding: '8px 20px', background: activeProductTab === 'card' ? '#ca8a04' : '#f1f5f9', color: activeProductTab === 'card' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'card' ? '#facc15' : '#f1f5f9', color: activeProductTab === 'card' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   2. Thẻ kho chi tiết
                 </button>
                 <button
                   onClick={() => setActiveProductTab('serials')}
-                  style={{ padding: '8px 20px', background: activeProductTab === 'serials' ? '#ca8a04' : '#f1f5f9', color: activeProductTab === 'serials' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '8px 20px', background: activeProductTab === 'serials' ? '#facc15' : '#f1f5f9', color: activeProductTab === 'serials' ? '#fff' : '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   3. Số khung / số máy ({productSerials.length})
                 </button>
@@ -5233,7 +5233,7 @@ const goView = (view) => {
                         <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Sản phẩm này chưa có số khung / số máy nào được ghi nhận.</td></tr>
                       ) : productSerials.map((r, i) => (
                         <tr key={r.key || r.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#ca8a04', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: '#facc15', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{r.frame || '-'}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{r.purchase_date ? new Date(r.purchase_date).toLocaleDateString('vi-VN') : '-'}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
@@ -5349,9 +5349,9 @@ const goView = (view) => {
 
             {/* 3 ô tổng hợp theo bộ lọc */}
             <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(supplierSums.total)}</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(supplierSums.total)}</div>
               </div>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
@@ -5404,7 +5404,7 @@ const goView = (view) => {
               <h2 style={{ margin: 0 }}>Quản lý Nhập Hàng ({visiblePurchases.length}{purFiltering ? `/${purchaseOrders.length}` : ''})</h2>
               <button
                 onClick={openCreatePurchase}
-                style={{ padding: '10px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                style={{ padding: '10px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 + Tạo Phiếu Nhập
               </button>
@@ -5471,9 +5471,9 @@ const goView = (view) => {
 
             {/* 3 ô tổng hợp theo bộ lọc */}
             <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ NHẬP</div>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(purSums.total)}</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(purSums.total)}</div>
               </div>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
@@ -5514,7 +5514,7 @@ const goView = (view) => {
                         <td style={{ ...cellStyle, fontWeight: 'bold', color: '#0284c7' }}>{po.code}</td>
                         <td style={cellStyle}>{po.created_at ? new Date(po.created_at).toLocaleDateString('vi-VN') : '---'}</td>
                         <td style={{ ...cellStyle, fontWeight: '500' }}>{po.supplier_name || '---'}</td>
-                        <td style={{ ...cellStyle, fontWeight: 'bold', color: '#ca8a04' }}>{vnd(totalAmt)}</td>
+                        <td style={{ ...cellStyle, fontWeight: 'bold', color: '#facc15' }}>{vnd(totalAmt)}</td>
                         <td style={{ ...cellStyle, color: '#16a34a' }}>{vnd(paidAmt)}</td>
                         <td style={{ ...cellStyle, color: debtAmt > 0 ? '#dc2626' : '#16a34a', fontWeight: debtAmt > 0 ? 'bold' : 'normal' }}>{vnd(debtAmt)}</td>
                         <td style={cellStyle}>
@@ -5575,7 +5575,7 @@ const goView = (view) => {
             <div className="report-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị tồn đầu kỳ</span>
-                <div style={{ fontSize: '22px', fontWeight: '900', color: '#ca8a04', marginTop: '8px' }}>{vnd(reportSummary.totalOpeningVal)}</div>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: '#facc15', marginTop: '8px' }}>{vnd(reportSummary.totalOpeningVal)}</div>
               </div>
               <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Giá trị nhập trong kỳ</span>
@@ -5684,7 +5684,7 @@ const goView = (view) => {
                   ) : (
                     reportItems.map((item) => (
                       <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#ca8a04' }}>{item.code}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#facc15' }}>{item.code}</td>
                         <td style={{ padding: '10px 12px', fontWeight: '500' }}>{item.name}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.unit}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: '1px solid #e2e8f0' }}>{item.openingQty}</td>
@@ -5732,7 +5732,7 @@ const goView = (view) => {
         {/* ⚙️ MÀN HÌNH CÀI ĐẶT THÔNG TIN DOANH NGHIỆP & LOGO */}
         {currentView === 'settings' && (
           <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', maxWidth: '700px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0, color: '#ca8a04', marginBottom: '20px' }}>⚙️ Cài đặt thông tin doanh nghiệp & Logo in hóa đơn</h2>
+            <h2 style={{ marginTop: 0, color: '#facc15', marginBottom: '20px' }}>⚙️ Cài đặt thông tin doanh nghiệp & Logo in hóa đơn</h2>
 
             <div style={{ marginBottom: '20px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
               <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>Giao diện hiển thị</div>
@@ -5747,9 +5747,9 @@ const goView = (view) => {
                     onClick={() => setTheme(t.key)}
                     style={{
                       padding: '9px 22px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold',
-                      border: '1px solid #ca8a04',
-                      background: theme === t.key ? '#ca8a04' : '#fff',
-                      color: theme === t.key ? '#fff' : '#ca8a04',
+                      border: '1px solid #facc15',
+                      background: theme === t.key ? '#facc15' : '#fff',
+                      color: theme === t.key ? '#fff' : '#facc15',
                     }}
                   >{t.label}</button>
                 ))}
@@ -5956,7 +5956,7 @@ const goView = (view) => {
         <div style={overlayStyle}>
           <div style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#ca8a04' }}>Chi tiết lãi lỗ: {rvDetail.code}</h3>
+              <h3 style={{ margin: 0, color: '#facc15' }}>Chi tiết lãi lỗ: {rvDetail.code}</h3>
               <button onClick={() => setRvDetail(null)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
@@ -5987,7 +5987,7 @@ const goView = (view) => {
                     <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       <td style={{ padding: '8px' }}>
                         <div style={{ fontWeight: 500 }}>{it.sku ? `${it.sku} - ` : ''}{it.name}</div>
-                        {it.detail && <div style={{ fontSize: '11px', color: '#ca8a04', fontStyle: 'italic' }}>{it.detail}</div>}
+                        {it.detail && <div style={{ fontSize: '11px', color: '#facc15', fontStyle: 'italic' }}>{it.detail}</div>}
                       </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>{it.quantity}</td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>{vnd(it.price)}</td>
@@ -6058,7 +6058,7 @@ const goView = (view) => {
     </>
   )}
 
-  <button onClick={loadProfitLossReport} style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
+  <button onClick={loadProfitLossReport} style={{ background: '#facc15', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xem báo cáo</button>
 </div>
             </div>
 
@@ -6198,9 +6198,9 @@ const goView = (view) => {
 
             {/* 3 ô tổng hợp theo bộ lọc */}
             <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG GIÁ TRỊ MUA</div>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(customerSums.total)}</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(customerSums.total)}</div>
               </div>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG ĐÃ THANH TOÁN</div>
@@ -6326,7 +6326,7 @@ const goView = (view) => {
                       const sv = stView(r);
                       return (
                         <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
-                          <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#ca8a04', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#facc15', whiteSpace: 'nowrap' }}>{r.chassis || '-'}</td>
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.frame || '-'}</td>
                           <td style={{ padding: '10px 12px', minWidth: '180px', maxWidth: '240px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                             {r.product_name}
@@ -6377,7 +6377,7 @@ const goView = (view) => {
             <div style={cardStyle} className="cost-page">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ margin: 0 }}>Tính giá nhập ({visibleCostRows.length}{costKeyword ? '/' + costRows.length : ''})</h2>
-              <button onClick={addCostRow} style={{ padding: '10px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm dòng</button>
+              <button onClick={addCostRow} style={{ padding: '10px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ Thêm dòng</button>
             </div>
 
             {/* Thông số mặc định cho dòng mới */}
@@ -6401,9 +6401,9 @@ const goView = (view) => {
 
             {/* 3 ô tổng hợp */}
             <div className="kpi-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '15px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #ca8a04' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #facc15' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>TỔNG CỘNG</div>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#ca8a04', marginTop: '4px' }}>{vnd(costSums.total)}</div>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15', marginTop: '4px' }}>{vnd(costSums.total)}</div>
               </div>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', borderLeft: '4px solid #16a34a' }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>ĐÃ THANH TOÁN</div>
@@ -6520,7 +6520,7 @@ const goView = (view) => {
                             onChange={(v) => updateCostRow(r.id, { shipOverride: v })}
                             onReset={() => updateCostRow(r.id, { shipOverride: null })} />
                         </td>
-                        <td style={{ whiteSpace: 'nowrap', fontWeight: 'bold', color: '#ca8a04' }}>{vnd(c.total)}</td>
+                        <td style={{ whiteSpace: 'nowrap', fontWeight: 'bold', color: '#facc15' }}>{vnd(c.total)}</td>
                         <td>
                           <input type="date" value={r.date1} disabled={lock} onChange={(e) => updateCostRow(r.id, { date1: e.target.value })} style={{ ...cCell, width: '122px', textAlign: 'left' }} />
                         </td>
@@ -6562,7 +6562,7 @@ const goView = (view) => {
                             onClick={() => applyImportCost(r)}
                             disabled={!linked || !(c.unitCost > 0)}
                             title={!linked ? 'Hãy chọn sản phẩm từ danh sách gợi ý trước' : 'Lấy giá nhập này làm giá nhập của sản phẩm'}
-                            style={{ height: '28px', padding: '0 10px', border: 'none', borderRadius: '5px', fontWeight: 'bold', fontSize: '12px', cursor: !linked ? 'not-allowed' : 'pointer', opacity: !linked ? 0.45 : 1, background: same ? '#dcfce7' : '#ca8a04', color: same ? '#16a34a' : '#fff' }}
+                            style={{ height: '28px', padding: '0 10px', border: 'none', borderRadius: '5px', fontWeight: 'bold', fontSize: '12px', cursor: !linked ? 'not-allowed' : 'pointer', opacity: !linked ? 0.45 : 1, background: same ? '#dcfce7' : '#facc15', color: same ? '#16a34a' : '#fff' }}
                           >
                             {r.appliedAt ? (same ? '✓ Đã áp dụng' : 'Áp dụng lại') : 'Áp dụng giá nhập'}
                           </button>
@@ -6589,7 +6589,7 @@ const goView = (view) => {
                       <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{vnd(costSums.fee)}</td>
                       <td style={{ borderTop: '2px solid #0f172a' }}></td>
                       <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>{vnd(costSums.ship)}</td>
-                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: '#ca8a04' }}>{vnd(costSums.total)}</td>
+                      <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: '#facc15' }}>{vnd(costSums.total)}</td>
                       <td colSpan="4" style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap' }}>Đã thanh toán: {vnd(costSums.paid)}</td>
                       <td style={{ padding: '10px 12px', borderTop: '2px solid #0f172a', whiteSpace: 'nowrap', color: costSums.debt > 0 ? '#dc2626' : '#16a34a' }}>{vnd(costSums.debt)}</td>
                       <td colSpan="5" style={{ borderTop: '2px solid #0f172a' }}></td>
@@ -6646,7 +6646,7 @@ const goView = (view) => {
                     const st = warrantyStatus(w.expiry_date);
                     return (
                       <tr key={w.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td onClick={() => setWarrantyDetail(w)} style={{ padding: '10px 12px', fontWeight: 'bold', color: '#ca8a04', cursor: 'pointer', whiteSpace: 'nowrap' }}>{w.code}</td>
+                        <td onClick={() => setWarrantyDetail(w)} style={{ padding: '10px 12px', fontWeight: 'bold', color: '#facc15', cursor: 'pointer', whiteSpace: 'nowrap' }}>{w.code}</td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#0284c7' }}>{w.invoice_code || '-'}</td>
                         <td style={{ padding: '10px 12px' }}>
                           <b>{w.customer_name}</b>
@@ -6826,7 +6826,7 @@ const goView = (view) => {
                       <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '8px' }}>{it.sku ? `${it.sku} - ` : ''}{it.name}</td>
                         <td style={{ padding: '8px' }}>{it.quantity}</td>
-                        <td style={{ padding: '8px', color: '#ca8a04', fontStyle: 'italic' }}>{it.detail || '-'}</td>
+                        <td style={{ padding: '8px', color: '#facc15', fontStyle: 'italic' }}>{it.detail || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -6845,7 +6845,7 @@ const goView = (view) => {
           <div style={overlayStyle}>
             <div style={{ background: '#fff', width: '800px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#ca8a04' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
+                <h3 style={{ margin: 0, color: '#facc15' }}>Chi tiết Phiếu Nhập: {selectedPurchaseOrder.code}</h3>
                 <button onClick={() => setShowViewPurchaseModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
 
@@ -6875,7 +6875,7 @@ const goView = (view) => {
                         <td style={{ padding: '8px', fontWeight: '500' }}>
                           {item.product_name}
                           {(item.serials || []).map((s, si) => (
-                            <div key={si} style={{ fontSize: '11px', color: '#ca8a04', fontStyle: 'italic', fontWeight: 'normal' }}>
+                            <div key={si} style={{ fontSize: '11px', color: '#facc15', fontStyle: 'italic', fontWeight: 'normal' }}>
                               {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số máy: ' + s.frame : ''].filter(Boolean).join(' | ')}
                             </div>
                           ))}
@@ -6907,7 +6907,7 @@ const goView = (view) => {
         {showQuickAddSupplierModal && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
             <div style={{ background: '#fff', width: '400px', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-              <h3 style={{ margin: '0 0 15px 0', color: '#ca8a04' }}>Thêm Nhanh Nhà Cung Cấp</h3>
+              <h3 style={{ margin: '0 0 15px 0', color: '#facc15' }}>Thêm Nhanh Nhà Cung Cấp</h3>
 
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Tên nhà cung cấp *:</label>
@@ -6961,7 +6961,7 @@ const goView = (view) => {
 {showCreatePurchaseModal && (
   <div style={overlayStyle}>
     <div style={{ background: '#fff', width: '760px', maxHeight: '90vh', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '13px' }}>
-      <div style={{ padding: '0 14px', height: '40px', flexShrink: 0, background: '#ca8a04', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '0 14px', height: '40px', flexShrink: 0, background: '#facc15', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={{ margin: 0, fontSize: '15px' }}>{editingPurchaseId ? 'Chỉnh sửa Phiếu Nhập Hàng' : 'Tạo Phiếu Nhập Hàng'}</h3>
         <button onClick={() => setShowCreatePurchaseModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
       </div>
@@ -6989,7 +6989,7 @@ const goView = (view) => {
                 type="button"
                 onClick={() => setShowQuickAddSupplierModal(true)}
                 title="Thêm nhà cung cấp mới"
-                style={{ height: '30px', padding: '0 10px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap' }}
+                style={{ height: '30px', padding: '0 10px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', whiteSpace: 'nowrap' }}
               >+ Thêm</button>
             </div>
 
@@ -7105,7 +7105,7 @@ const goView = (view) => {
                                             <td style={{ ...cTd, fontWeight: 500 }}>
                         <div>{item.name}</div>
                         {serialFilled(item).slice(0, 3).map((s, si) => (
-                          <div key={si} style={{ fontSize: '11px', color: '#ca8a04', fontStyle: 'italic', fontWeight: 'normal' }}>
+                          <div key={si} style={{ fontSize: '11px', color: '#facc15', fontStyle: 'italic', fontWeight: 'normal' }}>
                             {[s.chassis ? 'Số khung: ' + s.chassis : '', s.frame ? 'Số máy: ' + s.frame : ''].filter(Boolean).join(' | ')}
                           </div>
                         ))}
@@ -7115,7 +7115,7 @@ const goView = (view) => {
                         <button
                           type="button"
                           onClick={() => setSerialEditIdx(index)}
-                          style={{ background: '#fef9c3', color: '#ca8a04', border: '1px dashed #fde047', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
+                          style={{ background: '#fef9c3', color: '#facc15', border: '1px dashed #fde047', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
                         >
                           ✏️ + Thêm số khung, số máy ({serialFilled(item).length}/{item.quantity})
                         </button>
@@ -7171,7 +7171,7 @@ const goView = (view) => {
                     checked={prepaySel.includes(c.id)}
                     onChange={() => setPrepaySel((sel) => (sel.includes(c.id) ? sel.filter((x) => x !== c.id) : [...sel, c.id]))}
                   />
-                  <b style={{ color: '#ca8a04' }}>{c.code}</b>
+                  <b style={{ color: '#facc15' }}>{c.code}</b>
                   <span style={{ color: '#64748b' }}>{c.created_at ? String(c.created_at).slice(0, 10).split('-').reverse().join('/') : ''}</span>
                   <span style={{ fontWeight: 'bold', color: '#16a34a' }}>{vnd(c.amount)}</span>
                   <span style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.note || ''}</span>
@@ -7195,7 +7195,7 @@ const goView = (view) => {
 
               <button
                 onClick={handleSavePurchase}
-                style={{ height: '32px', padding: '0 16px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                style={{ height: '32px', padding: '0 16px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
               >
                 💾 Hoàn tất
               </button>
@@ -7381,7 +7381,7 @@ const goView = (view) => {
                       alert('Lỗi: ' + err.message);
                     }
                   }}
-                  style={{ padding: '8px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '8px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   {editingCashId ? 'Cập nhật giao dịch' : 'Lưu giao dịch'}
                 </button>
@@ -7395,7 +7395,7 @@ const goView = (view) => {
   <div style={{ ...overlayStyle, zIndex: 900 }}>
     <div style={{ background: '#fff', width: '820px', maxHeight: '92vh', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '13px' }}>
       <div style={{ padding: '0 14px', height: '40px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0' }}>
-        <h3 style={{ margin: 0, fontSize: '15px', color: modalOrderType === 'invoices' ? '#16a34a' : '#ca8a04' }}>
+        <h3 style={{ margin: 0, fontSize: '15px', color: modalOrderType === 'invoices' ? '#16a34a' : '#facc15' }}>
           {modalOrderType === 'invoices'
             ? (editingInvoiceId ? `✏️ Sửa Phiếu Bán Hàng${linkedOrder ? ' (từ đơn ' + linkedOrder.code + ')' : ''}` : '📦 Tạo Phiếu Bán Hàng (trừ tồn kho)')
             : (editingOrderId ? '✏️ Sửa Đơn Đặt Hàng' : '📝 Tạo Đơn Đặt Hàng (không trừ kho)')}
@@ -7419,7 +7419,7 @@ const goView = (view) => {
             <button
               onClick={() => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductModal(true); }}
               title="Thêm sản phẩm mới"
-              style={{ height: '30px', width: '36px', flexShrink: 0, background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
+              style={{ height: '30px', width: '36px', flexShrink: 0, background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
             >+</button>
           </div>
 
@@ -7447,7 +7447,7 @@ const goView = (view) => {
                           {out ? (modalOrderType === 'invoices' ? 'Hết hàng' : 'Hết (Cho phép đặt)') : `Tồn: ${p.stock}`} | ĐVT: {p.unit || 'Cái'}
                         </small>
                       </div>
-                      <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#ca8a04', whiteSpace: 'nowrap' }}>
+                      <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#facc15', whiteSpace: 'nowrap' }}>
                         {vnd(p.price)} <span style={{ color: '#0284c7' }}>+ Thêm</span>
                       </div>
                     </div>
@@ -7468,7 +7468,7 @@ const goView = (view) => {
     <button
       type="button"
       onClick={() => handleViewDetail('orders', linkedOrder.id)}
-      style={{ background: '#ca8a04', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+      style={{ background: '#facc15', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
     >Xem đơn</button>
   </div>
 )}
@@ -7510,7 +7510,7 @@ const goView = (view) => {
               <button
                 onClick={() => { setEditingCustomer(null); setCustomerForm({ ...EMPTY_CUSTOMER, name: customerSearch }); setShowCustomerModal(true); }}
                 title="Thêm khách hàng mới"
-                style={{ height: '30px', width: '36px', flexShrink: 0, background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
+                style={{ height: '30px', width: '36px', flexShrink: 0, background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
               >+</button>
             </div>
             {showCustomerDropdown && filteredPosCustomers.length > 0 && (
@@ -7570,7 +7570,7 @@ const goView = (view) => {
                       <td style={cTd}>
                         <div style={{ fontWeight: 500 }}>{l.name}</div>
                         {(cart[l.id + '_chassis'] || cart[l.id + '_frame'] || cart[l.id + '_color'] || cart[l.id + '_note']) && (
-                          <div style={{ fontSize: '11px', color: '#ca8a04', fontStyle: 'italic', margin: '2px 0' }}>
+                          <div style={{ fontSize: '11px', color: '#facc15', fontStyle: 'italic', margin: '2px 0' }}>
                             {[
                               cart[l.id + '_chassis'] ? `Số khung: ${cart[l.id + '_chassis']}` : '',
                               cart[l.id + '_frame'] ? `Số máy: ${cart[l.id + '_frame']}` : '',
@@ -7582,7 +7582,7 @@ const goView = (view) => {
                         <button
                           type="button"
                           onClick={() => setActiveChassisProduct(l.id)}
-                          style={{ background: '#fef9c3', color: '#ca8a04', border: '1px dashed #fde047', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
+                          style={{ background: '#fef9c3', color: '#facc15', border: '1px dashed #fde047', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer', marginTop: '2px' }}
                         >
                           ✏️ + Thêm số khung, số máy, ghi chú
                         </button>
@@ -7591,7 +7591,7 @@ const goView = (view) => {
                         <input type="number" min="1" value={l.quantity} onChange={(e) => setQty(l.id, Math.max(1, Number(e.target.value) || 1))} style={{ ...cCell, width: '52px', textAlign: 'center' }} />
                       </td>
                       <td style={cTd}>
-                        <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ ...cCell, width: '100px', fontWeight: 'bold', color: '#ca8a04' }} />
+                        <input type="number" value={l.price} onChange={(e) => setItemPrice(l.id, e.target.value)} style={{ ...cCell, width: '100px', fontWeight: 'bold', color: '#facc15' }} />
                       </td>
                       <td style={cTd}>
                         <input type="number" value={l.discount} onChange={(e) => setDiscount(l.id, e.target.value)} style={{ ...cCell, width: '80px' }} />
@@ -7612,7 +7612,7 @@ const goView = (view) => {
         <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 'bold', marginBottom: '6px' }}>
             <span>TỔNG CỘNG:</span>
-            <span style={{ color: '#ca8a04' }}>{vnd(cartTotal)}</span>
+            <span style={{ color: '#facc15' }}>{vnd(cartTotal)}</span>
           </div>
 
           {depositFromOrder > 0 && modalOrderType === 'invoices' && (() => {
@@ -7626,7 +7626,7 @@ const goView = (view) => {
                 </div>
                 <div>
                   <label style={cLabel}>Còn phải thanh toán:</label>
-                  <div style={{ fontWeight: 'bold', color: '#ca8a04' }}>{vnd(remain)}</div>
+                  <div style={{ fontWeight: 'bold', color: '#facc15' }}>{vnd(remain)}</div>
                 </div>
                 <div>
                   <label style={cLabel}>Thanh toán thêm lần này:</label>
@@ -7682,7 +7682,7 @@ const goView = (view) => {
         <button
           disabled={busy || cartLines.length === 0}
           onClick={handlePosSubmit}
-          style={{ width: '100%', height: '38px', background: modalOrderType === 'invoices' ? '#16a34a' : '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '14px' }}
+          style={{ width: '100%', height: '38px', background: modalOrderType === 'invoices' ? '#16a34a' : '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: busy || cartLines.length === 0 ? 'not-allowed' : 'pointer', opacity: busy || cartLines.length === 0 ? 0.6 : 1, fontWeight: 'bold', fontSize: '14px' }}
         >
           {modalOrderType === 'invoices'
             ? (editingInvoiceId ? 'CẬP NHẬT PHIẾU BÁN HÀNG' : 'XÁC NHẬN TẠO PHIẾU BÁN HÀNG')
@@ -7775,7 +7775,7 @@ const goView = (view) => {
                   <button onClick={() => setActiveChassisProduct(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
                 </div>
 
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ca8a04', marginBottom: '12px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#facc15', marginBottom: '12px' }}>
                   Sản phẩm: {prod.name}
                 </div>
 
@@ -7796,10 +7796,10 @@ const goView = (view) => {
                           <div
                             key={r.key || r.id}
                             onClick={() => pickSerial(r)}
-                            style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', border: on ? '1px solid #ca8a04' : '1px solid #e2e8f0', background: on ? '#fef9c3' : '#fff', display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px' }}
+                            style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', border: on ? '1px solid #facc15' : '1px solid #e2e8f0', background: on ? '#fef9c3' : '#fff', display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px' }}
                           >
                             <span>
-                              <b style={{ color: '#ca8a04' }}>{r.chassis || '-'}</b>
+                              <b style={{ color: '#facc15' }}>{r.chassis || '-'}</b>
                               <span style={{ color: '#64748b' }}> / {r.frame || '-'}</span>
                               {r.color ? <span style={{ color: '#64748b' }}> · {r.color}</span> : null}
                             </span>
@@ -7883,7 +7883,7 @@ const goView = (view) => {
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     onClick={() => setActiveChassisProduct(null)}
-                    style={{ padding: '8px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                    style={{ padding: '8px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                   >
                     Xong
                   </button>
@@ -7920,7 +7920,7 @@ const goView = (view) => {
               type="button"
               onClick={() => startScan(unitIdx, field)}
               title="Chụp ảnh để đọc mã"
-              style={{ height: '30px', width: '34px', flexShrink: 0, background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+              style={{ height: '30px', width: '34px', flexShrink: 0, background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
             >📷</button>
           );
           const chip = { background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '4px 10px', borderRadius: '14px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' };
@@ -7933,7 +7933,7 @@ const goView = (view) => {
                   <button onClick={closeSerial} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer' }}>✕</button>
                 </div>
 
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ca8a04', marginBottom: '8px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#facc15', marginBottom: '8px' }}>
                   Sản phẩm: {item.name} — số lượng {qty}
                 </div>
 
@@ -7961,7 +7961,7 @@ const goView = (view) => {
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {scanState.candidates.map((c) => (
                                 <button key={c.v} type="button" onClick={() => applyScan(c.v)} style={chip}>
-                                  {c.v}{c.tag ? <small style={{ fontWeight: 'normal', color: '#ca8a04' }}> ({c.tag})</small> : null}
+                                  {c.v}{c.tag ? <small style={{ fontWeight: 'normal', color: '#facc15' }}> ({c.tag})</small> : null}
                                 </button>
                               ))}
                             </div>
@@ -8004,7 +8004,7 @@ const goView = (view) => {
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={closeSerial} style={{ padding: '8px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xong</button>
+                  <button onClick={closeSerial} style={{ padding: '8px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Xong</button>
                 </div>
               </div>
             </div>
@@ -8038,7 +8038,7 @@ const goView = (view) => {
               </div>
 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button onClick={captureFrame} disabled={!!camErr} style={{ flex: '1 1 160px', height: '42px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', opacity: camErr ? 0.5 : 1 }}>📸 Chụp & đọc chữ</button>
+                <button onClick={captureFrame} disabled={!!camErr} style={{ flex: '1 1 160px', height: '42px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', opacity: camErr ? 0.5 : 1 }}>📸 Chụp & đọc chữ</button>
                 {torchOk && (
                   <button onClick={toggleTorch} style={{ height: '42px', padding: '0 14px', background: torchOn ? '#facc15' : '#334155', color: torchOn ? '#000' : '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>🔦 {torchOn ? 'Tắt đèn' : 'Bật đèn'}</button>
                 )}
@@ -8161,7 +8161,7 @@ const goView = (view) => {
                               <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán.</td></tr>
                             ) : rows.map((r) => (
                               <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                <td style={{ padding: '8px', fontWeight: 'bold', color: '#ca8a04' }}>{r.code}</td>
+                                <td style={{ padding: '8px', fontWeight: 'bold', color: '#facc15' }}>{r.code}</td>
                                 <td style={{ padding: '8px' }}>{r.date ? new Date(r.date).toLocaleDateString('vi-VN') : '---'}</td>
                                 <td style={{ padding: '8px' }}>
                                   <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: r.type === 'IN' ? '#dcfce7' : '#fee2e2', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>
@@ -8336,7 +8336,7 @@ const goView = (view) => {
           <div style={overlayStyle}>
             <div className="cust-modal" style={{ background: '#fff', width: '900px', maxHeight: '90vh', borderRadius: '12px', padding: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                <h3 style={{ margin: 0, color: '#ca8a04' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
+                <h3 style={{ margin: 0, color: '#facc15' }}>Thống kê khách hàng: {selectedCustomerDetail.name} ({selectedCustomerDetail.code})</h3>
                 <button onClick={() => setShowCustomerDetailModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
               </div>
 
@@ -8348,7 +8348,7 @@ const goView = (view) => {
 
               <div className="cust-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
                 <div style={statBoxStyle}>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#ca8a04' }}>{getCustomerOrderRows().length}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#facc15' }}>{getCustomerOrderRows().length}</div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Đơn hàng</div>
                 </div>
                 <div style={statBoxStyle}>
@@ -8431,7 +8431,7 @@ const goView = (view) => {
                           <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>Chưa có lịch sử thanh toán nào.</td></tr>
                         ) : rows.map((r) => (
                           <tr key={r.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#ca8a04' }}>{r.code}</td>
+                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#facc15' }}>{r.code}</td>
                             <td style={{ padding: '10px' }}>{r.date ? new Date(r.date).toLocaleDateString('vi-VN') : '---'}</td>
                             <td style={{ padding: '10px' }}>
                               <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: r.type === 'IN' ? '#dcfce7' : '#fee2e2', color: r.type === 'IN' ? '#16a34a' : '#dc2626' }}>
@@ -8526,7 +8526,7 @@ const goView = (view) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px', color: '#334155' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#64748b' }}>Mã Giao Dịch:</span>
-                  <strong style={{ color: '#ca8a04' }}>{selectedCashItem.code}</strong>
+                  <strong style={{ color: '#facc15' }}>{selectedCashItem.code}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#64748b' }}>Loại Giao Dịch:</span>
@@ -8569,7 +8569,7 @@ const goView = (view) => {
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
                 <button
                   onClick={() => setSelectedCashItem(null)}
-                  style={{ padding: '8px 20px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                  style={{ padding: '8px 20px', background: '#facc15', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
                   Đóng
                 </button>
@@ -8641,7 +8641,7 @@ const menuGroupTitleStyle = { fontSize: '13px', fontWeight: 800, color: '#e2e8f0
 const menuDividerStyle = { border: 0, borderTop: '1px solid #475569', margin: '14px 0' };
 const menuBtnStyle = (active) => ({
   width: '100%', padding: '9px 14px', textAlign: 'left',
-  background: active ? '#ca8a04' : 'transparent', color: '#fff',
+  background: active ? '#facc15' : 'transparent', color: '#fff',
   border: 'none', borderRadius: '8px', cursor: 'pointer',
   fontSize: '14px', fontWeight: active ? 'bold' : 'normal',
   display: 'flex', alignItems: 'center', gap: '10px',
