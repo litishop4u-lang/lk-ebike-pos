@@ -6,12 +6,153 @@ const json = (data, status = 200, origin = '*') =>
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
   });
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
+}
+
+// ===== ĐĂNG NHẬP (Web Crypto, không cần thư viện) =====
+const te = new TextEncoder();
+const toB64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromB64u = (s) => Uint8Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const sameBytes = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i]; return d === 0; };
+
+async function pbkdf2(secret, salt) {
+  const k = await crypto.subtle.importKey('raw', te.encode(secret), 'PBKDF2', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, k, 256));
+}
+async function hashSecret(secret) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return toB64u(salt) + '$' + toB64u(await pbkdf2(secret, salt));
+}
+async function verifySecret(secret, stored) {
+  const [s, h] = String(stored || '').split('$');
+  if (!s || !h) return false;
+  return sameBytes(await pbkdf2(secret, fromB64u(s)), fromB64u(h));
+}
+
+const hmacKey = (secret) => crypto.subtle.importKey('raw', te.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+async function signToken(payload, secret) {
+  const p = toB64u(te.encode(JSON.stringify(payload)));
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), te.encode(p));
+  return p + '.' + toB64u(sig);
+}
+async function verifyToken(token, secret) {
+  try {
+    const [p, s] = String(token || '').split('.');
+    if (!p || !s) return null;
+    if (!(await crypto.subtle.verify('HMAC', await hmacKey(secret), fromB64u(s), te.encode(p)))) return null;
+    const data = JSON.parse(new TextDecoder().decode(fromB64u(p)));
+    return data.exp > Date.now() / 1000 ? data : null;
+  } catch (e) { return null; }
+}
+
+async function requireAuth(request, env) {
+  if (!env.JWT_SECRET) throw new HttpError(500, 'Server chưa cấu hình JWT_SECRET');
+  const user = await verifyToken((request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''), env.JWT_SECRET);
+  if (!user) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
+  return user;
+}
+
+let authReady = false;
+async function ensureAuthSchema(db) {
+  if (authReady) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    recovery_hash TEXT NOT NULL,
+    created_at TEXT
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS auth_attempts (
+    key TEXT PRIMARY KEY, count INTEGER NOT NULL, first_at INTEGER NOT NULL
+  )`).run();
+  authReady = true;
+}
+
+// Chống dò mật khẩu: sai quá 8 lần trong 15 phút thì khóa tạm
+async function checkRate(db, key) {
+  const r = await db.prepare('SELECT count, first_at FROM auth_attempts WHERE key = ?').bind(key).first();
+  if (r && Date.now() - r.first_at < 15 * 60 * 1000 && r.count >= 8)
+    throw new HttpError(429, 'Thử sai quá nhiều lần, hãy đợi 15 phút rồi thử lại.');
+}
+async function noteFail(db, key) {
+  const now = Date.now();
+  const r = await db.prepare('SELECT count, first_at FROM auth_attempts WHERE key = ?').bind(key).first();
+  if (!r || now - r.first_at >= 15 * 60 * 1000)
+    await db.prepare('INSERT INTO auth_attempts (key, count, first_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count = 1, first_at = excluded.first_at').bind(key, now).run();
+  else
+    await db.prepare('UPDATE auth_attempts SET count = count + 1 WHERE key = ?').bind(key).run();
+}
+const clearFail = (db, key) => db.prepare('DELETE FROM auth_attempts WHERE key = ?').bind(key).run();
+
+const newRecoveryCode = () => {
+  const hex = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  return hex.match(/.{4}/g).join('-'); // AB12-CD34-EF56
+};
+
+// Xử lý /api/auth/*
+async function handleAuth(request, env, origin, pathname, method) {
+  const db = env.DB;
+  await ensureAuthSchema(db);
+  const ip = request.headers.get('CF-Connecting-IP') || 'ip';
+
+  // Tạo tài khoản đầu tiên (chỉ chạy được khi chưa có tài khoản nào, cần SETUP_KEY)
+  if (pathname === '/api/auth/setup' && method === 'POST') {
+    const b = await request.json();
+    if (!env.SETUP_KEY || b.key !== env.SETUP_KEY) throw new HttpError(403, 'Sai khóa cài đặt');
+    const n = await db.prepare('SELECT COUNT(*) AS n FROM users').first();
+    if (n?.n > 0) throw new HttpError(409, 'Đã có tài khoản, không thể tạo thêm bằng cách này');
+    const username = str(b.username);
+    if (!username || str(b.password).length < 6) throw new HttpError(400, 'Cần tên đăng nhập và mật khẩu từ 6 ký tự');
+    const code = newRecoveryCode();
+    await db.prepare('INSERT INTO users (username, password_hash, recovery_hash, created_at) VALUES (?,?,?,?)')
+      .bind(username, await hashSecret(String(b.password)), await hashSecret(code), new Date().toISOString()).run();
+    return json({ success: true, username, recovery_code: code }, 201, origin);
+  }
+
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    if (!env.JWT_SECRET) throw new HttpError(500, 'Server chưa cấu hình JWT_SECRET');
+    const b = await request.json();
+    const username = str(b.username);
+    const rk = ip + '|login|' + username.toLowerCase();
+    await checkRate(db, rk);
+    const u = await db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').bind(username).first();
+    if (!u || !(await verifySecret(String(b.password || ''), u.password_hash))) {
+      await noteFail(db, rk);
+      throw new HttpError(400, 'Sai tên đăng nhập hoặc mật khẩu.');
+    }
+    await clearFail(db, rk);
+    const days = b.remember ? 30 : 1;
+    const token = await signToken({ id: u.id, username: u.username, exp: Math.floor(Date.now() / 1000) + days * 86400 }, env.JWT_SECRET);
+    return json({ token, user: { id: u.id, username: u.username } }, 200, origin);
+  }
+
+  if (pathname === '/api/auth/reset-password' && method === 'POST') {
+    const b = await request.json();
+    const username = str(b.username);
+    const rk = ip + '|reset|' + username.toLowerCase();
+    await checkRate(db, rk);
+    const u = await db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').bind(username).first();
+    if (!u || !(await verifySecret(str(b.recovery_code).toUpperCase(), u.recovery_hash))) {
+      await noteFail(db, rk);
+      throw new HttpError(400, 'Tên đăng nhập hoặc mã khôi phục không đúng.');
+    }
+    if (String(b.new_password || '').length < 6) throw new HttpError(400, 'Mật khẩu mới phải từ 6 ký tự.');
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashSecret(String(b.new_password)), u.id).run();
+    await clearFail(db, rk);
+    return json({ success: true }, 200, origin);
+  }
+
+  if (pathname === '/api/auth/me' && method === 'GET') {
+    const user = await requireAuth(request, env);
+    return json({ user: { id: user.id, username: user.username } }, 200, origin);
+  }
+
+  return json({ error: 'Không tìm thấy API' }, 404, origin);
 }
 
 // ===== Helpers =====
@@ -854,7 +995,13 @@ export default {
     if (method === 'OPTIONS') return json(null, 204, origin);
 
     try {
+      // Đăng nhập / đặt lại mật khẩu: không cần token
+      if (pathname.startsWith('/api/auth/')) return await handleAuth(request, env, origin, pathname, method);
+      // Mọi API còn lại bắt buộc có đăng nhập
+      if (pathname.startsWith('/api/')) await requireAuth(request, env);
+
       if (pathname.startsWith('/api/')) await ensureCustomerCodes(db);
+      
       if (pathname.startsWith('/api/purchase_orders')) await ensureUnitSchema(db);
       if (pathname.startsWith('/api/purchase_orders') || pathname.startsWith('/api/cash-book')) await ensurePrepaySchema(db);
       // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
