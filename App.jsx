@@ -1809,7 +1809,13 @@ useEffect(() => {
             .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
-            .totals { width: 350px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
+            .summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 40px; }
+            .warranty { flex: 1; border: 1px solid #94a3b8; border-radius: 6px; padding: 8px 10px; font-size: 10.5px; line-height: 1.4; color: #1e293b; box-sizing: border-box; }
+            .warranty h4 { margin: 0 0 4px 0; font-size: 11.5px; text-transform: uppercase; }
+            .warranty h5 { margin: 6px 0 2px 0; font-size: 11px; }
+            .warranty ul, .warranty ol { margin: 2px 0; padding-left: 16px; }
+            .warranty .sub { margin: 1px 0 1px 12px; font-style: italic; color: #475569; }
+            .totals { width: 350px; flex-shrink: 0; margin-bottom: 0; font-size: 13px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
             .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
             .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 30px; font-weight: bold; }
@@ -1863,11 +1869,35 @@ useEffect(() => {
             </tbody>
           </table>
 
-          <div class="totals">
-            <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
-            <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
-            <div><span>Đã thanh toán / Tạm ứng:</span> <b>${printPaidAmount.toLocaleString('vi-VN')} ₫</b></div>
-            <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
+            <div class="summary">
+            <div class="warranty">
+              <h4>Chính sách bảo hành</h4>
+              <h5>1. Chế độ bảo hành</h5>
+              <ul>
+                <li><b>Pin Lithium-ion / Ắc quy chì:</b> bảo hành 12 tháng.
+                  <div class="sub">Điều kiện chai pin: thường được đổi mới hoặc sửa chữa nếu dung lượng tối đa tụt xuống dưới 70% trong thời gian bảo hành.</div>
+                </li>
+                <li><b>Khung xe:</b> bảo hành 36 tháng (lỗi nứt, gãy, cong vênh do nhà sản xuất).</li>
+                <li><b>Động cơ (Motor):</b> bảo hành 12 tháng (lỗi chập cháy coil, hỏng nam châm, lỗi cảm biến hall...).</li>
+                <li><b>Bộ điều khiển (IC / ECU):</b> bảo hành 12 tháng.</li>
+                <li><b>Bộ sạc (Charger), màn hình đồng hồ:</b> bảo hành 3 tháng.</li>
+                <li><b>Phụ tùng hao mòn (phanh, lốp, giảm xóc, đèn, còi, dây điện):</b> không bảo hành (chỉ bảo hành lỗi kỹ thuật ngay khi bàn giao xe).</li>
+              </ul>
+              <h5>2. Trường hợp KHÔNG được bảo hành (từ chối bảo hành)</h5>
+              <ol>
+                <li>Xe bị ngập nước hoặc tự ý rửa xe áp lực cao xịt thẳng vào bo mạch / pin.</li>
+                <li>Tự ý độ / chế, thay đổi kết cấu điện, thay thế phụ tùng không chính hãng.</li>
+                <li>Sạc pin / ắc quy sai quy cách, dùng sạc không đúng thông số gây phồng / cháy nổ.</li>
+                <li>Hư hỏng do tai nạn, va đập mạnh, thiên tai.</li>
+              </ol>
+            </div>
+
+            <div class="totals">
+              <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
+              <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
+              <div><span>Đã thanh toán / Tạm ứng:</span> <b>${printPaidAmount.toLocaleString('vi-VN')} ₫</b></div>
+              <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
+            </div>
           </div>
 
           <div class="signatures">
