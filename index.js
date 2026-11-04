@@ -152,6 +152,18 @@ async function handleAuth(request, env, origin, pathname, method) {
     return json({ user: { id: user.id, username: user.username } }, 200, origin);
   }
 
+  if (pathname === '/api/auth/change-password' && method === 'POST') {
+  const user = await requireAuth(request, env);
+  const b = await request.json();
+  const u = await db.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
+  if (!u || !(await verifySecret(String(b.old_password || ''), u.password_hash)))
+    throw new HttpError(400, 'Mật khẩu hiện tại không đúng.');
+  if (String(b.new_password || '').length < 6) throw new HttpError(400, 'Mật khẩu mới phải từ 6 ký tự.');
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+    .bind(await hashSecret(String(b.new_password)), u.id).run();
+  return json({ success: true }, 200, origin);
+}
+  
   return json({ error: 'Không tìm thấy API' }, 404, origin);
 }
 
