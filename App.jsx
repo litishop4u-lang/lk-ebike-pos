@@ -433,6 +433,14 @@ class ErrorBoundary extends Component {
 const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
+/* ===== Giao diện tối: đảo màu toàn trang, giữ nguyên ảnh và thanh menu ===== */
+html.theme-dark { background: #fff; filter: invert(1) hue-rotate(180deg); }
+html.theme-dark img,
+html.theme-dark video,
+html.theme-dark canvas,
+html.theme-dark .sidebar,
+html.theme-dark .mobile-topbar { filter: invert(1) hue-rotate(180deg); }
+
 /* ===== Đồng bộ font bảng + tiêu đề các màn hình (giống mục Nhà cung cấp) ===== */
 .main-content > div:not([style*="position: fixed"]) table { font-size: 13px !important; }
 .main-content > div:not([style*="position: fixed"]) table th,
@@ -1450,6 +1458,15 @@ useEffect(() => {
       logoUrl: '' // Dán link ảnh logo vào đây hoặc để trống sẽ hiện chữ Brand
     };
   });
+
+  // Giao diện sáng / tối (lưu theo từng thiết bị)
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('app_theme') === 'dark' ? 'dark' : 'light'; } catch (e) { return 'light'; }
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+    try { localStorage.setItem('app_theme', theme); } catch (e) { /* bỏ qua */ }
+  }, [theme]);
 
   const asArray = (d) => (Array.isArray(d) ? d : []);
 
@@ -5700,6 +5717,29 @@ const goView = (view) => {
         {currentView === 'settings' && (
           <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', maxWidth: '700px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0, color: '#7c3aed', marginBottom: '20px' }}>⚙️ Cài đặt thông tin doanh nghiệp & Logo in hóa đơn</h2>
+
+            <div style={{ marginBottom: '20px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>Giao diện hiển thị</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { key: 'light', label: '☀️ Sáng' },
+                  { key: 'dark', label: '🌙 Tối' },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setTheme(t.key)}
+                    style={{
+                      padding: '9px 22px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold',
+                      border: '1px solid #7c3aed',
+                      background: theme === t.key ? '#7c3aed' : '#fff',
+                      color: theme === t.key ? '#fff' : '#7c3aed',
+                    }}
+                  >{t.label}</button>
+                ))}
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>Áp dụng ngay, không cần bấm "Lưu Thay Đổi". Chỉ ảnh hưởng thiết bị đang dùng.</div>
+            </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
               <div style={{ gridColumn: 'span 2' }}>
