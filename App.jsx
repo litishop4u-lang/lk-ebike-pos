@@ -6042,6 +6042,14 @@ const goView = (view) => {
               </div>
             </div>
 
+            <div style={{ margin: '20px 0', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>🔑 Đổi mật khẩu đăng nhập</div>
+                <input type="password" autoComplete="current-password" placeholder="Mật khẩu hiện tại" value={pw.old} onChange={(e) => setPw({ ...pw, old: e.target.value })} style={inputStyle} />
+                <input type="password" autoComplete="new-password" placeholder="Mật khẩu mới" value={pw.n1} onChange={(e) => setPw({ ...pw, n1: e.target.value })} style={inputStyle} />
+                <input type="password" autoComplete="new-password" placeholder="Nhập lại mật khẩu mới" value={pw.n2} onChange={(e) => setPw({ ...pw, n2: e.target.value })} style={inputStyle} />
+                <button type="button" onClick={changePassword} style={{ marginTop: '8px', padding: '9px 18px', background: '#eab308', color: '#1a1400', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đổi mật khẩu</button>
+              </div>
+            
             <button
               onClick={() => {
                 localStorage.setItem('company_info', JSON.stringify(companyInfo));
@@ -6050,13 +6058,7 @@ const goView = (view) => {
               }}
               style={{ padding: '12px 24px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}
             >
-              <div style={{ margin: '20px 0', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>🔑 Đổi mật khẩu đăng nhập</div>
-                <input type="password" autoComplete="current-password" placeholder="Mật khẩu hiện tại" value={pw.old} onChange={(e) => setPw({ ...pw, old: e.target.value })} style={inputStyle} />
-                <input type="password" autoComplete="new-password" placeholder="Mật khẩu mới" value={pw.n1} onChange={(e) => setPw({ ...pw, n1: e.target.value })} style={inputStyle} />
-                <input type="password" autoComplete="new-password" placeholder="Nhập lại mật khẩu mới" value={pw.n2} onChange={(e) => setPw({ ...pw, n2: e.target.value })} style={inputStyle} />
-                <button type="button" onClick={changePassword} style={{ marginTop: '8px', padding: '9px 18px', background: '#eab308', color: '#1a1400', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Đổi mật khẩu</button>
-              </div>
+              
               💾 Lưu Thay Đổi
             </button>
           </div>
