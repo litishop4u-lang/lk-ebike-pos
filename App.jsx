@@ -441,6 +441,23 @@ html.theme-dark canvas,
 html.theme-dark .sidebar,
 html.theme-dark .mobile-topbar { filter: invert(1) hue-rotate(180deg); }
 
+/* ===== Giao diện tối: chữ vàng sáng như cột "Chi phí" ===== */
+/* Chữ vàng (mã đơn, mã phiếu, tiêu đề...) */
+html.theme-dark [style*="color: rgb(202, 138, 4)"]:not([style*="background"]) {
+  color: #facc15 !important;
+  filter: invert(1) hue-rotate(180deg);
+}
+/* Nút nền vàng */
+html.theme-dark [style*="background: rgb(202, 138, 4)"] {
+  background: #facc15 !important;
+  color: #1a1a1a !important;
+  filter: invert(1) hue-rotate(180deg);
+}
+/* Menu trái đã được đảo lại sẵn, không đảo thêm lần nữa */
+html.theme-dark .sidebar [style*="rgb(202, 138, 4)"] {
+  filter: none !important;
+}
+
 /* ===== GIAO DIỆN SÁNG: nền phải trắng, menu trái xanh lá đậm ===== */
 html:not(.theme-dark) .layout,
 html:not(.theme-dark) .main-content { background: #ffffff !important; }
