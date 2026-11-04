@@ -802,8 +802,8 @@ function LoginScreen({ onLogin }) {
             <label style={S.label}>Tên đăng nhập</label>
             <input name="username" autoComplete="username" autoCapitalize="none" value={username} onChange={(e) => setUsername(e.target.value)} style={S.input} required />
 
-            <label style={S.label}>Mã khôi phục</label>
-            <input value={recovery} onChange={(e) => setRecovery(e.target.value.toUpperCase())} placeholder="VD: AB12-CD34-EF56" style={S.input} required />
+            <label style={S.label}>Mã khôi phục hoặc khóa cài đặt (SETUP_KEY)</label>
+            <input value={recovery} onChange={(e) => setRecovery(e.target.value)} placeholder="Nhập SETUP_KEY hoặc mã khôi phục" style={S.input} required />
 
             <label style={S.label}>Mật khẩu mới</label>
             <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={S.input} required />
