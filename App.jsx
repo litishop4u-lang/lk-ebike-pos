@@ -441,18 +441,18 @@ html.theme-dark canvas,
 html.theme-dark .sidebar,
 html.theme-dark .mobile-topbar { filter: invert(1) hue-rotate(180deg); }
 
-/* ===== Giao diện tối: giữ vàng sáng ===== */
-html.theme-dark [style*="color: rgb(202, 138, 4)"] {
-  color: #facc15 !important;
+/* ===== Giao diện tối: giữ vàng sáng #facc15 ===== */
+/* Chữ vàng (mã phiếu, số khung, tổng giá trị...) */
+html.theme-dark [style*="color: rgb(250, 204, 21)"]:not([style*="background"]) {
   filter: invert(1) hue-rotate(180deg);
 }
-html.theme-dark [style*="background: rgb(202, 138, 4)"] {
-  background: #facc15 !important;
+/* Nút nền vàng */
+html.theme-dark [style*="background: rgb(250, 204, 21)"] {
+  filter: invert(1) hue-rotate(180deg);
   color: #1a1a1a !important;
-  filter: invert(1) hue-rotate(180deg);
 }
-/* Menu trái đã tự đảo lại rồi, không đảo thêm */
-html.theme-dark .sidebar [style*="rgb(202, 138, 4)"] {
+/* Menu trái đã đảo lại sẵn, không đảo thêm */
+html.theme-dark .sidebar [style*="rgb(250, 204, 21)"] {
   filter: none !important;
 }
 
