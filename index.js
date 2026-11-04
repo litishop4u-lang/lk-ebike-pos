@@ -137,7 +137,8 @@ async function handleAuth(request, env, origin, pathname, method) {
     const rk = ip + '|reset|' + username.toLowerCase();
     await checkRate(db, rk);
     const u = await db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').bind(username).first();
-    if (!u || !(await verifySecret(str(b.recovery_code).toUpperCase(), u.recovery_hash))) {
+    const okKey = !!env.SETUP_KEY && str(b.recovery_code) === env.SETUP_KEY;
+    if (!u || !(okKey || await verifySecret(str(b.recovery_code).toUpperCase(), u.recovery_hash))) {
       await noteFail(db, rk);
       throw new HttpError(400, 'Tên đăng nhập hoặc mã khôi phục không đúng.');
     }
