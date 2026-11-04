@@ -299,12 +299,24 @@ const loadZxing = () => new Promise((resolve, reject) => {
   document.head.appendChild(s);
 });
 
-async function api(path, options) {
+const getToken = () => localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+const clearToken = () => { localStorage.removeItem('auth_token'); sessionStorage.removeItem('auth_token'); };
+
+async function api(path, options = {}) {
+  const token = getToken();
   const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      ...(options.headers || {}),
+    },
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    clearToken();
+    window.dispatchEvent(new Event('auth-expired')); // hết phiên -> về màn đăng nhập
+  }
   if (!res.ok) throw new Error(data.error || `Có lỗi xảy ra (${res.status})`);
   return data;
 }
@@ -690,15 +702,155 @@ html.theme-dark ::placeholder { color: var(--muted); opacity: 1; }
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 `;
+function LoginScreen({ onLogin }) {
+  const [mode, setMode] = useState('login'); // 'login' | 'forgot'
+  const [username, setUsername] = useState(() => localStorage.getItem('remember_user') || '');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [showPw, setShowPw] = useState(false);
+  const [recovery, setRecovery] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [newPw2, setNewPw2] = useState('');
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submitLogin = async (e) => {
+    e.preventDefault();
+    setErr(''); setOk(''); setBusy(true);
+    try {
+      const res = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: username.trim(), password, remember }) });
+      clearToken();
+      (remember ? localStorage : sessionStorage).setItem('auth_token', res.token);
+      if (remember) localStorage.setItem('remember_user', username.trim());
+      else localStorage.removeItem('remember_user');
+      onLogin(res.user);
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitReset = async (e) => {
+    e.preventDefault();
+    setErr(''); setOk('');
+    if (newPw.length < 6) return setErr('Mật khẩu mới phải từ 6 ký tự trở lên.');
+    if (newPw !== newPw2) return setErr('Hai lần nhập mật khẩu mới không giống nhau.');
+    setBusy(true);
+    try {
+      await api('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ username: username.trim(), recovery_code: recovery.trim(), new_password: newPw }) });
+      setOk('Đã đặt lại mật khẩu. Hãy đăng nhập bằng mật khẩu mới.');
+      setMode('login'); setPassword(''); setRecovery(''); setNewPw(''); setNewPw2('');
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const S = {
+    page: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box', background: 'linear-gradient(135deg,#0b1220,#14532d)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
+    card: { width: '100%', maxWidth: '400px', background: '#fff', borderRadius: '14px', padding: '28px 26px', boxShadow: '0 20px 40px rgba(0,0,0,.35)', boxSizing: 'border-box' },
+    label: { display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', margin: '12px 0 5px' },
+    input: { width: '100%', height: '42px', padding: '0 12px', fontSize: '16px', border: '1px solid #cbd5e1', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', color: '#0f172a' },
+    btn: { width: '100%', height: '44px', marginTop: '18px', background: '#eab308', color: '#1a1400', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 },
+    link: { background: 'none', border: 'none', color: '#a16207', fontWeight: 600, cursor: 'pointer', fontSize: '13px', padding: 0 },
+  };
+
+  return (
+    <div style={S.page}>
+      <div style={S.card}>
+        <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+          <div style={{ fontSize: '24px', fontWeight: 900, color: '#14532d' }}>LK Ebike POS</div>
+          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
+            {mode === 'login' ? 'Đăng nhập để tiếp tục' : 'Đặt lại mật khẩu'}
+          </div>
+        </div>
+
+        {ok && <div style={{ background: '#dcfce7', color: '#166534', padding: '8px 10px', borderRadius: '6px', fontSize: '13px', marginTop: '8px' }}>{ok}</div>}
+        {err && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '8px 10px', borderRadius: '6px', fontSize: '13px', marginTop: '8px' }}>{err}</div>}
+
+        {mode === 'login' ? (
+          <form onSubmit={submitLogin}>
+            <label style={S.label} htmlFor="lg-user">Tên đăng nhập</label>
+            <input id="lg-user" name="username" autoComplete="username" autoCapitalize="none" autoFocus
+              value={username} onChange={(e) => setUsername(e.target.value)} style={S.input} required />
+
+            <label style={S.label} htmlFor="lg-pass">Mật khẩu</label>
+            <div style={{ position: 'relative' }}>
+              <input id="lg-pass" name="password" type={showPw ? 'text' : 'password'} autoComplete="current-password"
+                value={password} onChange={(e) => setPassword(e.target.value)} style={{ ...S.input, paddingRight: '44px' }} required />
+              <button type="button" onClick={() => setShowPw(!showPw)} title={showPw ? 'Ẩn' : 'Hiện'}
+                style={{ position: 'absolute', right: '6px', top: '6px', height: '30px', width: '34px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }}>
+                {showPw ? '🙈' : '👁️'}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+              <label style={{ fontSize: '13px', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: '16px', height: '16px' }} />
+                Ghi nhớ đăng nhập
+              </label>
+              <button type="button" style={S.link} onClick={() => { setMode('forgot'); setErr(''); setOk(''); }}>Quên mật khẩu?</button>
+            </div>
+
+            <button type="submit" disabled={busy} style={S.btn}>{busy ? 'Đang đăng nhập...' : 'ĐĂNG NHẬP'}</button>
+          </form>
+        ) : (
+          <form onSubmit={submitReset}>
+            <label style={S.label}>Tên đăng nhập</label>
+            <input name="username" autoComplete="username" autoCapitalize="none" value={username} onChange={(e) => setUsername(e.target.value)} style={S.input} required />
+
+            <label style={S.label}>Mã khôi phục</label>
+            <input value={recovery} onChange={(e) => setRecovery(e.target.value.toUpperCase())} placeholder="VD: AB12-CD34-EF56" style={S.input} required />
+
+            <label style={S.label}>Mật khẩu mới</label>
+            <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={S.input} required />
+
+            <label style={S.label}>Nhập lại mật khẩu mới</label>
+            <input type="password" autoComplete="new-password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} style={S.input} required />
+
+            <button type="submit" disabled={busy} style={S.btn}>{busy ? 'Đang xử lý...' : 'ĐẶT LẠI MẬT KHẨU'}</button>
+            <div style={{ textAlign: 'center', marginTop: '12px' }}>
+              <button type="button" style={S.link} onClick={() => { setMode('login'); setErr(''); }}>← Quay lại đăng nhập</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Kiểm tra đăng nhập trước khi vào app
+function AuthGate() {
+  const [status, setStatus] = useState('checking'); // 'checking' | 'out' | 'in'
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const out = () => { setUser(null); setStatus('out'); };
+    window.addEventListener('auth-expired', out);
+    if (!getToken()) out();
+    else api('/api/auth/me').then((r) => { setUser(r.user); setStatus('in'); }).catch(out);
+    return () => window.removeEventListener('auth-expired', out);
+  }, []);
+
+  const logout = () => { clearToken(); setUser(null); setStatus('out'); };
+
+  if (status === 'checking') return <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Đang tải...</div>;
+  if (status === 'out') return <LoginScreen onLogin={(u) => { setUser(u); setStatus('in'); }} />;
+  return <AppMain user={user} onLogout={logout} />;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppMain />
+      <AuthGate />
     </ErrorBoundary>
   );
 }
 
-function AppMain() {
+function AppMain({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('dashboard'); // 'pos' | 'return-orders' | 'purchase-returns' | 'products' | 'suppliers' | 'purchases' | 'customers' | 'settings' | 'inventory-report' | 'cash-book' | 'profit-loss-report'
   const [sidebarOpen, setSidebarOpen] = useState(false); // menu trái trên điện thoại
   // ===== States cho Đơn hàng / Phiếu bán hàng (popup tạo đơn) =====
@@ -3475,6 +3627,13 @@ const goView = (view) => {
       </div>
     ))}
   </nav>
+  <div style={{ marginTop: '18px', paddingTop: '12px', borderTop: '1px solid #475569' }}>
+  <div style={{ fontSize: '12px', color: '#cbd5e1', margin: '0 0 8px 8px' }}>👤 {user?.username}</div>
+  <button
+    onClick={() => { if (confirm('Đăng xuất khỏi app?')) onLogout(); }}
+    style={{ width: '100%', padding: '9px 14px', textAlign: 'left', background: 'transparent', color: '#fca5a5', border: '1px solid #7f1d1d', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}
+  >🚪 Đăng xuất</button>
+</div>
 </aside>
 
       {/* Nội dung chính bên phải */}
