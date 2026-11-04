@@ -7461,7 +7461,7 @@ const goView = (view) => {
         {/* Sửa phiếu bán xuất từ đơn đặt hàng: hiện đơn nguồn */}
 {modalOrderType === 'invoices' && editingInvoiceId && linkedOrder && (
   <div style={{ background: '#fefce8', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fde68a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-    <div style={{ fontSize: '13px', color: '#854d0e' }}>
+    <div style={{ fontSize: '13px', color: '#facc15' }}>
       📝 Phiếu này được xuất từ đơn đặt hàng <b>{linkedOrder.code}</b>
       {' '}(ngày đặt {linkedOrder.created_at ? new Date(linkedOrder.created_at).toLocaleDateString('vi-VN') : '---'}, tạm ứng <b>{vnd(linkedOrder.paid_amount)}</b>)
     </div>
@@ -7923,7 +7923,7 @@ const goView = (view) => {
               style={{ height: '30px', width: '34px', flexShrink: 0, background: '#facc15', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
             >📷</button>
           );
-          const chip = { background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '4px 10px', borderRadius: '14px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' };
+          const chip = { background: '#fef9c3', color: '#facc15', border: '1px solid #fde047', padding: '4px 10px', borderRadius: '14px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' };
 
           return (
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200 }}>
