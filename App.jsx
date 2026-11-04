@@ -434,12 +434,28 @@ const RESPONSIVE_CSS = `
 .mobile-topbar, .sidebar-backdrop { display: none; }
 
 /* ===== Giao diện tối: đảo màu toàn trang, giữ nguyên ảnh và thanh menu ===== */
-html.theme-dark { background: #fff; filter: invert(1) hue-rotate(180deg); }
+html.theme-dark { background: #e6ebfb; filter: invert(1) hue-rotate(180deg); }
 html.theme-dark img,
 html.theme-dark video,
 html.theme-dark canvas,
 html.theme-dark .sidebar,
 html.theme-dark .mobile-topbar { filter: invert(1) hue-rotate(180deg); }
+
+/* ===== GIAO DIỆN SÁNG: nền phải trắng, menu trái xanh lá đậm ===== */
+html:not(.theme-dark) .layout,
+html:not(.theme-dark) .main-content { background: #ffffff !important; }
+html:not(.theme-dark) .sidebar { background: #052e16 !important; }
+
+/* ===== GIAO DIỆN TỐI: nền phải + menu trái xanh navy đậm ===== */
+/* Lưu ý: vì cả trang bị đảo màu nên các màu "nền/thẻ" dưới đây là màu TRƯỚC khi đảo */
+html.theme-dark .layout,
+html.theme-dark .main-content { background: #e6ebfb !important; }       /* sau đảo ≈ #0f1424 */
+html.theme-dark [style*="background: rgb(255, 255, 255)"] { background: #dadff3 !important; }  /* thẻ/bảng/popup ≈ #1a1f33 */
+html.theme-dark [style*="background: rgb(248, 250, 252)"] { background: #d5daed !important; }  /* tiêu đề bảng, ô KPI ≈ #1f2437 */
+html.theme-dark .scroll-table thead th,
+html.theme-dark .pos-card thead th { background: #d5daed; }
+/* Menu trái đã được đảo ngược lại nên dùng màu thật */
+html.theme-dark .sidebar { background: #101830 !important; border-right: 1px solid #232b4a; }
 
 /* ===== Đồng bộ font bảng + tiêu đề các màn hình (giống mục Nhà cung cấp) ===== */
 .main-content > div:not([style*="position: fixed"]) table { font-size: 13px !important; }
@@ -3398,7 +3414,7 @@ const goView = (view) => {
       <div className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`} onClick={() => setSidebarOpen(false)} />
 
       {/* Thanh menu bên trái */}
-<aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: '260px', background: '#1e293b', color: '#fff', padding: '20px' }}>
+<aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: '220px', background: '#1e293b', color: '#fff', padding: '20px' }}>
   <h2 style={{ fontSize: '1.2rem', marginBottom: '20px', color: '#38bdf8' }}>LK Ebike POS</h2>
 
   <nav onClick={(e) => { if (e.target.closest('button')) setSidebarOpen(false); }} /* chọn mục xong tự ẩn menu trên điện thoại */>
