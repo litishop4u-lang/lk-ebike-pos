@@ -2029,6 +2029,18 @@ const changePassword = async () => {
       ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain; display: block;" />`
       : `<div style="text-align: center;"><h1 style="margin: 0; color: #16a34a; font-style: italic; font-size: 28px; font-weight: 900;">${companyInfo.brand}</h1><p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px; font-weight: bold;">${companyInfo.subtitle}</p></div>`;
 
+    const orderNoteHtml = isOrder
+      ? `<div class="order-note">
+          <h4>📦 LƯU Ý ĐẶT HÀNG:</h4>
+          <ul>
+            <li>Thời gian về hàng dự kiến: <b>30 - 40 ngày</b>.</li>
+            <li>Trong một số trường hợp khách quan (thủ tục hải quan, thời tiết hoặc gián đoạn vận chuyển), thời gian có thể kéo dài thêm (tối đa không quá 1 tháng) và shop sẽ báo trước cho bạn.</li>
+            <li>Trường hợp đơn hàng bị trễ so với dự kiến, nếu quý khách không đồng ý tiếp tục chờ thêm, shop cam kết sẽ hoàn trả 100% tiền cọc ngay lập tức.</li>
+            <li>Cảm ơn quý khách đã tin tưởng và đồng hành cùng shop! ❤️</li>
+          </ul>
+        </div>`
+      : '';
+    
     printWindow.document.write(`
       <html>
         <head>
@@ -2051,7 +2063,12 @@ const changePassword = async () => {
             .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
-            .totals { width: 350px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
+            .summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 40px; }
+            .order-note { flex: 1; border: 1px solid #64748b; border-radius: 6px; padding: 8px 12px; font-size: 11.5px; line-height: 1.5; color: #1e293b; box-sizing: border-box; }
+            .order-note h4 { margin: 0 0 4px 0; font-size: 12.5px; }
+            .order-note ul { margin: 2px 0; padding-left: 18px; }
+            .order-note li { margin: 2px 0; }
+            .totals { width: 350px; flex-shrink: 0; margin-left: auto; margin-bottom: 0; font-size: 13px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
             .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
             .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 0; margin-bottom: 90px; }
@@ -2112,11 +2129,14 @@ const changePassword = async () => {
             </tbody>
           </table>
 
-          <div class="totals">
-            <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
-            <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
-            <div><span>Đã thanh toán / Tạm ứng:</span> <b>${printPaidAmount.toLocaleString('vi-VN')} ₫</b></div>
-            <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
+          <div class="summary">
+            ${orderNoteHtml}
+            <div class="totals">
+              <div><span>Tổng cộng:</span> <b>${grossTotal.toLocaleString('vi-VN')} ₫</b></div>
+              <div><span>Giảm giá tổng:</span> <b style="color: #dc2626;">-${totalDiscount.toLocaleString('vi-VN')} ₫</b></div>
+              <div><span>Đã thanh toán / Tạm ứng:</span> <b>${printPaidAmount.toLocaleString('vi-VN')} ₫</b></div>
+              <div class="final"><span>Còn nợ lại:</span> <span>${debtAmount.toLocaleString('vi-VN')} ₫</span></div>
+            </div>
           </div>
 
           <div class="signatures">
