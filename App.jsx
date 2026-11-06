@@ -2068,10 +2068,10 @@ const changePassword = async () => {
             .order-note h4 { margin: 0 0 4px 0; font-size: 12.5px; }
             .order-note ul { margin: 2px 0; padding-left: 18px; }
             .order-note li { margin: 2px 0; }
-            .totals { width: 350px; flex-shrink: 0; margin-left: auto; margin-bottom: 0; font-size: 13px; }
+            .totals { width: 350px; flex-shrink: 0; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
             .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
-            .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 0; margin-bottom: 90px; }
+            .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: -10px; margin-bottom: 90px; }
             .signatures div { width: 200px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
             .signatures b { display: block; font-size: 14px; font-weight: bold; color: #0f172a; }
             .signatures p { font-weight: normal; font-size: 12px; color: #64748b; font-style: italic; margin: 4px 0 0 0; }
@@ -2150,7 +2150,7 @@ const changePassword = async () => {
             </div>
           </div>
 
-                    <div class="warranty">
+        ${isOrder ? '' : `<div class="warranty">
             <h4>Chính sách bảo hành</h4>
             <h5>1. Chế độ bảo hành</h5>
             <ul>
@@ -2170,7 +2170,7 @@ const changePassword = async () => {
               <li>Sạc pin / ắc quy sai quy cách, dùng sạc không đúng thông số gây phồng / cháy nổ.</li>
               <li>Hư hỏng do tai nạn, va đập mạnh, thiên tai.</li>
             </ol>
-          </div>
+          </div>`}
 
           <div class="footer">
             Cảm ơn quý khách và hẹn gặp lại!
