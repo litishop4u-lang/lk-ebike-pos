@@ -544,8 +544,14 @@ html.theme-dark ::placeholder { color: var(--muted); opacity: 1; }
 .main-content > div:not([style*="position: fixed"]) table.compact-table td { padding: 7px 6px !important; }
 .pos-card thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
 /* Dòng "Tính giá nhập" đã khóa: ô nhập chuyển xám, không gõ được */
-.cost-locked { background: #f8fafc; }
-.cost-locked input:disabled { background: #f1f5f9 !important; color: #475569; cursor: not-allowed; }
+.cost-locked { background: var(--card2) !important; }
+.cost-locked input:disabled {
+  background: var(--page) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text);
+  opacity: 1;
+  cursor: not-allowed;
+}
 /* Bảng Tính giá nhập: ô gọn hơn (cần selector dài để thắng rule padding chung có !important) */
 .main-content > div:not([style*="position: fixed"]) table.cost-table th,
 .main-content > div:not([style*="position: fixed"]) table.cost-table td { padding: 6px 6px !important; }
