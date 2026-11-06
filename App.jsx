@@ -1992,8 +1992,15 @@ const changePassword = async () => {
       totalDiscount += discount;
 
       const productName = prod.product_name || prod.name || 'Sản phẩm';
-      const chassisText = prod.chassis_color
-        ? `<div style="font-size: 11px; color: #555; font-style: italic; margin-top: 2px;">Số khung/sườn & Màu: ${prod.chassis_color}</div>`
+      const det = parseItemDetails(prod.chassis_color);
+      const detParts = [
+        det.chassis ? `Số khung: ${det.chassis}` : '',
+        det.frame ? `Số máy: ${det.frame}` : '',
+        det.color ? `Màu: ${det.color}` : '',
+        det.note ? `Ghi chú: ${det.note}` : '',
+      ].filter(Boolean);
+      const chassisText = detParts.length
+        ? `<div style="font-size: 11px; color: #555; font-style: italic; margin-top: 2px;">${detParts.join(' | ')}</div>`
         : '';
 
       return `
@@ -2047,9 +2054,10 @@ const changePassword = async () => {
             .totals { width: 350px; margin-left: auto; margin-bottom: 40px; font-size: 13px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
             .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
-            .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 30px; font-weight: bold; }
-            .signatures div { width: 200px; }
-            .signatures p { font-weight: normal; font-size: 12px; color: #64748b; font-style: italic; margin-top: 4px; }
+            .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: 0; margin-bottom: 90px; }
+            .signatures div { width: 200px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+            .signatures b { display: block; font-size: 14px; font-weight: bold; color: #0f172a; }
+            .signatures p { font-weight: normal; font-size: 12px; color: #64748b; font-style: italic; margin: 4px 0 0 0; }
             .warranty { margin-top: 24px; border: 1px solid #64748b; border-radius: 6px; padding: 10px 14px; font-size: 12px; line-height: 1.5; color: #1e293b; page-break-inside: avoid; }
             .warranty h4 { margin: 0 0 6px 0; text-align: center; font-size: 13px; text-transform: uppercase; }
             .warranty h5 { margin: 8px 0 3px 0; font-size: 12px; }
@@ -2079,7 +2087,7 @@ const changePassword = async () => {
 
           <div class="info-grid">
             <div>
-              <p><b>Khách hàng:</b> ${printData.customer_name || 'Khách lẻ'}</p>
+              <p><b>Khách hàng:</b> <b style="font-size: 15px; color: #0f172a;">${printData.customer_name || 'Khách lẻ'}</b></p>
               <p><b>Địa chỉ:</b> ${printData.address || '—'}</p>
               <p><b>SĐT:</b> ${printData.customer_phone || '—'}</p>
             </div>
