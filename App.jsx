@@ -1705,6 +1705,13 @@ const changePassword = async () => {
 
   useEffect(() => { loadData(); }, []);
 
+    // Tên tab trình duyệt theo màn hình đang mở
+  useEffect(() => {
+    const item = MENU_GROUPS.flatMap((g) => g.items).find((it) => it.view === currentView);
+    const name = item ? item.label.replace(/^\S+\s*/, '') : '';
+    document.title = name ? `${name} · LK Ebike POS` : 'LK Ebike POS';
+  }, [currentView]);
+
     const loadOrderedProducts = async () => {
     setOrderedLoading(true);
     try {
