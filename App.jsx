@@ -2006,7 +2006,7 @@ const changePassword = async () => {
         det.note ? `Ghi chú: ${det.note}` : '',
       ].filter(Boolean);
       const chassisText = detParts.length
-        ? `<div style="font-size: 11px; color: #555; font-style: italic; margin-top: 2px;">${detParts.join(' | ')}</div>`
+        ? `<div style="font-size: 9px; color: #555; font-style: italic; margin-top: 2px;">${detParts.join(' | ')}</div>`
         : '';
 
       return `
@@ -2052,42 +2052,43 @@ const changePassword = async () => {
         <head>
           <title>${titleText} - ${codeText}</title>
           <style>
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 15px; font-size: 14px; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 15px; font-size: 10px; }
 
             /* Thu nhỏ khoảng cách dưới header */
             .header { display: flex; justify-content: space-between; align-items: stretch; border-bottom: none; padding-bottom: 0px; margin-bottom: 5px; }
 
             .brand-left { width: 33%; border: none; padding: 0; background: transparent; display: flex; align-items: center; justify-content: flex-start; box-sizing: border-box; }
             .company-right { width: 65%; border: none; padding: 0; background: transparent; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
-            .company-right h3 { margin: 0 0 4px 0; color: #2563eb; font-size: 16px; }
-            .company-right p { margin: 2px 0; font-size: 12px; color: #475569; }
+            .company-right h3 { margin: 0 0 4px 0; color: #2563eb; font-size: 12px; }
+            .company-right p { margin: 2px 0; font-size: 10px; color: #475569; }
 
             /* Dịch phần tiêu đề sát lên trên, thêm đường viền gạch ngang ngay phía trên tiêu đề */
             .title-area { text-align: center; margin-top: 0px; margin-bottom: 15px; border-top: 2px solid #cbd5e1; padding-top: 8px; }
-            .title-area h2 { margin: 0; font-size: 22px; text-transform: uppercase; color: #0f172a; }
-            .title-area p { margin: 3px 0 0 0; color: #64748b; font-size: 13px; }
-            .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
+            .title-area h2 { margin: 0; font-size: 15px; text-transform: uppercase; color: #0f172a; }
+            .title-area p { margin: 3px 0 0 0; color: #64748b; font-size: 10px; }
+            .info-grid { display: flex; justify-content: space-between; margin-bottom: 14px; font-size: 10px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th { background: #f1f5f9; padding: 10px 8px; text-align: left; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
+            th { background: #f1f5f9; padding: 6px 6px; text-align: left; font-size: 10px; border-bottom: 2px solid #cbd5e1; }
+            td { font-size: 10px; }
             .summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 40px; }
-            .order-note { flex: 1; border: 1px solid #64748b; border-radius: 6px; padding: 8px 12px; font-size: 11.5px; line-height: 1.5; color: #1e293b; box-sizing: border-box; }
-            .order-note h4 { margin: 0 0 4px 0; font-size: 12.5px; }
+            .order-note { flex: 1; border: 1px solid #64748b; border-radius: 6px; padding: 8px 12px; font-size: 10px; line-height: 1.5; color: #1e293b; box-sizing: border-box; }
+            .order-note h4 { margin: 0 0 4px 0; font-size: 10px; }
             .order-note ul { margin: 2px 0; padding-left: 18px; }
             .order-note li { margin: 2px 0; }
-            .totals { width: 350px; flex-shrink: 0; margin-left: auto; margin-bottom: 10px; font-size: 13px; }
+            .totals { width: 300px; flex-shrink: 0; margin-left: auto; margin-bottom: 10px; font-size: 10px; }
             .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
-            .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 15px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
+            .totals .final { border-top: 2px solid #0f172a; font-weight: bold; font-size: 11px; color: #dc2626; padding-top: 8px; margin-top: 5px; }
             .signatures { display: flex; justify-content: space-between; text-align: center; margin-top: -35px; margin-bottom: 90px; }
             .signatures div { width: 200px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
-            .signatures b { display: block; font-size: 14px; font-weight: bold; color: #0f172a; }
-            .signatures p { font-weight: normal; font-size: 12px; color: #64748b; font-style: italic; margin: 4px 0 0 0; }
-            .warranty { margin-top: 24px; border: 1px solid #64748b; border-radius: 6px; padding: 10px 14px; font-size: 12px; line-height: 1.5; color: #1e293b; page-break-inside: avoid; }
-            .warranty h4 { margin: 0 0 6px 0; text-align: center; font-size: 13px; text-transform: uppercase; }
-            .warranty h5 { margin: 8px 0 3px 0; font-size: 12px; }
+            .signatures b { display: block; font-size: 11px; font-weight: bold; color: #0f172a; }
+            .signatures p { font-weight: normal; font-size: 10px; color: #64748b; font-style: italic; margin: 4px 0 0 0; }
+            .warranty { margin-top: 24px; border: 1px solid #64748b; border-radius: 6px; padding: 10px 14px; font-size: 10px; line-height: 1.5; color: #1e293b; page-break-inside: avoid; }
+            .warranty h4 { margin: 0 0 6px 0; text-align: center; font-size: 11px; text-transform: uppercase; }
+            .warranty h5 { margin: 8px 0 3px 0; font-size: 10px; }
             .warranty ul, .warranty ol { margin: 2px 0; padding-left: 20px; }
             .warranty li { margin: 1px 0; }
             .warranty .sub { margin-top: 1px; font-style: italic; color: #475569; }
-            .footer { text-align: center; font-style: italic; color: #64748b; font-size: 12px; margin-top: 24px; border-top: 1px dashed #cbd5e1; padding-top: 15px; }
+            .footer { text-align: center; font-style: italic; color: #64748b; font-size: 10px; margin-top: 24px; border-top: 1px dashed #cbd5e1; padding-top: 15px; }
             @media print { body { padding: 0; } }
           </style>
         </head>
@@ -2110,7 +2111,7 @@ const changePassword = async () => {
 
           <div class="info-grid">
             <div>
-              <p><b>Khách hàng:</b> <b style="font-size: 15px; color: #0f172a;">${printData.customer_name || 'Khách lẻ'}</b></p>
+              <p><b>Khách hàng:</b> <b style="font-size: 11px; color: #0f172a;">${printData.customer_name || 'Khách lẻ'}</b></p>
               <p><b>Địa chỉ:</b> ${printData.address || '—'}</p>
               <p><b>SĐT:</b> ${printData.customer_phone || '—'}</p>
             </div>
