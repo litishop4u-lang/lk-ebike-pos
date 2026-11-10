@@ -711,9 +711,9 @@ async function buildInventoryReport(db, startDate, endDate) {
     let purQty = 0, purVal = 0, purAfterQty = 0;
     for (const i of pPur) {
       const q = n0(i.quantity);
-      if (!i.date || (i.date >= cleanStart && i.date <= cleanEnd)) {
+    if (!i.date || (i.date >= cleanStart && i.date <= cleanEnd)) {
         purQty += q;
-        purVal += n0(i.total) || q * openingUnitCost;
+        purVal += n0(i.total); // lấy đúng số trên phiếu nhập, kể cả bằng 0
       } else if (i.date > cleanEnd) {
         purAfterQty += q;
       }
@@ -757,7 +757,7 @@ async function buildInventoryReport(db, startDate, endDate) {
     const poolQty = Math.max(0, openingQty) + purQty - supQty;
     const poolVal = openingValRaw + purVal - supVal;
     let avgCost;
-    if (poolQty > 0 && poolVal > 0) avgCost = poolVal / poolQty;
+    if (poolQty > 0) avgCost = Math.max(0, poolVal) / poolQty; // pool có hàng mà giá trị 0 thì giá vốn = 0
     else if (purQty > 0 && purVal > 0) avgCost = purVal / purQty;
     else avgCost = openingUnitCost;
 
