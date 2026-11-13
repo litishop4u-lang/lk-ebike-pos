@@ -1315,6 +1315,7 @@ function AppMain({ user, onLogout }) {
   });
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [prepaySel, setPrepaySel] = useState([]);           // id các phiếu chi trả trước đã chọn
+  const [prepayAmt, setPrepayAmt] = useState({});           // id phiếu chi -> số tiền dùng cho phiếu nhập này
   const [prepaidApplied, setPrepaidApplied] = useState([]); // phiếu đã gắn sẵn vào phiếu nhập đang sửa
   // Nhập số khung / số sườn trong phiếu nhập (có chụp ảnh)
   const [serialEditIdx, setSerialEditIdx] = useState(null); // vị trí dòng sản phẩm trong phiếu nhập đang nhập số khung
@@ -2428,7 +2429,7 @@ const changePassword = async () => {
 
     pos.forEach((p) => {
       const full = (purchaseOrders || []).find((x) => x.id === p.id) || p;
-      const paid = Number(full.paid_amount) || 0;
+      const paid = (Number(full.paid_amount) || 0) - (Number(full.prepaid_total) || 0);
       if (paid > 0 && !usedCodes.has(p.code)) {
         rows.push({ key: 'p' + p.id, date: full.created_at || p.created_at, code: p.code, type: 'OUT', amount: paid, method: full.payment_method || '', note: 'Thanh toán khi nhập hàng', kind: 'po', ref: p });
       }
@@ -2670,6 +2671,7 @@ const changePassword = async () => {
       const appliedSum = applied.reduce((s, c) => s + (Number(c.amount) || 0), 0);
       setPrepaidApplied(applied);
       setPrepaySel(applied.map((c) => c.id));
+      setPrepayAmt(Object.fromEntries(applied.map((c) => [c.id, Number(c.amount) || 0])));
       loadCashBook();
       setPurchaseForm({
         supplier_id: details.supplier_id,
@@ -2713,7 +2715,7 @@ const changePassword = async () => {
         supplier_id: purchaseForm.supplier_id,
         payment_method: purchaseForm.payment_method,
         paid_amount: paidTotal,                 // gồm cả tiền trả trước
-        prepay_ids: prepaySel.filter((id) => getPrepayCandidates().some((c) => c.id === id)),
+        prepay: getPrepayCandidates().filter((c) => prepaySel.includes(c.id) && prepayUse(c) > 0).map((c) => ({ id: c.id, amount: prepayUse(c) })),
         created_at: purchaseForm.created_at,
         items: purchaseItems,
       }),
@@ -2759,19 +2761,21 @@ const changePassword = async () => {
   const updatePurchaseItem = (index, patch) =>
     setPurchaseItems((items) => items.map((it, idx) => (idx === index ? { ...it, ...patch } : it)));
 
-  // Phiếu chi trả trước của NCC đang chọn (chưa gắn phiếu nhập nào) + các phiếu đã gắn vào phiếu đang sửa
+   // Phiếu chi trả trước của NCC đang chọn. free = phần còn dùng được (tổng - phần đã dùng cho phiếu nhập khác)
   const getPrepayCandidates = () => {
     const sup = (suppliers || []).find((s) => String(s.id) === String(purchaseForm.supplier_id));
     if (!sup) return [];
-    const map = new Map();
-    (cashItems || []).forEach((c) => {
-      if (c.type === 'OUT' && c.reference_code === sup.code && String(c.category || '').includes('NCC')) map.set(c.id, c);
-    });
-    (prepaidApplied || []).forEach((c) => map.set(c.id, c));
-    return [...map.values()].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    const own = new Map((prepaidApplied || []).map((c) => [c.id, Number(c.amount) || 0])); // phần phiếu đang sửa đã dùng
+    return (cashItems || [])
+      .filter((c) => c.type === 'OUT' && c.reference_code === sup.code && String(c.category || '').includes('NCC'))
+      .map((c) => ({ ...c, free: (Number(c.amount) || 0) - (Number(c.allocated) || 0) + (own.get(c.id) || 0) }))
+      .filter((c) => c.free > 0.5)
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   };
+  // Số tiền thực dùng của 1 phiếu chi (không vượt quá phần còn lại)
+  const prepayUse = (c) => Math.min(Number(c.free) || 0, Math.max(0, Number(prepayAmt[c.id]) || 0));
   const getPrepaySum = () =>
-    getPrepayCandidates().filter((c) => prepaySel.includes(c.id)).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    getPrepayCandidates().filter((c) => prepaySel.includes(c.id)).reduce((s, c) => s + prepayUse(c), 0);
 
     // Ghi 1 ô số khung / số sườn của xe thứ unitIdx trong dòng sản phẩm itemIdx
   const setSerial = (itemIdx, unitIdx, field, value) =>
@@ -3037,7 +3041,7 @@ const productSuggestions = productKeyword ? visibleProducts.slice(0, 8) : [];
   if (!sid) return; // chỉ tính phiếu tham chiếu thẳng mã NCC (phiếu tự sinh đã nằm trong phiếu nhập)
   const d = String(c.created_at || '').slice(0, 10);
   if (rangeStart && (d < rangeStart || d > rangeEnd)) return;
-  const amt = Number(c.amount) || 0;
+  const amt = (Number(c.amount) || 0) - (c.type === 'OUT' ? (Number(c.allocated) || 0) : 0);
   const delta = c.type === 'IN' ? -amt : amt;
   const m = map[sid] || (map[sid] = { total: 0, paid: 0, debt: 0, count: 0 });
   m.paid += delta;
@@ -7424,19 +7428,41 @@ const goView = (view) => {
             <div style={{ fontSize: '12px', color: '#94a3b8' }}>Không có phiếu chi trả trước nào chưa được sử dụng.</div>
           ) : (
             <div style={{ maxHeight: '110px', overflowY: 'auto' }}>
-              {candidates.map((c) => (
-                <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', cursor: 'pointer', fontSize: '13px' }}>
-                  <input
-                    type="checkbox"
-                    checked={prepaySel.includes(c.id)}
-                    onChange={() => setPrepaySel((sel) => (sel.includes(c.id) ? sel.filter((x) => x !== c.id) : [...sel, c.id]))}
-                  />
-                  <b style={{ color: '#facc15' }}>{c.code}</b>
-                  <span style={{ color: '#64748b' }}>{c.created_at ? String(c.created_at).slice(0, 10).split('-').reverse().join('/') : ''}</span>
-                  <span style={{ fontWeight: 'bold', color: '#16a34a' }}>{vnd(c.amount)}</span>
-                  <span style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.note || ''}</span>
-                </label>
-              ))}
+                            {candidates.map((c) => {
+                const checked = prepaySel.includes(c.id);
+                return (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', fontSize: '13px', flexWrap: 'wrap' }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        if (checked) { setPrepaySel((sel) => sel.filter((x) => x !== c.id)); return; }
+                        const remain = Math.max(0, totalAmount - getPrepaySum()); // phần phiếu nhập còn thiếu
+                        setPrepaySel((sel) => [...sel, c.id]);
+                        setPrepayAmt((m) => ({ ...m, [c.id]: Math.min(c.free, remain) }));
+                      }}
+                    />
+                    <b style={{ color: '#facc15' }}>{c.code}</b>
+                    <span style={{ color: '#64748b' }}>{c.created_at ? String(c.created_at).slice(0, 10).split('-').reverse().join('/') : ''}</span>
+                    <span style={{ fontWeight: 'bold', color: '#16a34a' }}>còn {vnd(c.free)}</span>
+                    {c.free < (Number(c.amount) || 0) - 0.5 && <span style={{ color: '#64748b' }}>(tổng {vnd(c.amount)})</span>}
+                    {checked && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        → dùng:
+                        <input
+                          type="number"
+                          min="0"
+                          max={c.free}
+                          value={prepayAmt[c.id] ?? ''}
+                          onChange={(e) => setPrepayAmt((m) => ({ ...m, [c.id]: e.target.value }))}
+                          style={{ ...cCell, width: '110px', fontWeight: 'bold' }}
+                        />
+                      </span>
+                    )}
+                    <span style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '260px' }}>{c.note || ''}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
