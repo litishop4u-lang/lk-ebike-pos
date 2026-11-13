@@ -957,45 +957,69 @@ async function ensurePrepaySchema(db) {
   if (!(results || []).some((c) => c.name === 'prepaid_supplier')) {
     await db.prepare('ALTER TABLE cash_books ADD COLUMN prepaid_supplier TEXT').run();
   }
+  // Bảng ghi: phiếu nhập nào dùng bao nhiêu tiền của phiếu chi nào
+  await db.prepare(`CREATE TABLE IF NOT EXISTS prepay_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cash_book_id INTEGER NOT NULL,
+    purchase_code TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0
+  )`).run();
+  // Chuyển phiếu chi trả trước kiểu cũ (gắn nguyên phiếu) sang kiểu phân bổ theo số tiền
+  await db.batch([
+    db.prepare(`INSERT INTO prepay_allocations (cash_book_id, purchase_code, amount)
+                SELECT id, reference_code, amount FROM cash_books WHERE prepaid_supplier IS NOT NULL`),
+    db.prepare(`UPDATE cash_books SET reference_code = prepaid_supplier, prepaid_supplier = NULL
+                WHERE prepaid_supplier IS NOT NULL`),
+  ]);
   prepayReady = true;
 }
 
-// Kiểm tra các phiếu chi trả trước được chọn và dựng lệnh gắn chúng vào phiếu nhập poCode.
+// Kiểm tra các phiếu chi trả trước được chọn (rawList = [{ id, amount }]) và dựng lệnh ghi số tiền phiếu nhập poCode dùng.
 // Trả về { stmts, sum }: sum = tổng tiền trả trước (đã nằm trong paid_amount của phiếu nhập).
-async function buildPrepay(db, poCode, supplierId, rawIds, paidAmount) {
-  const ids = [...new Set((Array.isArray(rawIds) ? rawIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
-  if (!ids.length) return { stmts: [], sum: 0 };
+async function buildPrepay(db, poCode, supplierId, rawList, paidAmount) {
+  const want = new Map();
+  for (const x of Array.isArray(rawList) ? rawList : []) {
+    const id = Number(x && x.id);
+    const amt = money(x && x.amount);
+    if (Number.isInteger(id) && id > 0 && amt > 0) want.set(id, (want.get(id) || 0) + amt);
+  }
+  if (!want.size) return { stmts: [], sum: 0 };
+
   const sup = await db.prepare('SELECT code FROM suppliers WHERE id = ?').bind(supplierId).first();
   if (!sup) throw new HttpError(404, 'Nhà cung cấp không tồn tại');
 
+  const ids = [...want.keys()];
   const { results } = await db.prepare(
-    `SELECT id, code, type, amount, category, reference_code, prepaid_supplier FROM cash_books WHERE id IN (${placeholders(ids)})`
+    `SELECT id, code, type, amount, category, reference_code FROM cash_books WHERE id IN (${placeholders(ids)})`
   ).bind(...ids).all();
   const rows = results || [];
   if (rows.length !== ids.length) throw new HttpError(400, 'Có phiếu chi trả trước không còn tồn tại, vui lòng tải lại');
 
+  // Số tiền các phiếu chi này đã dùng cho CÁC PHIẾU NHẬP KHÁC
+  const used = (await db.prepare(
+    `SELECT cash_book_id, SUM(amount) AS used FROM prepay_allocations
+     WHERE cash_book_id IN (${placeholders(ids)}) AND purchase_code <> ? GROUP BY cash_book_id`
+  ).bind(...ids, poCode).all()).results || [];
+  const usedMap = new Map(used.map((r) => [r.cash_book_id, Number(r.used) || 0]));
+
   let sum = 0;
+  const stmts = [];
   for (const c of rows) {
-    // free: phiếu chi tới NCC này, chưa gắn phiếu nhập nào
-    const free = c.type === 'OUT' && c.reference_code === sup.code && !c.prepaid_supplier && String(c.category || '').includes('NCC');
-    // mine: đang gắn đúng phiếu nhập này (trường hợp sửa phiếu)
-    const mine = !!poCode && c.reference_code === poCode && c.prepaid_supplier === sup.code;
-    if (!free && !mine) throw new HttpError(400, `Phiếu chi ${c.code} không hợp lệ hoặc đã được dùng cho phiếu nhập khác`);
-    sum += Number(c.amount) || 0;
+    const ok = c.type === 'OUT' && c.reference_code === sup.code && String(c.category || '').includes('NCC');
+    if (!ok) throw new HttpError(400, `Phiếu chi ${c.code} không hợp lệ cho nhà cung cấp này`);
+    const free = (Number(c.amount) || 0) - (usedMap.get(c.id) || 0);
+    const amt = want.get(c.id);
+    if (amt > free + 0.5) throw new HttpError(400, `Phiếu chi ${c.code} chỉ còn dùng được ${Math.round(free).toLocaleString('vi-VN')} đ`);
+    sum += amt;
+    stmts.push(db.prepare('INSERT INTO prepay_allocations (cash_book_id, purchase_code, amount) VALUES (?,?,?)').bind(c.id, poCode, amt));
   }
   if (sum > paidAmount + 0.5) throw new HttpError(400, 'Tổng tiền trả trước đang lớn hơn số tiền đã thanh toán của phiếu nhập');
-
-  // Điều kiện reference_code = mã NCC: trong PUT, lệnh gỡ chạy trước nên phiếu đã quay về mã NCC
-  const stmts = ids.map((id) =>
-    db.prepare('UPDATE cash_books SET reference_code = ?, prepaid_supplier = ? WHERE id = ? AND reference_code = ?')
-      .bind(poCode, sup.code, id, sup.code));
   return { stmts, sum };
 }
 
-// Gỡ các phiếu chi trả trước khỏi phiếu nhập (trả về trạng thái "chưa dùng", gắn lại mã NCC)
+// Gỡ toàn bộ số tiền trả trước mà phiếu nhập này đã dùng (phiếu chi quay lại "còn dùng được")
 const releasePrepay = (db, poCode) =>
-  db.prepare('UPDATE cash_books SET reference_code = prepaid_supplier, prepaid_supplier = NULL WHERE reference_code = ? AND prepaid_supplier IS NOT NULL')
-    .bind(poCode);
+  db.prepare('DELETE FROM prepay_allocations WHERE purchase_code = ?').bind(poCode);
 
 export default {
   async fetch(request, env) {
@@ -1016,7 +1040,7 @@ export default {
       if (pathname.startsWith('/api/')) await ensureCustomerCodes(db);
       
       if (pathname.startsWith('/api/purchase_orders')) await ensureUnitSchema(db);
-      if (pathname.startsWith('/api/purchase_orders') || pathname.startsWith('/api/cash-book')) await ensurePrepaySchema(db);
+      if (pathname.startsWith('/api/')) await ensurePrepaySchema(db);
       // Đảm bảo bảng có cột chassis_color trước khi thao tác phiếu bán / đơn đặt hàng
       if (pathname.startsWith('/api/invoices') || pathname.startsWith('/api/orders')) {
         await ensureChassisColumns(db);
@@ -1706,7 +1730,10 @@ export default {
 
       // ===== 7. QUẢN LÝ THU CHI =====
       if (pathname === '/api/cash-book' && method === 'GET') {
-        const { results } = await db.prepare('SELECT * FROM cash_books ORDER BY id DESC').all();
+        const { results } = await db.prepare(
+          `SELECT cb.*, COALESCE((SELECT SUM(a.amount) FROM prepay_allocations a WHERE a.cash_book_id = cb.id), 0) AS allocated
+           FROM cash_books cb ORDER BY cb.id DESC`
+        ).all();
 
         let totalIn = 0;
         let totalOut = 0;
@@ -1750,17 +1777,18 @@ export default {
 
       if (is(/^\/api\/cash-book\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
-        const cb = await db.prepare('SELECT prepaid_supplier FROM cash_books WHERE id = ?').bind(id).first();
-        if (cb && cb.prepaid_supplier) throw new HttpError(409, 'Phiếu chi này đã được dùng cho một phiếu nhập. Hãy sửa phiếu nhập để gỡ ra trước.');
+        const usedAlloc = await db.prepare('SELECT COUNT(*) AS n FROM prepay_allocations WHERE cash_book_id = ?').bind(id).first();
+        if (usedAlloc?.n > 0) throw new HttpError(409, 'Phiếu chi này đã được dùng (một phần hoặc toàn bộ) cho phiếu nhập. Hãy sửa phiếu nhập để gỡ ra trước.');
         await db.prepare('DELETE FROM cash_books WHERE id = ?').bind(id).run();
         return json({ success: true }, 200, origin);
       }
 
       if (is(/^\/api\/cash-book\/\d+$/, 'PUT')) {
         const id = idOf(pathname);
-        const existing = await db.prepare('SELECT id, prepaid_supplier FROM cash_books WHERE id = ?').bind(id).first();
+        const existing = await db.prepare('SELECT id FROM cash_books WHERE id = ?').bind(id).first();
         if (!existing) throw new HttpError(404, 'Không tìm thấy phiếu thu chi');
-        if (existing.prepaid_supplier) throw new HttpError(409, 'Phiếu chi này đã được dùng cho một phiếu nhập. Hãy sửa phiếu nhập để gỡ ra trước.');
+        const usedAlloc = await db.prepare('SELECT COUNT(*) AS n FROM prepay_allocations WHERE cash_book_id = ?').bind(id).first();
+        if (usedAlloc?.n > 0) throw new HttpError(409, 'Phiếu chi này đã được dùng (một phần hoặc toàn bộ) cho phiếu nhập. Hãy sửa phiếu nhập để gỡ ra trước.');
 
         const b = await request.json();
         const type = b.type; // 'IN' hoặc 'OUT'
@@ -1986,12 +2014,13 @@ export default {
              FROM supplier_payments GROUP BY supplier_id) pay ON s.id = pay.supplier_id
   LEFT JOIN (SELECT supplier_id, SUM(total_amount) AS total_returned, SUM(COALESCE(received_amount, 0)) AS total_received
              FROM purchase_return_orders WHERE status LIKE '%Hoàn Thành%' GROUP BY supplier_id) rt ON s.id = rt.supplier_id
-  LEFT JOIN (SELECT reference_code,
-                    SUM(CASE WHEN type = 'OUT' THEN amount ELSE 0 END) AS cash_out,
-                    SUM(CASE WHEN type = 'IN' THEN amount ELSE 0 END) AS cash_in
+  LEFT JOIN (SELECT cash_books.reference_code AS reference_code,
+                    SUM(CASE WHEN cash_books.type = 'OUT' THEN cash_books.amount - COALESCE(al.used, 0) ELSE 0 END) AS cash_out,
+                    SUM(CASE WHEN cash_books.type = 'IN' THEN cash_books.amount ELSE 0 END) AS cash_in
              FROM cash_books
-             WHERE category LIKE '%NCC%'
-             GROUP BY reference_code) cb ON cb.reference_code = s.code
+             LEFT JOIN (SELECT cash_book_id, SUM(amount) AS used FROM prepay_allocations GROUP BY cash_book_id) al ON al.cash_book_id = cash_books.id
+             WHERE cash_books.category LIKE '%NCC%'
+             GROUP BY cash_books.reference_code) cb ON cb.reference_code = s.code
   ORDER BY s.id DESC
 `).all();
         return json(results || [], 200, origin);
@@ -2076,7 +2105,8 @@ export default {
       // ===== 4. PHIẾU NHẬP HÀNG =====
       if (pathname === '/api/purchase_orders' && method === 'GET') {
         const { results } = await db.prepare(`
-          SELECT po.*, s.name AS supplier_name
+          SELECT po.*, s.name AS supplier_name,
+                 COALESCE((SELECT SUM(a.amount) FROM prepay_allocations a WHERE a.purchase_code = po.code), 0) AS prepaid_total
           FROM purchase_orders po LEFT JOIN suppliers s ON po.supplier_id = s.id
           ORDER BY po.id DESC
         `).all();
@@ -2089,7 +2119,7 @@ export default {
         await checkUnitsUnique(db, po.units, null);
         const code = await nextCode(db, 'purchase_orders', 'PN', reqData.created_at);
         // Phiếu chi trả trước được chọn: gắn vào phiếu nhập này, không sinh thêm phiếu chi cho phần đó
-        const prepay = await buildPrepay(db, code, po.supplier_id, reqData.prepay_ids, po.paid_amount);
+        const prepay = await buildPrepay(db, code, po.supplier_id, reqData.prepay, po.paid_amount);
         const cashPaid = Math.max(0, po.paid_amount - prepay.sum);
 
         // Lấy chính xác ngày do người dùng chọn từ frontend gửi lên (nếu có), nếu không mới lấy ngày hiện tại
@@ -2140,7 +2170,7 @@ export default {
           FROM purchase_order_items poi LEFT JOIN products p ON poi.product_id = p.id
           WHERE poi.purchase_order_id = ?
         `).bind(id).all();
-                const unitRows = (await db.prepare('SELECT product_id, chassis, frame FROM chassis_units WHERE purchase_order_id = ? ORDER BY id').bind(id).all()).results || [];
+        const unitRows = (await db.prepare('SELECT product_id, chassis, frame FROM chassis_units WHERE purchase_order_id = ? ORDER BY id').bind(id).all()).results || [];
         const byProduct = new Map();
         for (const u of unitRows) {
           const key = String(u.product_id);
@@ -2154,7 +2184,9 @@ export default {
           return { ...it, serials };
         });
         const prepaid = (await db.prepare(
-          'SELECT id, code, amount, created_at, payment_method, note FROM cash_books WHERE reference_code = ? AND prepaid_supplier IS NOT NULL ORDER BY id'
+          `SELECT cb.id, cb.code, a.amount AS amount, cb.amount AS full_amount, cb.created_at, cb.payment_method, cb.note
+           FROM prepay_allocations a JOIN cash_books cb ON cb.id = a.cash_book_id
+           WHERE a.purchase_code = ? ORDER BY a.id`
         ).bind(po.code).all()).results || [];
         return json({ ...po, items: itemsWithSerials, prepaid }, 200, origin);
       }
@@ -2171,7 +2203,7 @@ export default {
         await checkUnitsUnique(db, po.units, id);
         const customDate = reqData.created_at || new Date().toISOString();
         // Kiểm tra trước (chỉ đọc), phiếu đang gắn đúng phiếu này vẫn được chấp nhận
-        const prepay = await buildPrepay(db, existing.code, po.supplier_id, reqData.prepay_ids, po.paid_amount);
+        const prepay = await buildPrepay(db, existing.code, po.supplier_id, reqData.prepay, po.paid_amount);
         const cashPaid = Math.max(0, po.paid_amount - prepay.sum);
 
         const oldItems = (await db.prepare('SELECT product_id, quantity FROM purchase_order_items WHERE purchase_order_id = ?').bind(id).all()).results || [];
