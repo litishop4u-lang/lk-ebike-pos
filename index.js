@@ -1815,6 +1815,55 @@ export default {
         return json({ success: true }, 200, origin);
       }
 
+            // ===== THANH TOÁN CÔNG NỢ NCC THEO TỪNG PHIẾU NHẬP =====
+      if (pathname === '/api/supplier-debt-payment' && method === 'POST') {
+        const b = await request.json();
+        const sup = await db.prepare('SELECT id, code, name FROM suppliers WHERE code = ?').bind(str(b.reference_code)).first();
+        if (!sup) throw new HttpError(400, 'Vui lòng chọn nhà cung cấp');
+
+        // Gộp các dòng trùng phiếu nhập
+        const want = new Map();
+        for (const a of Array.isArray(b.allocations) ? b.allocations : []) {
+          const poId = Number(a && a.po_id);
+          const amt = money(a && a.amount);
+          if (Number.isInteger(poId) && poId > 0 && amt > 0) want.set(poId, (want.get(poId) || 0) + amt);
+        }
+        if (!want.size) throw new HttpError(400, 'Chưa chọn phiếu nhập nào để thanh toán');
+
+        const payMethod = str(b.payment_method) || 'Chuyển khoản';
+        const payDate = str(b.created_at) || new Date().toISOString();
+        const baseCode = await nextCode(db, 'cash_books', 'TC', payDate);
+        const mm = /^(.*?)(\d+)$/.exec(baseCode);
+
+        const stmts = [];
+        let total = 0;
+        let k = 0;
+        for (const [poId, amt] of want) {
+          const po = await db.prepare('SELECT id, code, supplier_id, total, paid_amount FROM purchase_orders WHERE id = ?').bind(poId).first();
+          if (!po || Number(po.supplier_id) !== Number(sup.id)) throw new HttpError(400, 'Có phiếu nhập không thuộc nhà cung cấp này');
+          const debt = (Number(po.total) || 0) - (Number(po.paid_amount) || 0);
+          if (amt > debt + 0.5) throw new HttpError(400, `Phiếu ${po.code} chỉ còn nợ ${Math.round(debt).toLocaleString('vi-VN')} đ`);
+
+          // Cộng vào đã thanh toán của phiếu nhập (vế phải dùng giá trị cũ nên debt = total - paid cũ - amt)
+          stmts.push(
+            db.prepare('UPDATE purchase_orders SET paid_amount = paid_amount + ?1, debt = total - paid_amount - ?1 WHERE id = ?2').bind(amt, po.id)
+          );
+          // Phiếu chi, chứng từ = mã phiếu nhập (giống phiếu chi tự sinh khi nhập hàng)
+          const code = mm[1] + String(Number(mm[2]) + k).padStart(mm[2].length, '0');
+          k++;
+          stmts.push(
+            db.prepare(`
+              INSERT INTO cash_books (code, type, amount, category, payment_method, reference_code, note, created_at)
+              VALUES (?, 'OUT', ?, 'Mua hàng / Trả nợ NCC', ?, ?, ?, ?)
+            `).bind(code, amt, payMethod, po.code,
+              str(b.note) || `Thanh toán công nợ cho ${sup.name} theo phiếu ${po.code}`, payDate)
+          );
+          total += amt;
+        }
+        await db.batch(stmts);
+        return json({ success: true, total, count: want.size }, 201, origin);
+      }
+
       // ===== TRẢ HÀNG NHẬP =====
       if (pathname === '/api/purchase-returns' && method === 'GET') {
         await ensurePurchaseReturnSchema(db);
