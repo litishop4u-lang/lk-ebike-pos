@@ -1425,6 +1425,8 @@ function AppMain({ user, onLogout }) {
   const [cashTo, setCashTo] = useState('');
   const [cashPartnerSearch, setCashPartnerSearch] = useState('');
   const [showCashPartnerDrop, setShowCashPartnerDrop] = useState(false);
+  const [cashPoPay, setCashPoPay] = useState({}); // id phiếu nhập -> số tiền thanh toán công nợ (trong popup Thu chi)
+  useEffect(() => { if (!showCashModal) setCashPoPay({}); }, [showCashModal]);
 
   const loadCashBook = async () => {
     try {
@@ -2756,6 +2758,34 @@ const changePassword = async () => {
     } catch (err) {
       alert('Lỗi thêm nhà cung cấp: ' + err.message);
     }
+  };
+
+    // Công nợ còn lại của 1 phiếu nhập
+  function poDebtOf(po) {
+    return po.debt !== undefined && po.debt !== null
+      ? Number(po.debt) || 0
+      : (Number(po.total) || 0) - (Number(po.paid_amount) || 0);
+  }
+
+  // Mở popup phiếu chi sẵn dữ liệu để thanh toán công nợ của 1 phiếu nhập
+  const openPurchaseDebtPayment = (po) => {
+    const sup = (suppliers || []).find((s) => String(s.id) === String(po.supplier_id));
+    if (!sup) { alert('Không tìm thấy nhà cung cấp của phiếu nhập này.'); return; }
+    const debt = Math.round(poDebtOf(po));
+    if (debt <= 0) { alert('Phiếu nhập này không còn công nợ.'); return; }
+    setEditingCashId(null);
+    setCashPartnerSearch('');
+    setCashPoPay({ [po.id]: debt });
+    setCashForm({
+      type: 'OUT',
+      amount: debt,
+      category: 'Mua hàng / Trả nợ NCC',
+      payment_method: 'Chuyển khoản',
+      reference_code: sup.code,
+      note: `Thanh toán công nợ phiếu nhập ${po.code}`,
+      created_at: todayLocal(),
+    });
+    setShowCashModal(true);
   };
 
   const updatePurchaseItem = (index, patch) =>
@@ -5778,6 +5808,13 @@ const goView = (view) => {
                           </span>
                         </td>
                         <td style={{ ...cellStyle, textAlign: 'center' }}>
+                          {debtAmt > 0 && (
+                            <button
+                              onClick={() => openPurchaseDebtPayment(po)}
+                              title="Thanh toán công nợ còn thiếu cho nhà cung cấp"
+                              style={{ background: '#fef3c7', color: '#b45309', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px', fontWeight: 'bold', fontSize: '12px' }}
+                            >💵 Thanh toán nợ</button>
+                          )}
                           <button
                             onClick={async () => {
                               try {
@@ -7570,7 +7607,7 @@ const goView = (view) => {
           type="button"
           title="Bỏ chọn"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setCashForm({ ...cashForm, reference_code: '' })}
+          onClick={() => { setCashForm({ ...cashForm, reference_code: '' }); setCashPoPay({}); }}
           style={{ position: 'absolute', right: '6px', top: '26px', background: 'transparent', border: 'none', fontSize: '15px', cursor: 'pointer', color: '#64748b' }}
         >✕</button>
       )}
@@ -7582,7 +7619,7 @@ const goView = (view) => {
             <div
               key={x.id}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setCashForm({ ...cashForm, reference_code: x.code }); setShowCashPartnerDrop(false); }}
+              onClick={() => { setCashForm({ ...cashForm, reference_code: x.code }); setCashPoPay({}); setShowCashPartnerDrop(false); }}
               style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}
             >
               <b>{x.name}</b> <span style={{ color: '#64748b' }}>({x.code}){x.phone ? ` - ${x.phone}` : ''}</span>
@@ -7598,7 +7635,73 @@ const goView = (view) => {
     </div>
   );
 })()}
-
+              {/* Phiếu nhập còn nợ của nhà cung cấp đã chọn */}
+              {!editingCashId && cashForm.type === 'OUT' && cashForm.category === 'Mua hàng / Trả nợ NCC' && (() => {
+                const sup = (suppliers || []).find((s) => s.code === cashForm.reference_code);
+                if (!sup) return null;
+                const list = (purchaseOrders || [])
+                  .filter((po) => String(po.supplier_id) === String(sup.id) && poDebtOf(po) > 0.5)
+                  .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+                const applyPay = (next) => {
+                  setCashPoPay(next);
+                  const sum = Object.values(next).reduce((s, v) => s + (Number(v) || 0), 0);
+                  setCashForm((f) => ({ ...f, amount: sum || '' }));
+                };
+                const paySum = Object.values(cashPoPay).reduce((s, v) => s + (Number(v) || 0), 0);
+                return (
+                  <div style={{ marginBottom: '12px', border: '1px solid #fde68a', background: '#fefce8', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#a16207', marginBottom: '4px' }}>
+                      Phiếu nhập còn nợ của {sup.name} ({list.length})
+                      <span style={{ fontWeight: 'normal', color: '#64748b' }}> — tích chọn phiếu để thanh toán phần còn lại</span>
+                    </div>
+                    {list.length === 0 ? (
+                      <div style={{ fontSize: '12px', color: '#94a3b8' }}>Nhà cung cấp này không còn phiếu nhập nào đang nợ.</div>
+                    ) : (
+                      <div style={{ maxHeight: '170px', overflowY: 'auto' }}>
+                        {list.map((po) => {
+                          const debt = Math.round(poDebtOf(po));
+                          const checked = cashPoPay[po.id] !== undefined;
+                          return (
+                            <div key={po.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', fontSize: '13px', flexWrap: 'wrap' }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const next = { ...cashPoPay };
+                                  if (checked) delete next[po.id]; else next[po.id] = debt;
+                                  applyPay(next);
+                                }}
+                              />
+                              <b style={{ color: '#facc15' }}>{po.code}</b>
+                              <span style={{ color: '#64748b' }}>{po.created_at ? String(po.created_at).slice(0, 10).split('-').reverse().join('/') : ''}</span>
+                              <span style={{ color: '#64748b' }}>tổng {vnd(po.total)}</span>
+                              <span style={{ fontWeight: 'bold', color: '#dc2626' }}>còn nợ {vnd(debt)}</span>
+                              {checked && (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  → trả:
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={debt}
+                                    value={cashPoPay[po.id]}
+                                    onChange={(e) => applyPay({ ...cashPoPay, [po.id]: Math.min(debt, Math.max(0, Number(e.target.value) || 0)) })}
+                                    style={{ ...cCell, width: '110px', fontWeight: 'bold' }}
+                                  />
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {paySum > 0 && (
+                      <div style={{ fontSize: '12px', marginTop: '4px', color: '#166534' }}>
+                        Tổng thanh toán các phiếu đã chọn: <b>{vnd(paySum)}</b> (số tiền bên dưới tự cập nhật)
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Số tiền (VNĐ):</label>
                 <input
@@ -7648,7 +7751,35 @@ const goView = (view) => {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button onClick={() => setShowCashModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Hủy</button>
                 <button
-                  onClick={async () => {
+                    onClick={async () => {
+                    // Thanh toán công nợ theo từng phiếu nhập
+                    const alloc = (!editingCashId && cashForm.type === 'OUT' && cashForm.category === 'Mua hàng / Trả nợ NCC')
+                      ? Object.entries(cashPoPay).map(([id, a]) => ({ po_id: Number(id), amount: Number(a) || 0 })).filter((x) => x.amount > 0)
+                      : [];
+                    if (alloc.length > 0) {
+                      try {
+                        await api('/api/supplier-debt-payment', {
+                          method: 'POST',
+                          body: JSON.stringify({
+                            reference_code: cashForm.reference_code,
+                            payment_method: cashForm.payment_method,
+                            created_at: cashForm.created_at,
+                            note: cashForm.note,
+                            allocations: alloc,
+                          }),
+                        });
+                        setMsg({ type: 'ok', text: 'Đã thanh toán công nợ cho nhà cung cấp!' });
+                        setShowCashModal(false);
+                        setEditingCashId(null);
+                        setCashForm(newCashForm());
+                        loadCashBook();
+                        loadData();
+                      } catch (err) {
+                        alert('Lỗi: ' + err.message);
+                      }
+                      return;
+                    }
+
                     if (!cashForm.amount || Number(cashForm.amount) <= 0) {
                       alert('Vui lòng nhập số tiền hợp lệ!');
                       return;
