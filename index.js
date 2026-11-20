@@ -1020,6 +1020,48 @@ async function buildPrepay(db, poCode, supplierId, rawList, paidAmount) {
 // Gỡ toàn bộ số tiền trả trước mà phiếu nhập này đã dùng (phiếu chi quay lại "còn dùng được")
 const releasePrepay = (db, poCode) =>
   db.prepare('DELETE FROM prepay_allocations WHERE purchase_code = ?').bind(poCode);
+// ===== Khách hàng đồng thời là nhà cung cấp =====
+let custSupReady = false;
+async function ensureCustomerSupplierSchema(db) {
+  if (custSupReady) return;
+  const { results } = await db.prepare('PRAGMA table_info(customers)').all();
+  if (!(results || []).some((c) => c.name === 'supplier_id')) {
+    await db.prepare('ALTER TABLE customers ADD COLUMN supplier_id INTEGER').run();
+  }
+  custSupReady = true;
+}
+
+// Không cho gỡ nhà cung cấp đã có phiếu nhập
+async function assertSupplierUnused(db, supplierId) {
+  const used = await db.prepare('SELECT COUNT(*) AS n FROM purchase_orders WHERE supplier_id = ?').bind(supplierId).first();
+  if (used?.n > 0) throw new HttpError(409, 'Khách hàng này đã có phiếu nhập hàng với tư cách nhà cung cấp nên không thể bỏ tick "cũng là nhà cung cấp".');
+}
+
+// Tạo / cập nhật / gỡ nhà cung cấp gắn với khách hàng
+async function syncCustomerSupplier(db, customerId, isSupplier) {
+  const c = await db.prepare('SELECT * FROM customers WHERE id = ?').bind(customerId).first();
+  if (!c) return;
+  const linked = c.supplier_id ? await db.prepare('SELECT id FROM suppliers WHERE id = ?').bind(c.supplier_id).first() : null;
+  if (isSupplier) {
+    if (linked) {
+      await db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ? WHERE id = ?')
+        .bind(c.name, c.phone || null, c.address || null, linked.id).run();
+    } else {
+      const code = 'NCC-' + c.code;
+      let sup = await db.prepare('SELECT id FROM suppliers WHERE code = ?').bind(code).first();
+      if (!sup) {
+        const r = await db.prepare('INSERT INTO suppliers (code, name, phone, address, status) VALUES (?,?,?,?,?)')
+          .bind(code, c.name, c.phone || null, c.address || null, 'active').run();
+        sup = { id: r.meta?.last_row_id };
+      }
+      await db.prepare('UPDATE customers SET supplier_id = ? WHERE id = ?').bind(sup.id, c.id).run();
+    }
+  } else if (linked) {
+    await assertSupplierUnused(db, linked.id);
+    await db.prepare('DELETE FROM suppliers WHERE id = ?').bind(linked.id).run();
+    await db.prepare('UPDATE customers SET supplier_id = NULL WHERE id = ?').bind(c.id).run();
+  }
+}
 
 export default {
   async fetch(request, env) {
@@ -1038,6 +1080,7 @@ export default {
       if (pathname.startsWith('/api/')) await requireAuth(request, env);
 
       if (pathname.startsWith('/api/')) await ensureCustomerCodes(db);
+      if (pathname.startsWith('/api/')) await ensureCustomerSupplierSchema(db);
       
       if (pathname.startsWith('/api/purchase_orders')) await ensureUnitSchema(db);
       if (pathname.startsWith('/api/')) await ensurePrepaySchema(db);
@@ -1131,7 +1174,7 @@ export default {
 
         // 1. Lấy lịch sử Nhập hàng
         const importsRes = await db.prepare(`
-          SELECT po.code as purchase_code, po.created_at, sup.name as partner_name, poi.price, poi.quantity
+          SELECT po.id AS doc_id, po.code as purchase_code, po.created_at, sup.name as partner_name, poi.price, poi.quantity
           FROM purchase_order_items poi
           JOIN purchase_orders po ON poi.purchase_order_id = po.id
           LEFT JOIN suppliers sup ON po.supplier_id = sup.id
@@ -1140,7 +1183,7 @@ export default {
 
         // 2. Lấy lịch sử Bán hàng (Xuất kho)
         const exportsRes = await db.prepare(`
-          SELECT i.code as invoice_code, i.created_at, i.customer_name as partner_name, ii.price, ii.quantity
+          SELECT i.id AS doc_id, i.code as invoice_code, i.created_at, i.customer_name as partner_name, ii.price, ii.quantity
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE ii.product_id = ?
@@ -1148,7 +1191,7 @@ export default {
 
         // 3. Lấy lịch sử Khách trả hàng (Nhập lại kho)
         const returnsRes = await db.prepare(`
-          SELECT ro.code as return_code, COALESCE(ro.return_date, ro.created_at) as created_at,
+          SELECT ro.id AS doc_id, ro.code as return_code, COALESCE(ro.return_date, ro.created_at) as created_at,
                  ro.customer_name as partner_name, ro.status, roi.price, roi.quantity
           FROM return_order_items roi
           JOIN return_orders ro ON roi.return_order_id = ro.id
@@ -1160,7 +1203,9 @@ export default {
         // Đưa phiếu nhập vào (Số lượng dương)
         (importsRes.results || []).forEach(item => {
           transactions.push({
-            code: item.purchase_code || ('NK-' + item.id),
+            kind: 'purchase',
+            doc_id: item.doc_id,
+            code: item.purchase_code || ('NK-' + item.doc_id),
             date: item.created_at,
             partner: item.partner_name || 'Nhà cung cấp',
             import_price: Number(item.price) || 0,
@@ -1172,7 +1217,9 @@ export default {
         // Đưa phiếu xuất/bán vào (Số lượng âm)
         (exportsRes.results || []).forEach(item => {
           transactions.push({
-            code: item.invoice_code || ('HD-' + item.id),
+            kind: 'invoice',
+            doc_id: item.doc_id,
+            code: item.invoice_code || ('HD-' + item.doc_id),
             date: item.created_at,
             partner: item.partner_name || 'Khách lẻ',
             import_price: 0,
@@ -1185,6 +1232,8 @@ export default {
         (returnsRes.results || []).forEach(item => {
           if (!isCompletedReturn(item.status)) return;
           transactions.push({
+            kind: 'return',
+            doc_id: item.doc_id,
             code: item.return_code || 'TH',
             date: item.created_at,
             partner: item.partner_name || 'Khách lẻ',
@@ -1197,7 +1246,7 @@ export default {
         // Trả hàng cho NCC (xuất khỏi kho, số lượng âm)
         await ensurePurchaseReturnSchema(db);
         const supRetRes = await db.prepare(`
-          SELECT r.code, COALESCE(r.return_date, r.created_at) AS created_at, r.supplier_name, r.status, i.price, i.quantity
+          SELECT r.id AS doc_id, r.code, COALESCE(r.return_date, r.created_at) AS created_at, r.supplier_name, r.status, i.price, i.quantity
           FROM purchase_return_order_items i
           JOIN purchase_return_orders r ON i.return_id = r.id
           WHERE i.product_id = ?
@@ -1205,6 +1254,8 @@ export default {
         (supRetRes.results || []).forEach((item) => {
           if (!isCompletedReturn(item.status)) return;
           transactions.push({
+            kind: 'purchase-return',
+            doc_id: item.doc_id,
             code: item.code,
             date: item.created_at,
             partner: item.supplier_name || 'Nhà cung cấp',
@@ -2369,13 +2420,16 @@ export default {
         const name = str(b.name);
         if (!name) throw new HttpError(400, 'Thiếu tên khách hàng');
         const code = str(b.code) || genCode('KH');
+        let newId = null;
         try {
-          await db.prepare('INSERT INTO customers (code, name, phone, address) VALUES (?,?,?,?)')
+          const r = await db.prepare('INSERT INTO customers (code, name, phone, address) VALUES (?,?,?,?)')
             .bind(code, name, str(b.phone) || null, str(b.address) || null).run();
+          newId = r.meta?.last_row_id;
         } catch (err) {
           if (isUnique(err)) throw new HttpError(400, 'Trùng mã khách hàng');
           throw err;
         }
+        if (b.is_supplier && newId) await syncCustomerSupplier(db, newId, true);
         return json({ success: true, code }, 201, origin);
       }
 
@@ -2414,6 +2468,10 @@ export default {
         const current = await db.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
         if (!current) throw new HttpError(404, 'Không tìm thấy khách hàng');
 
+        // Không gửi is_supplier thì giữ nguyên trạng thái cũ
+        const wantSupplier = b.is_supplier === undefined ? !!current.supplier_id : !!b.is_supplier;
+        if (!wantSupplier && current.supplier_id) await assertSupplierUnused(db, current.supplier_id);
+
         const newCode = str(b.code) || current.code;
         const stmts = [
           db.prepare('UPDATE customers SET code = ?, name = ?, phone = ?, address = ? WHERE id = ?')
@@ -2434,15 +2492,19 @@ export default {
           if (isUnique(err)) throw new HttpError(400, 'Trùng mã khách hàng');
           throw err;
         }
+        await syncCustomerSupplier(db, id, wantSupplier);
         return json({ success: true }, 200, origin);
       }
-
       if (is(/^\/api\/customers\/\d+$/, 'DELETE')) {
         const id = idOf(pathname);
-        const c = await db.prepare('SELECT name, code FROM customers WHERE id = ?').bind(id).first();
+        const c = await db.prepare('SELECT name, code, supplier_id FROM customers WHERE id = ?').bind(id).first();
         if (!c) throw new HttpError(404, 'Không tìm thấy khách hàng');
         const used = await db.prepare('SELECT (SELECT COUNT(*) FROM invoices WHERE customer_code = ?1) + (SELECT COUNT(*) FROM orders WHERE customer_code = ?1) AS n').bind(c.code).first();
         if (used?.n > 0) throw new HttpError(409, 'Khách hàng đã có đơn hàng/phiếu bán nên không thể xóa');
+        if (c.supplier_id) {
+          await assertSupplierUnused(db, c.supplier_id);
+          await db.prepare('DELETE FROM suppliers WHERE id = ?').bind(c.supplier_id).run();
+        }
         await db.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
         return json({ success: true }, 200, origin);
       }
