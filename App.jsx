@@ -323,7 +323,7 @@ async function api(path, options = {}) {
 
 const EMPTY_PRODUCT = { sku: '', name: '', unit: 'Cái', import_price: 0, price: 0, wholesale_price: 0, stock: 0 };
 const EMPTY_SUPPLIER = { code: '', name: '', phone: '', address: '', status: 'active' };
-const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '' };
+const EMPTY_CUSTOMER = { code: '', name: '', phone: '', address: '', is_supplier: false };
 // Dùng hàm để ngày luôn là ngày hiện tại tại thời điểm mở form
 const newCashForm = () => ({
   type: 'OUT',
@@ -1967,7 +1967,15 @@ const changePassword = async () => {
       console.error('Lỗi tải thẻ kho:', err);
     }
   };
-
+    // Bấm mã phiếu trong thẻ kho -> mở chi tiết đúng chứng từ
+  const openStockDoc = (tx) => {
+    if (!tx.doc_id) return;
+    setSelectedProduct(null);
+    if (tx.kind === 'invoice') handleViewDetail('invoices', tx.doc_id);
+    else if (tx.kind === 'purchase') viewPurchaseFromSupplier({ id: tx.doc_id });
+    else if (tx.kind === 'return') { setCurrentView('return-orders'); loadReturnOrders(); handleViewReturn({ id: tx.doc_id }); }
+    else if (tx.kind === 'purchase-return') handleViewPr({ id: tx.doc_id });
+  };
   // === Hàm in phiếu / đơn ===
   const handlePrintOrder = async (item, isOrder = false) => {
     let printData = item;
@@ -5478,7 +5486,11 @@ const goView = (view) => {
                       ) : (
                         stockCardList.map((item, index) => (
                           <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '10px', fontWeight: '500', color: '#0284c7' }}>{item.code}</td>
+                            <td
+                              onClick={() => openStockDoc(item)}
+                              title="Bấm để xem chi tiết phiếu"
+                              style={{ padding: '10px', fontWeight: 'bold', color: '#0284c7', cursor: item.doc_id ? 'pointer' : 'default', textDecoration: item.doc_id ? 'underline' : 'none' }}
+                            >{item.code}</td>
                             <td style={{ padding: '10px' }}>{item.date ? item.date.slice(0, 10) : ''}</td>
                             <td style={{ padding: '10px' }}>{item.partner}</td>
                             <td style={{ padding: '10px', textAlign: 'right' }}>{item.import_price > 0 ? vnd(item.import_price) : '-'}</td>
@@ -6531,14 +6543,17 @@ const goView = (view) => {
                     customerRows.map((c) => (
                       <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.code}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>{c.name}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 'bold', color: '#0284c7', cursor: 'pointer' }} onClick={() => openCustomerDetail(c)}>
+                          {c.name}
+                          {c.supplier_id ? <span style={{ marginLeft: '6px', padding: '1px 7px', borderRadius: '10px', fontSize: '10.5px', background: '#fef3c7', color: '#d97706' }}>NCC</span> : null}
+                        </td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{c.phone || '-'}</td>
                         <td style={{ padding: '10px 12px', maxWidth: '220px', wordBreak: 'break-word' }}>{c.address || '-'}</td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{vnd(c.f_total)}</td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: '#16a34a' }}>{vnd(c.f_paid)}</td>
                         <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: c.f_debt > 0 ? '#dc2626' : '#16a34a', fontWeight: c.f_debt > 0 ? 'bold' : 'normal' }}>{vnd(c.f_debt)}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '' }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
+                          <button onClick={() => { setEditingCustomer(c); setCustomerForm({ code: c.code, name: c.name, phone: c.phone || '', address: c.address || '', is_supplier: !!c.supplier_id }); setShowCustomerModal(true); }} title="Sửa" style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '6px' }}>✏️</button>
                           <button onClick={() => handleDeleteCustomer(c.id, c.name)} title="Xóa" style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 8px', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
                         </td>
                       </tr>
@@ -8715,6 +8730,15 @@ const goView = (view) => {
                 <div style={{ marginBottom: '10px' }}><label>Tên khách hàng *:</label><input value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} style={inputStyle} required /></div>
                 <div style={{ marginBottom: '10px' }}><label>Số điện thoại:</label><input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} style={inputStyle} /></div>
                 <div style={{ marginBottom: '15px' }}><label>Địa chỉ:</label><input value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} style={inputStyle} /></div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!customerForm.is_supplier}
+                    onChange={(e) => setCustomerForm({ ...customerForm, is_supplier: e.target.checked })}
+                    style={{ width: '16px', height: '16px' }}
+                  />
+                  Khách hàng này cũng là nhà cung cấp
+                </label>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                   <button type="button" onClick={() => setShowCustomerModal(false)} style={{ padding: '8px 16px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
                   <button type="submit" style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Lưu</button>
