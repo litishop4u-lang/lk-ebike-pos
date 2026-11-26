@@ -9026,22 +9026,114 @@ const goView = (view) => {
   );
 }
 // ===== Popup xem phiếu trước khi in =====
+// Tải thư viện chụp ảnh (html2canvas) từ mạng, chỉ tải 1 lần khi cần
+const loadHtml2Canvas = () =>
+  new Promise((resolve, reject) => {
+    if (window.html2canvas) return resolve(window.html2canvas);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+    s.onload = () => resolve(window.html2canvas);
+    s.onerror = () => reject(new Error('Không tải được thư viện tạo ảnh, vui lòng kiểm tra mạng'));
+    document.head.appendChild(s);
+  });
+
 function PrintPreviewModal({ data, onClose }) {
   const frameRef = useRef(null);
+  const blobRef = useRef(null); // ảnh phiếu đã tạo sẵn, dùng chung cho 3 nút
   const [frameH, setFrameH] = useState(700);
+  const [busy, setBusy] = useState('');
+  const [toast, setToast] = useState('');
+
+  const say = (t) => { setToast(t); setTimeout(() => setToast(''), 4000); };
+
+  const bodyBox = () => {
+    const d = frameRef.current && frameRef.current.contentDocument;
+    if (!d || !d.body) return null;
+    const r = d.body.getBoundingClientRect();
+    return { d, w: Math.ceil(r.width), h: Math.ceil(r.height) };
+  };
 
   // Co chiều cao khung cho vừa nội dung phiếu
   const fitFrame = () => {
-    const d = frameRef.current && frameRef.current.contentDocument;
-    if (d && d.documentElement) setFrameH(d.documentElement.scrollHeight + 8);
+    const b = bodyBox();
+    if (b) setFrameH(b.h + 4);
   };
+
+  // Tạo ảnh PNG của phiếu (chỉ tạo 1 lần, lần sau dùng lại)
+  const getBlob = () => {
+    if (!blobRef.current) {
+      blobRef.current = (async () => {
+        const h2c = await loadHtml2Canvas();
+        const b = bodyBox();
+        if (!b) throw new Error('Phiếu chưa sẵn sàng, vui lòng thử lại');
+        const canvas = await h2c(b.d.body, {
+          scale: 2, backgroundColor: '#ffffff', useCORS: true,
+          width: b.w, height: b.h, windowWidth: b.w, windowHeight: b.h,
+        });
+        return await new Promise((res, rej) =>
+          canvas.toBlob((x) => (x ? res(x) : rej(new Error('Không tạo được ảnh'))), 'image/png'));
+      })();
+      blobRef.current.catch(() => { blobRef.current = null; });
+    }
+    return blobRef.current;
+  };
+
+  const run = async (label, fn) => {
+    if (busy) return;
+    setBusy(label);
+    try { await fn(); } catch (e) { alert('Lỗi: ' + (e && e.message ? e.message : e)); }
+    setBusy('');
+  };
+
+  const fileName = String(data.title || 'phieu').replace(/[\\/:*?"<>|]+/g, '-');
 
   const doPrint = () => {
     const w = frameRef.current && frameRef.current.contentWindow;
     if (w) { w.focus(); w.print(); }
   };
 
+  const doDownload = () => run('download', async () => {
+    const blob = await getBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    say('Đã tải ảnh về máy');
+  });
+
+  const copyImage = async () => {
+    if (!navigator.clipboard || !window.ClipboardItem) {
+      throw new Error('Trình duyệt không hỗ trợ chép ảnh (cần mở bằng https). Hãy dùng nút Tải ảnh.');
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': getBlob() })]);
+  };
+
+  const doCopy = () => run('copy', async () => {
+    await copyImage();
+    say('Đã chép ảnh, bạn có thể dán (Ctrl+V) vào nơi cần gửi');
+  });
+
+  const doZalo = () => run('zalo', async () => {
+    const blob = await getBlob();
+    const file = new File([blob], fileName + '.png', { type: 'image/png' });
+    // Điện thoại: mở bảng chia sẻ, chọn Zalo
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: data.title }); }
+      catch (e) { if (!e || e.name !== 'AbortError') throw e; }
+      return;
+    }
+    // Máy tính: chép ảnh rồi mở Zalo web, bạn chỉ cần dán vào khung chat
+    try { await copyImage(); say('Đã chép ảnh. Hãy dán (Ctrl+V) vào khung chat Zalo'); }
+    catch (e) { say('Không chép được ảnh. Hãy bấm Tải ảnh rồi gửi file qua Zalo'); }
+    window.open('https://chat.zalo.me', '_blank');
+  });
+
   const btn = { padding: '10px 18px', borderRadius: '8px', border: '1px solid #475569', background: 'transparent', color: '#fff', fontWeight: 600, fontSize: '15px', cursor: 'pointer' };
+  const zaloBtn = { ...btn, background: '#d03a00', border: '1px solid #d03a00' };
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.92)', zIndex: 20000, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -9051,14 +9143,20 @@ function PrintPreviewModal({ data, onClose }) {
             ref={frameRef}
             title={data.title}
             srcDoc={data.html}
-            onLoad={fitFrame}
+            onLoad={() => { fitFrame(); setTimeout(() => getBlob().catch(() => {}), 400); }}
             style={{ width: '100%', height: frameH + 'px', border: 'none', display: 'block' }}
           />
         </div>
       </div>
+      {toast && (
+        <div style={{ background: '#16a34a', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, marginTop: '8px', maxWidth: '90%', textAlign: 'center' }}>{toast}</div>
+      )}
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap', padding: '12px', width: '100%', maxWidth: '794px', boxSizing: 'border-box' }}>
         <button onClick={onClose} style={btn}>Đóng</button>
-        <button onClick={doPrint} style={{ ...btn, background: '#d03a00', border: '1px solid #d03a00' }}>In</button>
+        <button onClick={doDownload} disabled={!!busy} style={{ ...btn, opacity: busy ? 0.6 : 1 }}>{busy === 'download' ? 'Đang tạo ảnh...' : 'Tải ảnh'}</button>
+        <button onClick={doCopy} disabled={!!busy} style={{ ...btn, opacity: busy ? 0.6 : 1 }}>{busy === 'copy' ? 'Đang chép...' : 'Chép ảnh'}</button>
+        <button onClick={doPrint} style={btn}>In</button>
+        <button onClick={doZalo} disabled={!!busy} style={{ ...zaloBtn, opacity: busy ? 0.6 : 1 }}>{busy === 'zalo' ? 'Đang chuẩn bị...' : 'Gửi qua Zalo'}</button>
       </div>
     </div>
   );
