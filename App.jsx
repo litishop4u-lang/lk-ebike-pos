@@ -1990,11 +1990,7 @@ const changePassword = async () => {
       }
     }
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Vui lòng cho phép trình duyệt mở popup để in hóa đơn!');
-      return;
-    }
+    
 
     const titleText = isOrder ? 'ĐƠN ĐẶT HÀNG' : 'HÓA ĐƠN BÁN HÀNG';
     const codeText = printData.code || '---';
@@ -2065,7 +2061,7 @@ const changePassword = async () => {
         </div>`
       : '';
     
-    printWindow.document.write(`
+      const printHtml = `
       <html>
         <head>
           <title>${titleText} - ${codeText}</title>
@@ -2211,13 +2207,18 @@ const changePassword = async () => {
   </script>
         </body>
       </html>
-    `);
-    printWindow.document.close();
+    `;
+    // Bỏ đoạn script tự gọi in; việc in giờ do nút "In" trong popup đảm nhiệm
+    setPrintPreview({
+      title: `${titleText} - ${codeText}`,
+      html: printHtml.replace(/<script[\s\S]*?<\/script>/g, ''),
+    });
   };
 
   // 1. Hàm xem chi tiết đơn đặt hàng hoặc phiếu bán hàng
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailData, setDetailData] = useState(null);
+  const [printPreview, setPrintPreview] = useState(null); // { title, html } của phiếu đang xem trước khi in
 
   const handleViewDetail = async (type, id) => {
     try {
@@ -8719,7 +8720,8 @@ const goView = (view) => {
             </div>
           </div>
         )}
-
+        {/* POPUP XEM PHIẾU TRƯỚC KHI IN */}
+        {printPreview && <PrintPreviewModal data={printPreview} onClose={() => setPrintPreview(null)} />}
         {/* MODAL THÊM / SỬA KHÁCH HÀNG */}
         {showCustomerModal && (
           <div style={overlayStyle}>
@@ -9023,7 +9025,44 @@ const goView = (view) => {
     </div>
   );
 }
+// ===== Popup xem phiếu trước khi in =====
+function PrintPreviewModal({ data, onClose }) {
+  const frameRef = useRef(null);
+  const [frameH, setFrameH] = useState(700);
 
+  // Co chiều cao khung cho vừa nội dung phiếu
+  const fitFrame = () => {
+    const d = frameRef.current && frameRef.current.contentDocument;
+    if (d && d.documentElement) setFrameH(d.documentElement.scrollHeight + 8);
+  };
+
+  const doPrint = () => {
+    const w = frameRef.current && frameRef.current.contentWindow;
+    if (w) { w.focus(); w.print(); }
+  };
+
+  const btn = { padding: '10px 18px', borderRadius: '8px', border: '1px solid #475569', background: 'transparent', color: '#fff', fontWeight: 600, fontSize: '15px', cursor: 'pointer' };
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.92)', zIndex: 20000, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ flex: 1, overflowY: 'auto', width: '100%', display: 'flex', justifyContent: 'center', padding: '16px 12px 0', boxSizing: 'border-box' }}>
+        <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '794px', height: 'fit-content', overflow: 'hidden' }}>
+          <iframe
+            ref={frameRef}
+            title={data.title}
+            srcDoc={data.html}
+            onLoad={fitFrame}
+            style={{ width: '100%', height: frameH + 'px', border: 'none', display: 'block' }}
+          />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap', padding: '12px', width: '100%', maxWidth: '794px', boxSizing: 'border-box' }}>
+        <button onClick={onClose} style={btn}>Đóng</button>
+        <button onClick={doPrint} style={{ ...btn, background: '#d03a00', border: '1px solid #d03a00' }}>In</button>
+      </div>
+    </div>
+  );
+}
 // ===== Styles dùng chung =====
 const navBtnStyle = (active) => ({ width: '100%', padding: '10px 15px', background: active ? '#0284c7' : 'transparent', color: '#fff', border: 'none', borderRadius: '6px', textAlign: 'left', cursor: 'pointer', fontWeight: active ? 'bold' : 'normal' });
 const tabBtnStyle = (active) => ({ flex: 1, padding: '12px', background: active ? '#fff' : 'transparent', border: 'none', borderBottom: active ? '3px solid #0284c7' : 'none', fontWeight: active ? 'bold' : 'normal', color: active ? '#0284c7' : '#64748b', cursor: 'pointer' });
