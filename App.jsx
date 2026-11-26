@@ -9037,25 +9037,68 @@ const loadHtml2Canvas = () =>
     document.head.appendChild(s);
   });
 
+// CSS giao diện điện thoại: chỉ áp dụng khi xem trên màn hình, KHÔNG ảnh hưởng bản in giấy
+const PRINT_MOBILE_CSS = `
+@media screen {
+  body { font-size: 14px !important; padding: 14px !important; }
+  .company-right h3 { font-size: 16px !important; }
+  .company-right p { font-size: 13px !important; }
+  .title-area h2 { font-size: 20px !important; }
+  .title-area p { font-size: 13px !important; }
+  .info-grid { flex-direction: column !important; font-size: 14px !important; }
+  .info-grid p { margin: 5px 0 !important; font-size: 14px !important; }
+  table, tbody { display: block !important; width: 100% !important; }
+  thead { display: none !important; }
+  tr { display: flex !important; flex-wrap: wrap !important; border-bottom: 1px solid #e2e8f0; padding: 8px 0; }
+  td { display: block !important; border-bottom: none !important; padding: 2px 0 !important; font-size: 14px !important; text-align: left !important; }
+  td:nth-child(1) { display: none !important; }
+  td:nth-child(2) { width: 100% !important; font-weight: bold; font-size: 15px !important; margin-bottom: 4px; }
+  td:nth-child(2) div[style] { font-size: 12px !important; font-weight: normal !important; }
+  td:nth-child(3), td:nth-child(4), td:nth-child(5) { flex: 1 1 auto; width: auto !important; padding-right: 12px !important; font-size: 13px !important; }
+  td:nth-child(3)::before { content: 'SL: '; color: #64748b; }
+  td:nth-child(4)::before { content: 'Đơn giá: '; color: #64748b; }
+  td:nth-child(5)::before { content: 'Giảm: '; color: #64748b; }
+  td:nth-child(6) { width: 100% !important; text-align: right !important; font-size: 15px !important; margin-top: 4px; }
+  td:nth-child(6)::before { content: 'Thành tiền: '; color: #64748b; font-weight: normal; }
+  .summary { flex-direction: column !important; gap: 12px !important; margin-bottom: 20px !important; }
+  .order-note { flex: none !important; width: 100% !important; font-size: 13px !important; }
+  .order-note h4 { font-size: 14px !important; }
+  .totals { width: 100% !important; font-size: 14px !important; margin-left: 0 !important; }
+  .totals .final { font-size: 16px !important; }
+  .signatures { margin-top: 0 !important; margin-bottom: 40px !important; }
+  .signatures div { width: 45% !important; }
+  .signatures b { font-size: 14px !important; }
+  .signatures p { font-size: 12px !important; }
+  .warranty { font-size: 13px !important; }
+  .warranty h4 { font-size: 14px !important; }
+  .warranty h5 { font-size: 13px !important; }
+  .footer { font-size: 13px !important; }
+}`;
+
 function PrintPreviewModal({ data, onClose }) {
+  const PAGE_W = 794;    // khổ A4 ngang (px), dùng cho màn hình máy tính
+  const PAGE_H = 1123;   // khổ A4 dọc (px)
   const frameRef = useRef(null);
-  const blobRef = useRef(null); // ảnh phiếu đã tạo sẵn, dùng chung cho 3 nút
-  const [frameH, setFrameH] = useState(700);
+  const blobRef = useRef(null); // ảnh phiếu đã tạo sẵn, dùng chung cho các nút
+  const scrollRef = useRef(null);
+  const [boxW, setBoxW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1000));
+  const [frameH, setFrameH] = useState(PAGE_H);
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState('');
-  // Phiếu luôn dựng ở khổ 794px (giống máy tính), rồi thu nhỏ cho vừa màn hình điện thoại
-  const PAGE_W = 794;
-  const boxRef = useRef(null);
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    const calc = () => {
-      const w = boxRef.current ? boxRef.current.clientWidth : PAGE_W;
-      setScale(Math.min(1, w / PAGE_W));
-    };
-    calc();
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
-  }, []);
+  const [zoom, setZoom] = useState(null); // máy tính: null = vừa khung; số = đã phóng to
+
+  const mobile = boxW < 640;                                   // điện thoại: dạng thẻ dọc
+  const fit = Math.min(1, Math.max(0.2, (boxW - 24) / PAGE_W)); // máy tính: tỉ lệ vừa chiều ngang
+  const scale = mobile ? 1 : Math.max(fit, zoom || fit);
+  const pageW = mobile ? Math.max(280, boxW - 24) : PAGE_W;    // chiều rộng khung phiếu
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+
+  const html = mobile
+    ? String(data.html).replace('</head>', '<style>' + PRINT_MOBILE_CSS + '</style></head>')
+    : data.html;
 
   const say = (t) => { setToast(t); setTimeout(() => setToast(''), 4000); };
 
@@ -9070,6 +9113,36 @@ function PrintPreviewModal({ data, onClose }) {
   const fitFrame = () => {
     const b = bodyBox();
     if (b) setFrameH(b.h + 4);
+  };
+
+  // Đo chiều rộng khung xem; đổi kích thước (xoay màn hình) thì tính lại phiếu
+  useLayoutEffect(() => {
+    const calc = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      setBoxW(el.clientWidth);
+      blobRef.current = null;
+      setTimeout(fitFrame, 150);
+    };
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
+
+  // Phóng to / thu nhỏ (máy tính), giữ nguyên điểm đang nhìn ở giữa khung
+  const zoomTo = (next) => {
+    const el = scrollRef.current;
+    const s0 = scaleRef.current;
+    const s1 = Math.min(2.2, Math.max(fitRef.current, next));
+    if (!el || Math.abs(s1 - s0) < 0.001) return;
+    const cx = el.scrollLeft + el.clientWidth / 2;
+    const cy = el.scrollTop + el.clientHeight / 2;
+    scaleRef.current = s1;
+    setZoom(s1);
+    requestAnimationFrame(() => {
+      el.scrollLeft = (cx * s1) / s0 - el.clientWidth / 2;
+      el.scrollTop = (cy * s1) / s0 - el.clientHeight / 2;
+    });
   };
 
   // Tạo ảnh PNG của phiếu (chỉ tạo 1 lần, lần sau dùng lại)
@@ -9147,19 +9220,36 @@ function PrintPreviewModal({ data, onClose }) {
 
   const btn = { padding: '10px 18px', borderRadius: '8px', border: '1px solid #475569', background: 'transparent', color: '#fff', fontWeight: 600, fontSize: '15px', cursor: 'pointer' };
   const zaloBtn = { ...btn, background: '#d03a00', border: '1px solid #d03a00' };
+  const zBtn = { width: '36px', height: '36px', borderRadius: '8px', border: 'none', background: 'rgba(15,23,42,0.85)', color: '#fff', fontSize: '20px', fontWeight: 700, cursor: 'pointer' };
+
+  // Máy tính: luôn hiển thị tối thiểu 1 tờ A4 nguyên trang. Điện thoại: dài theo nội dung.
+  const paperH = mobile ? frameH : Math.max(frameH, PAGE_H);
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.92)', zIndex: 20000, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ flex: 1, overflowY: 'auto', width: '100%', display: 'flex', justifyContent: 'center', padding: '16px 12px 0', boxSizing: 'border-box' }}>
-      <div ref={boxRef} style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '794px', height: Math.ceil(frameH * scale) + 'px', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-          <iframe
-            ref={frameRef}
-            title={data.title}
-            srcDoc={data.html}
-            onLoad={() => { fitFrame(); setTimeout(() => getBlob().catch(() => {}), 400); }}
-            style={{ width: PAGE_W + 'px', height: frameH + 'px', border: 'none', display: 'block', transformOrigin: 'top left', transform: `scale(${scale})` }}
-          />
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%' }}>
+        <div
+          ref={scrollRef}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'auto', padding: '16px 12px', boxSizing: 'border-box' }}
+        >
+          <div style={{ width: Math.ceil(pageW * scale) + 'px', height: Math.ceil(paperH * scale) + 'px', margin: '0 auto', background: '#fff', borderRadius: mobile ? '16px' : '4px', boxShadow: '0 4px 24px rgba(0,0,0,0.5)', position: 'relative', overflow: 'hidden' }}>
+            <iframe
+              ref={frameRef}
+              title={data.title}
+              srcDoc={html}
+              onLoad={() => { blobRef.current = null; fitFrame(); setTimeout(() => getBlob().catch(() => {}), 400); }}
+              style={{ width: pageW + 'px', height: frameH + 'px', border: 'none', display: 'block', transformOrigin: 'top left', transform: `scale(${scale})` }}
+            />
+          </div>
         </div>
+        {/* Nút phóng to / thu nhỏ: chỉ hiện trên máy tính */}
+        {!mobile && (
+          <div style={{ position: 'absolute', top: '10px', right: '18px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button onClick={() => zoomTo(scale / 1.25)} style={zBtn} title="Thu nhỏ">−</button>
+            <button onClick={() => zoomTo(fit)} style={{ ...zBtn, width: 'auto', padding: '0 10px', fontSize: '13px' }} title="Vừa chiều ngang">{Math.round(scale * 100)}%</button>
+            <button onClick={() => zoomTo(scale * 1.25)} style={zBtn} title="Phóng to">+</button>
+          </div>
+        )}
       </div>
       {toast && (
         <div style={{ background: '#16a34a', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, marginTop: '8px', maxWidth: '90%', textAlign: 'center' }}>{toast}</div>
