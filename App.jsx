@@ -9043,6 +9043,19 @@ function PrintPreviewModal({ data, onClose }) {
   const [frameH, setFrameH] = useState(700);
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState('');
+  // Phiếu luôn dựng ở khổ 794px (giống máy tính), rồi thu nhỏ cho vừa màn hình điện thoại
+  const PAGE_W = 794;
+  const boxRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const calc = () => {
+      const w = boxRef.current ? boxRef.current.clientWidth : PAGE_W;
+      setScale(Math.min(1, w / PAGE_W));
+    };
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
 
   const say = (t) => { setToast(t); setTimeout(() => setToast(''), 4000); };
 
@@ -9138,13 +9151,13 @@ function PrintPreviewModal({ data, onClose }) {
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.92)', zIndex: 20000, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ flex: 1, overflowY: 'auto', width: '100%', display: 'flex', justifyContent: 'center', padding: '16px 12px 0', boxSizing: 'border-box' }}>
-        <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '794px', height: 'fit-content', overflow: 'hidden' }}>
+      <div ref={boxRef} style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '794px', height: Math.ceil(frameH * scale) + 'px', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
           <iframe
             ref={frameRef}
             title={data.title}
             srcDoc={data.html}
             onLoad={() => { fitFrame(); setTimeout(() => getBlob().catch(() => {}), 400); }}
-            style={{ width: '100%', height: frameH + 'px', border: 'none', display: 'block' }}
+            style={{ width: PAGE_W + 'px', height: frameH + 'px', border: 'none', display: 'block', transformOrigin: 'top left', transform: `scale(${scale})` }}
           />
         </div>
       </div>
