@@ -9037,67 +9037,53 @@ const loadHtml2Canvas = () =>
     document.head.appendChild(s);
   });
 
-// CSS giao diện điện thoại: chỉ áp dụng khi xem trên màn hình, KHÔNG ảnh hưởng bản in giấy
-const PRINT_MOBILE_CSS = `
+// Phóng chữ phiếu cho dễ đọc khi xem trên điện thoại (giữ NGUYÊN cấu trúc bản in). Không ảnh hưởng bản in giấy.
+const PRINT_COMPACT_CSS = `
 @media screen {
-  body { font-size: 14px !important; padding: 14px !important; }
-  .company-right h3 { font-size: 16px !important; }
-  .company-right p { font-size: 13px !important; }
-  .title-area h2 { font-size: 20px !important; }
-  .title-area p { font-size: 13px !important; }
-  .info-grid { flex-direction: column !important; font-size: 14px !important; }
-  .info-grid p { margin: 5px 0 !important; font-size: 14px !important; }
-  table, tbody { display: block !important; width: 100% !important; }
-  thead { display: none !important; }
-  tr { display: flex !important; flex-wrap: wrap !important; border-bottom: 1px solid #e2e8f0; padding: 8px 0; }
-  td { display: block !important; border-bottom: none !important; padding: 2px 0 !important; font-size: 14px !important; text-align: left !important; }
-  td:nth-child(1) { display: none !important; }
-  td:nth-child(2) { width: 100% !important; font-weight: bold; font-size: 15px !important; margin-bottom: 4px; }
-  td:nth-child(2) div[style] { font-size: 12px !important; font-weight: normal !important; }
-  td:nth-child(3), td:nth-child(4), td:nth-child(5) { flex: 1 1 auto; width: auto !important; padding-right: 12px !important; font-size: 13px !important; }
-  td:nth-child(3)::before { content: 'SL: '; color: #64748b; }
-  td:nth-child(4)::before { content: 'Đơn giá: '; color: #64748b; }
-  td:nth-child(5)::before { content: 'Giảm: '; color: #64748b; }
-  td:nth-child(6) { width: 100% !important; text-align: right !important; font-size: 15px !important; margin-top: 4px; }
-  td:nth-child(6)::before { content: 'Thành tiền: '; color: #64748b; font-weight: normal; }
-  .summary { flex-direction: column !important; gap: 12px !important; margin-bottom: 20px !important; }
-  .order-note { flex: none !important; width: 100% !important; font-size: 13px !important; }
-  .order-note h4 { font-size: 14px !important; }
-  .totals { width: 100% !important; font-size: 14px !important; margin-left: 0 !important; }
-  .totals .final { font-size: 16px !important; }
-  .signatures { margin-top: 0 !important; margin-bottom: 40px !important; }
-  .signatures div { width: 45% !important; }
-  .signatures b { font-size: 14px !important; }
-  .signatures p { font-size: 12px !important; }
-  .warranty { font-size: 13px !important; }
-  .warranty h4 { font-size: 14px !important; }
-  .warranty h5 { font-size: 13px !important; }
-  .footer { font-size: 13px !important; }
+  body { font-size: 13px !important; padding: 14px !important; }
+  .company-right h3 { font-size: 15px !important; }
+  .company-right p { font-size: 12px !important; }
+  .title-area h2 { font-size: 19px !important; }
+  .title-area p { font-size: 12px !important; }
+  .info-grid { font-size: 13px !important; }
+  .info-grid p { font-size: 13px !important; }
+  .info-grid b[style] { font-size: 14px !important; }
+  th, td { font-size: 12.5px !important; }
+  td div[style] { font-size: 11px !important; }
+  .order-note { font-size: 12px !important; }
+  .order-note h4 { font-size: 13px !important; }
+  .totals { width: 240px !important; font-size: 12.5px !important; }
+  .totals .final { font-size: 14px !important; }
+  .signatures b { font-size: 13px !important; }
+  .signatures p { font-size: 11.5px !important; }
+  .warranty { font-size: 12px !important; }
+  .warranty h4 { font-size: 13px !important; }
+  .warranty h5 { font-size: 12px !important; }
+  .footer { font-size: 12px !important; }
 }`;
 
 function PrintPreviewModal({ data, onClose }) {
-  const PAGE_W = 794;    // khổ A4 ngang (px), dùng cho màn hình máy tính
-  const PAGE_H = 1123;   // khổ A4 dọc (px)
   const frameRef = useRef(null);
   const blobRef = useRef(null); // ảnh phiếu đã tạo sẵn, dùng chung cho các nút
   const scrollRef = useRef(null);
   const [boxW, setBoxW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1000));
+  const compact = boxW < 640;                         // điện thoại: dựng phiếu khổ A4 hẹp, chữ lớn hơn
+  const PAGE_W = compact ? 620 : 794;                 // chiều rộng phiếu (px)
+  const PAGE_H = Math.round(PAGE_W * 1.4142);         // chiều cao 1 tờ A4 theo tỉ lệ
   const [frameH, setFrameH] = useState(PAGE_H);
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState('');
-  const [zoom, setZoom] = useState(null); // máy tính: null = vừa khung; số = đã phóng to
+  const [zoom, setZoom] = useState(null);             // null = vừa chiều ngang; số = đã phóng to
 
-  const mobile = boxW < 640;                                   // điện thoại: dạng thẻ dọc
-  const fit = Math.min(1, Math.max(0.2, (boxW - 24) / PAGE_W)); // máy tính: tỉ lệ vừa chiều ngang
-  const scale = mobile ? 1 : Math.max(fit, zoom || fit);
-  const pageW = mobile ? Math.max(280, boxW - 24) : PAGE_W;    // chiều rộng khung phiếu
+  const fit = Math.min(1, Math.max(0.2, (boxW - 24) / PAGE_W));
+  const scale = Math.max(fit, zoom || fit);
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
-  const html = mobile
-    ? String(data.html).replace('</head>', '<style>' + PRINT_MOBILE_CSS + '</style></head>')
+  const html = compact
+    ? String(data.html).replace('</head>', '<style>' + PRINT_COMPACT_CSS + '</style></head>')
     : data.html;
 
   const say = (t) => { setToast(t); setTimeout(() => setToast(''), 4000); };
@@ -9115,25 +9101,26 @@ function PrintPreviewModal({ data, onClose }) {
     if (b) setFrameH(b.h + 4);
   };
 
-  // Đo chiều rộng khung xem; đổi kích thước (xoay màn hình) thì tính lại phiếu
+  // Đo chiều rộng khung xem; xoay màn hình thì tính lại
   useLayoutEffect(() => {
     const calc = () => {
       const el = scrollRef.current;
       if (!el) return;
       setBoxW(el.clientWidth);
       blobRef.current = null;
-      setTimeout(fitFrame, 150);
+      setZoom(null);
+      setTimeout(fitFrame, 200);
     };
     calc();
     window.addEventListener('resize', calc);
     return () => window.removeEventListener('resize', calc);
   }, []);
 
-  // Phóng to / thu nhỏ (máy tính), giữ nguyên điểm đang nhìn ở giữa khung
+  // Phóng to / thu nhỏ, giữ nguyên điểm đang nhìn ở giữa khung
   const zoomTo = (next) => {
     const el = scrollRef.current;
     const s0 = scaleRef.current;
-    const s1 = Math.min(2.2, Math.max(fitRef.current, next));
+    const s1 = Math.min(2.5, Math.max(fitRef.current, next));
     if (!el || Math.abs(s1 - s0) < 0.001) return;
     const cx = el.scrollLeft + el.clientWidth / 2;
     const cy = el.scrollTop + el.clientHeight / 2;
@@ -9144,6 +9131,33 @@ function PrintPreviewModal({ data, onClose }) {
       el.scrollTop = (cy * s1) / s0 - el.clientHeight / 2;
     });
   };
+  const zoomToRef = useRef(zoomTo);
+  zoomToRef.current = zoomTo;
+
+  // Chụm hai ngón tay để phóng to / thu nhỏ
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    let d0 = 0;
+    let s0 = 1;
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const start = (e) => { if (e.touches.length === 2) { d0 = dist(e.touches); s0 = scaleRef.current; } };
+    const move = (e) => {
+      if (e.touches.length === 2 && d0 > 0) {
+        e.preventDefault();
+        zoomToRef.current((s0 * dist(e.touches)) / d0);
+      }
+    };
+    const end = () => { d0 = 0; };
+    el.addEventListener('touchstart', start, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
+    return () => {
+      el.removeEventListener('touchstart', start);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', end);
+    };
+  }, []);
 
   // Tạo ảnh PNG của phiếu (chỉ tạo 1 lần, lần sau dùng lại)
   const getBlob = () => {
@@ -9222,34 +9236,33 @@ function PrintPreviewModal({ data, onClose }) {
   const zaloBtn = { ...btn, background: '#d03a00', border: '1px solid #d03a00' };
   const zBtn = { width: '36px', height: '36px', borderRadius: '8px', border: 'none', background: 'rgba(15,23,42,0.85)', color: '#fff', fontSize: '20px', fontWeight: 700, cursor: 'pointer' };
 
-  // Máy tính: luôn hiển thị tối thiểu 1 tờ A4 nguyên trang. Điện thoại: dài theo nội dung.
-  const paperH = mobile ? frameH : Math.max(frameH, PAGE_H);
+  const paperH = Math.max(frameH, PAGE_H); // luôn hiển thị tối thiểu 1 tờ A4 nguyên trang
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.92)', zIndex: 20000, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%' }}>
         <div
           ref={scrollRef}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'auto', padding: '16px 12px', boxSizing: 'border-box' }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'auto', padding: '16px 12px', boxSizing: 'border-box', touchAction: 'pan-x pan-y' }}
         >
-          <div style={{ width: Math.ceil(pageW * scale) + 'px', height: Math.ceil(paperH * scale) + 'px', margin: '0 auto', background: '#fff', borderRadius: mobile ? '16px' : '4px', boxShadow: '0 4px 24px rgba(0,0,0,0.5)', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ width: Math.ceil(PAGE_W * scale) + 'px', height: Math.ceil(paperH * scale) + 'px', margin: '0 auto', background: '#fff', borderRadius: '4px', boxShadow: '0 4px 24px rgba(0,0,0,0.5)', position: 'relative', overflow: 'hidden' }}>
             <iframe
               ref={frameRef}
               title={data.title}
               srcDoc={html}
               onLoad={() => { blobRef.current = null; fitFrame(); setTimeout(() => getBlob().catch(() => {}), 400); }}
-              style={{ width: pageW + 'px', height: frameH + 'px', border: 'none', display: 'block', transformOrigin: 'top left', transform: `scale(${scale})` }}
+              style={{ width: PAGE_W + 'px', height: frameH + 'px', border: 'none', display: 'block', transformOrigin: 'top left', transform: `scale(${scale})` }}
             />
+            {/* Lớp trong suốt để chụm / kéo ngón tay hoạt động cả khi chạm lên phiếu */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
           </div>
         </div>
-        {/* Nút phóng to / thu nhỏ: chỉ hiện trên máy tính */}
-        {!mobile && (
-          <div style={{ position: 'absolute', top: '10px', right: '18px', display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <button onClick={() => zoomTo(scale / 1.25)} style={zBtn} title="Thu nhỏ">−</button>
-            <button onClick={() => zoomTo(fit)} style={{ ...zBtn, width: 'auto', padding: '0 10px', fontSize: '13px' }} title="Vừa chiều ngang">{Math.round(scale * 100)}%</button>
-            <button onClick={() => zoomTo(scale * 1.25)} style={zBtn} title="Phóng to">+</button>
-          </div>
-        )}
+        {/* Nút phóng to / thu nhỏ */}
+        <div style={{ position: 'absolute', top: '10px', right: '18px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <button onClick={() => zoomTo(scale / 1.25)} style={zBtn} title="Thu nhỏ">−</button>
+          <button onClick={() => zoomTo(fit)} style={{ ...zBtn, width: 'auto', padding: '0 10px', fontSize: '13px' }} title="Vừa chiều ngang">{Math.round(scale * 100)}%</button>
+          <button onClick={() => zoomTo(scale * 1.25)} style={zBtn} title="Phóng to">+</button>
+        </div>
       </div>
       {toast && (
         <div style={{ background: '#16a34a', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, marginTop: '8px', maxWidth: '90%', textAlign: 'center' }}>{toast}</div>
